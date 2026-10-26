@@ -1,6 +1,6 @@
 {
     "name": "@nickwelsh/zero-for-laravel",
-    "version": "0.2.1",
+    "version": "0.3.0",
     "description": "Generated Laravel model contracts and React bindings for Zero.",
     "homepage": "https://docs.nickwelsh.me/zero-for-laravel/",
     "bugs": {

@@ -2,7 +2,7 @@
 
 Laravel-owned model contracts, queries and automatic CRUD for Rocicorp Zero.
 
-Install the current stable release, **v0.2.1**, in your Laravel application:
+Install the current stable release, **v0.3.0**, in your Laravel application:
 
 ```sh
 composer require nickwelsh/zero-for-laravel
@@ -22,7 +22,7 @@ See the [monorepo documentation](https://github.com/nickwelsh/zero-for-laravel-m
 
 Requires PHP 8.3+ and Laravel 12 or 13.
 
-## Unreleased additions
+## v0.3.0 additions
 
 `zero:dev` owns local contract generation, publication synchronization, and cache
 startup. `zero:doctor` separates prerequisites and process health from unknown

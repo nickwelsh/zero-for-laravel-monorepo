@@ -26,7 +26,7 @@ pnpm add --save-exact @rocicorp/zero@1.10.0
 php artisan vendor:publish --tag=zero-config
 ```
 
-These commands install the current stable Zero for Laravel release, **v0.2.1**,
+These commands install the current stable Zero for Laravel release, **v0.3.0**,
 without development stability flags or an explicit version suffix. Keep the PHP
 and JavaScript packages on matching release versions. The Zero client and cache
 must both use **1.10.0**. React bindings require React 18 or 19 in your application;
@@ -486,13 +486,12 @@ MIT licensed.
 See [tooling](docs/tooling.md) for workspace commands, supported runtimes, and the
 settings adapted or omitted from the Laravel application reference.
 
-## Unreleased correctness and development additions
+## v0.3.0 correctness and development additions
 
 The source adds typed filter shorthand, `toPlain()` projection, live sort retention,
 explicit infinite-window stop reasons, optional FormBraid, and named domain actions.
 Package-owned `zero:dev`, `zero:doctor`, `zero:exposure`, and guarded replica-file
-reset commands replace reusable local startup plumbing. These additions have not
-been published; see [the changelog](CHANGELOG.md),
+reset commands replace reusable local startup plumbing. See [the changelog](CHANGELOG.md),
 [local startup and recovery](apps/docs/content/docs/0.x/docs/local-development.mdx),
 [domain mutations](apps/docs/content/docs/0.x/docs/domain-mutations.mdx), and
 [publication-sensitive migrations](apps/docs/content/docs/0.x/docs/replication.mdx).

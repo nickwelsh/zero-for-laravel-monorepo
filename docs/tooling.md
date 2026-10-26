@@ -46,9 +46,9 @@ default workflow permissions can remain read-only. Repository Admin access is
 needed for initial environment and secret setup; package-owner access is used to
 configure npm. Do not grant an admin token to the publish job.
 
-The client package version is `0.2.1`. To release, set the version in
+The client package version is `0.3.0`. To release, set the version in
 `packages/client/package.json` and publish a matching GitHub Release tagged
-`v<version>` (for example `v0.2.1`) from `main`. Stable releases
+`v<version>` (for example `v0.3.0`) from `main`. Stable releases
 publish to `latest`; prerelease versions (for example `0.2.0-beta.1`) must be marked
 as GitHub prereleases and use `next`.
 
