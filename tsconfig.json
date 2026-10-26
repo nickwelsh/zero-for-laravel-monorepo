@@ -16,5 +16,5 @@
             "@nickwelsh/zero-for-laravel/react": ["./packages/client/src/react/index.ts"]
         }
     },
-    "include": ["packages", "tests/interop", "vite.config.ts"]
+    "include": ["packages", "tests/interop", "tests/integration", "vite.config.ts"]
 }

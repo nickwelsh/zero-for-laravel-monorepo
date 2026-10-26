@@ -254,3 +254,15 @@ describe('cast hydration', () => {
         expect(raw.preferences).toBe('{"theme":"dark"}');
     });
 });
+
+it('filter shorthand shares conversion, removal and validation with filter objects', () => {
+    expect(Task.query.all().filter('done', false).args).toEqual(
+        Task.query.all().filter({ model: 'Task', name: 'done', value: false }).args,
+    );
+    expect(Task.query.all().filter('done', false).filter('done', undefined).args.filters).toEqual({});
+    expect(Task.query.all().filter('completed_at', null).args.filters).toEqual({ completed_at: null });
+    expect(Task.query.all().filter('title_operator', { operator: '!=', value: 'hidden' }).args.filters).toEqual({
+        title_operator: { operator: '!=', value: 'hidden' },
+    });
+    expect(() => Task.query.all().filter('done', 'false' as never)).toThrow();
+});

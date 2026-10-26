@@ -1,0 +1,102 @@
+---
+title: Named domain mutations
+description: Explicitly register bounded business actions using the existing Zero mutation protocol.
+---
+
+The unreleased source supports named actions for operations spanning several
+records or calling existing application actions. CRUD and nested mutation APIs
+remain unchanged. No PHP method becomes remotely callable through discovery.
+
+## Register an action
+
+A `DomainMutation` declares a small wire contract, a Laravel FormRequest, and its
+authoritative handler. Inputs support string, number, and boolean fields; fields
+can be optional or nullable. Scalar arrays require `maxItems` between 1 and 100.
+Numbers must be finite and within JavaScript's safe numeric range. Arbitrary nested
+payloads and unrestricted record sets are deliberately unsupported.
+
+```php
+use ZeroForLaravel\Domain\DomainMutation;
+use ZeroForLaravel\ZeroContext;
+
+final class CompleteTasks extends DomainMutation
+{
+    public static function input(): array
+    {
+        return ['ids' => ['type' => 'string', 'array' => true, 'maxItems' => 25]];
+    }
+
+    public static function request(): string
+    {
+        return CompleteTasksRequest::class;
+    }
+
+    public function handle(array $input, ZeroContext $context): void
+    {
+        // Reuse your application's action. It must enforce per-record ownership
+        // and lock the selected rows on the configured upstream connection.
+        app(CompleteTasksAction::class)->execute($input['ids'], $context->userId());
+    }
+}
+```
+
+The FormRequest must explicitly implement `authorize()`. Use Laravel Gate/policies
+and rules such as `ids => required|array|min:1|max:25` and
+`ids.* => required|uuid|distinct`. Client context is available from the request's
+`ZeroContext::class` attribute. Wire types and allowlisted keys are checked before
+validation and again after FormRequest normalization. The handler receives only
+validated input. Authorization of the operation does not replace ownership checks
+for every selected record.
+
+Register only the intended action in `config/zero.php`:
+
+```php
+'domain_mutations' => ['completeTasks' => CompleteTasks::class],
+```
+
+Run `zero:generate`. Generated exports include `domainDefinitions`,
+`DomainInputs['completeTasks']`, and `actions.completeTasks(input)`. The `actions`
+namespace is reserved when domain mutations are registered.
+
+```ts
+import { actions } from './zero/generated';
+const result = zero.mutate(actions.completeTasks({ ids: selectedIds }));
+const outcome = await result.server;
+```
+
+The existing mutation processor owns client ordering, duplicates, transactions,
+rollback, durable permanent rejection, and retryable infrastructure errors.
+Validation errors arrive in `outcome.error.details.fields`; authorization errors
+use `code: 'forbidden'`. Throw `OperationException('business_code', 'Public message')`
+for an intentional operation-level rejection. Unexpected exceptions remain
+retryable server errors. Rejected application writes and progress are committed
+atomically after the application transaction rolls back.
+
+## Optional optimistic behavior
+
+Generated actions are server-only by default. Add local effects by extending the
+same native registry, then bind the returned `mutators` to your provider:
+
+```ts
+import { createDomainMutations } from '@nickwelsh/zero-for-laravel';
+import { schema, crudMutators, domainDefinitions } from './zero/generated';
+
+export const { mutators, actions } = createDomainMutations(schema, crudMutators, domainDefinitions, {
+    completeTasks: async ({ tx, args }) => {
+        for (const id of args.ids) await tx.mutate.tasks.update({ id, done: true });
+    },
+});
+```
+
+Callbacks run in native Zero transactions and may replay. They must be deterministic
+functions of the captured input and transaction state. Capture IDs/timestamps before
+enqueueing; do not use clocks, randomness, network calls, jobs, or external effects
+inside optimistic callbacks. The bindings clone and freeze the input once.
+Server authorization remains authoritative, and native Zero reconciles rejection.
+
+The server handler runs inside the upstream transaction. All affected records must
+use that connection. Dispatch external jobs with Laravel's `afterCommit()` behavior,
+or use a transactional outbox when durable delivery is required. Rollbacks and
+rejected mutations must not dispatch external work. After-commit dispatch alone is
+not an exactly-once external delivery guarantee; application jobs still need
+idempotency where appropriate.

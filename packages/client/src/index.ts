@@ -1,4 +1,6 @@
 export { createZeroForLaravel } from './runtime';
+export { createDomainMutations } from './domain';
+export type { DomainField, DomainContracts, DomainInput, DomainOptimistic } from './domain';
 export type { Model } from './runtime';
 export { Selection } from './query';
 export type { SelectionData, NativeQueries } from './query';
@@ -26,5 +28,5 @@ export type {
     IncludeArgs,
 } from './contract';
 
-export { ModelSnapshot } from './record';
-export type { ModelInstance, RelationSelection } from './record';
+export { ModelSnapshot, toPlain } from './record';
+export type { ModelInstance, RelationSelection, PlainData } from './record';

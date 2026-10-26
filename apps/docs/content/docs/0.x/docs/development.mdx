@@ -83,3 +83,17 @@ API routes separate from authored pages: docs-base rejects route collisions.
 For a future release line, add a version folder and version metadata, then give
 its generated API input a separate file and route. The current configuration
 tracks the v0.x source in this checkout.
+
+## Live integration boundary
+
+`pnpm test:integration` starts a disposable Laravel callback server and the installed
+Zero 1.10.0 cache. The PostgreSQL role supplied through `ZERO_TEST_PG_*` must be able
+to create databases and use logical replication. The suite creates a unique empty
+database, app ID, publication, ports, and temporary replica directory. It exercises
+fresh migrations, contract checks, exact private publication columns, callback
+authentication, 257-query transforms, upstream-to-client updates, identity isolation,
+retained sorting, unmounting, and authoritative optimistic-mutation rejection.
+Cleanup targets only that generated database and its exact recorded artifacts.
+
+The live suite is opt-in locally and runs in CI on the PHP 8.3/Laravel 13 job.
+It does not reuse, migrate, or reset the example application's database or cache.

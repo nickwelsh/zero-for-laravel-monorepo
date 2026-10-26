@@ -4,6 +4,7 @@
     "type": "module",
     "scripts": {
         "test": "vp test run",
+        "test:integration": "ZERO_LIVE_TESTS=1 vp test run tests/integration/live.test.tsx",
         "typecheck": "tsc --noEmit && pnpm docs:typecheck",
         "build": "pnpm --filter @nickwelsh/zero-for-laravel build && pnpm docs:build",
         "docs:dev": "pnpm --filter @zero-for-laravel/docs dev",

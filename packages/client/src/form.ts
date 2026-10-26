@@ -1,4 +1,4 @@
-import type { Constraints, FieldDefinition, FormDefinition } from '@formbraid/core';
+import type { Constraints, FieldDefinition, FormDefinition } from './form-contract';
 import type { Column, ContractMap, ModelContract, Operation, RelatedName } from './contract';
 import type { NestedSelections } from './mutation';
 import { decodeColumn, fail, object } from './validation';
@@ -143,7 +143,7 @@ function fieldDefinition(name: string, column: Column, rules: readonly string[],
     return {
         name,
         type,
-        component: components[type as keyof typeof components],
+        component: components[type],
         label: name
             .split('.')
             .at(-1)!

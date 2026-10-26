@@ -16,7 +16,7 @@ const native = vi.hoisted(() => ({
 }));
 vi.mock('@rocicorp/zero/react', () => ({
     useQuery: (request: unknown) => {
-        native.query(request);
+        if (request) native.query(request);
         return [native.raw, native.details];
     },
     useZero: () => native.zero,

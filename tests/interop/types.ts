@@ -1,6 +1,6 @@
 import { Task, TaskList, schema, definitions } from './generated';
 import { nestedRuntime, nestedDefinitions } from './nested';
-import { createZeroForLaravel } from '@nickwelsh/zero-for-laravel';
+import { createZeroForLaravel, toPlain, createDomainMutations } from '@nickwelsh/zero-for-laravel';
 import type { SelectionData } from '@nickwelsh/zero-for-laravel';
 import {
     useData,
@@ -207,3 +207,39 @@ function requiredNestedLink() {
     // @ts-expect-error nested input replaces the required foreign key
     runtime.models.Task.create().with('list').prepare({ title: 'Missing list' });
 }
+
+// Selection-local filter names and values come from the generated contract.
+Task.query.all().filter('done', false).filter('completed_at', null).filter('title', undefined);
+// @ts-expect-error unknown filter
+Task.query.all().filter('private_secret', true);
+// @ts-expect-error boolean filter requires a boolean
+Task.query.all().filter('done', 'false');
+// @ts-expect-error operator values retain the field's type
+Task.query.all().filter('title_operator', { operator: '!=', value: 123 });
+
+function plainProjection() {
+    const rows = nestedRuntime().models.Task.query.all().with('list').with('comments').decode([]);
+    const plain = toPlain(rows);
+    const title: string | undefined = plain[0]?.title;
+    const list: string | undefined = plain[0]?.list?.name;
+    const child: string | undefined = plain[0]?.comments[0]?.body;
+    const date: Date | null | undefined = plain[0]?.completed_at;
+    // @ts-expect-error plain data has no snapshot wrapper
+    plain[0]?.data;
+    // @ts-expect-error projections are readonly
+    plain[0]!.title = 'Changed';
+    return { title, list, child, date };
+}
+
+const domain = createDomainMutations(schema, createZeroForLaravel(schema, definitions).mutators, {
+    completeTasks: { ids: { type: 'string', array: true, maxItems: 3 }, notify: { type: 'boolean', optional: true } },
+} as const);
+domain.actions.completeTasks({ ids: ['id'], notify: false });
+// @ts-expect-error domain inputs are generated and typed
+domain.actions.completeTasks({ ids: [123] });
+// @ts-expect-error unknown operation
+domain.actions.unregistered({});
+
+// A scalar JSON field named data must never be mistaken for a snapshot type.
+const scalarProjection = toPlain({ data: { data: 'scalar' } } as const);
+const scalarData: 'scalar' = scalarProjection.data.data;

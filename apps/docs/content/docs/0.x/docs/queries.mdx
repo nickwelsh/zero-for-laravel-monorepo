@@ -34,7 +34,7 @@ const tasks = useData(Task.query.all().orderBy('title').infinite(50));
 
 Infinite loading expands one live ordered query using a lookahead row. It resets
 on query or client changes and respects the model's `maxLimit`. `hasMore` remains
-unknown until sufficient data arrives; `capped` reports the maximum limit.
+unknown until synchronization completes; `capped` reports the maximum limit. `hasMore` is false at that maximum even when exhaustion is unknown. `exhausted` and `stopReason` distinguish a proven end from a maximum-limited window. Sort-only changes preserve an expanded window; other scope, contract, or client changes reset it. This is a bounded live result window, not unrestricted dataset traversal.
 Direct to-many includes can be limited. Junction includes cannot be ordered or limited.
 
 ## Declaring filters
@@ -97,3 +97,18 @@ const tasks = selection.decode(await zero.run(selection.request()));
 
 Use the native Zero instance configured with the generated schema, queries, and
 mutators. Hydrated rows are [model snapshots](./records-and-casts.mdx).
+
+## Selection-local filter shorthand
+
+A selection already identifies its model. Both forms use the same runtime
+validation and generated filter names/value types:
+
+```ts
+Todo.query.all().filter('completed', false);
+Todo.query.all().filter({ model: 'Todo', name: 'completed', value: false });
+```
+
+The object form remains useful with `useFilter` and reusable controls. Passing
+`undefined` removes the filter; `null` remains an explicit value when allowed by
+the contract. Dynamic operators and callback filters have the same behavior in
+both forms. Client shorthand does not change server allowlists or authorization.

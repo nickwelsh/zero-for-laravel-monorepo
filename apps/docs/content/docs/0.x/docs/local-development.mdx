@@ -1,0 +1,89 @@
+---
+title: Local startup and recovery
+description: Run, inspect, and recover a local Zero cache without application-specific startup scripts.
+---
+
+These commands are available in the unreleased source. Use matching Composer and
+JavaScript package releases with Zero client and cache **1.10.0**. The PHP package
+supports PHP 8.3+, Laravel 12/13, and PostgreSQL 15+. Do not upgrade the Zero cache
+independently of the pinned client and tested callback protocol.
+
+## Start locally
+
+Install Node.js and `@rocicorp/zero@1.10.0` in the application. Serve Laravel at
+`APP_URL`, configure its PostgreSQL connection, set a private `ZERO_API_KEY`, and
+use `APP_ENV=local`:
+
+```sh
+php artisan zero:dev
+```
+
+The command generates contracts, synchronizes the dedicated publication, and runs
+the application's installed Zero binary through Laravel's process API. It encodes
+PostgreSQL credentials in connection URLs, configures both callbacks from
+`zero.route_prefix`, forwards session cookies, and passes the private key through
+the child environment. Keep this key out of browser bundles. Token-based auth uses
+Zero's native auth forwarding. Your Laravel middleware still authenticates users.
+
+`zero.dev.port` defaults to `ZERO_PORT` or 4848. `zero.dev.replica` defaults to
+`storage/app/zero/replica.db`; both are configurable in `config/zero.php`.
+`zero.dev.node` selects the Node executable. Set `zero.dev.ca` (or `ZERO_CA_CERT`)
+to an optional readable CA certificate for HTTPS callbacks. This is independent
+of Herd or any other local web server; it does not enable TLS on Zero itself.
+
+Each worktree needs its own database/app ID, publication, port, and replica path.
+Set `zero.upstream_schema` to `{app_id}_0` for the supported local shard. The
+command takes replica and database/app locks and refuses occupied ports. It never
+kills a port's owner. Output is streamed with database URLs and callback keys
+redacted; exit codes and SIGINT/SIGTERM propagate to the child.
+
+## Inspect exposure and prerequisites
+
+```sh
+php artisan zero:exposure
+php artisan zero:exposure --json
+php artisan zero:doctor
+```
+
+Exposure uses the same metadata that generates contracts and restricts publication
+columns. It lists queries, mutations, ownership rules, server visibility scopes,
+relationships, server fills, and published fields. An empty set of owner rules
+with no server visibility scopes means explicitly public reads, not an implicit
+authorization check. Included models retain their own visibility rules.
+
+Doctor is read-only. It reports PostgreSQL version, WAL configuration, replication
+slots/senders, role privileges, exact publication membership, contract freshness,
+callback configuration, local port conflicts, and cache health. Missing permissions
+or unavailable checks are reported as unknown. A cache root health response proves
+process reachability; it does not prove callback authentication, query completion,
+or replica backfill. Zero 1.10.0 has no general readiness endpoint used here. Verify
+that an authenticated subscription completes and observes an upstream change.
+
+## Reset an owned local replica
+
+After stopping Zero, inspect the intended changes before authorizing deletion:
+
+```sh
+php artisan zero:reset --dry-run
+php artisan zero:reset --force
+php artisan zero:dev
+```
+
+Reset requires `APP_ENV=local`, the supported installed Zero version, and the
+ownership manifest created by `zero:dev` for this workspace/database/app ID. It
+lists exact Zero-owned database artifacts and recorded replication slots, and
+removes only the configured replica, serving-copy, change-log, and SQLite sidecar
+files. It refuses symlinks, open files, occupied ports, package process locks, and
+active associated replication slots. `lsof` is required to verify open files.
+There is no prefix-based cleanup or database deletion option.
+
+This workflow repairs local file corruption or an unusable local replica. It
+preserves PostgreSQL data, publications, client mutation progress, CVRs, and change
+history. It is **not a full Zero decommission** and does not repair incompatible
+upstream bookkeeping. Full database artifact deletion remains outside this bounded
+command; never substitute broad schema/slot prefix matches or reset a shared app.
+
+Ordinary model/schema changes should use migrations, `zero:generate`, and
+`zero:sync-publication`. See [replication](./replication.mdx) for publication-sensitive
+migrations and failed-batch recovery. A routine migration is not a reason to delete
+replicas or mutation progress.

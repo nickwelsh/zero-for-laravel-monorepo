@@ -25,7 +25,10 @@ final readonly class QueryProcessor
      */
     public function process(mixed $body, ZeroContext $context): array
     {
-        if (! is_array($body) || ! array_is_list($body) || count($body) !== 2 || $body[0] !== 'transform' || ! is_array($body[1]) || ! array_is_list($body[1]) || count($body[1]) > 100) {
+        // Zero can revalidate every retained query in one batch, including
+        // queries no longer displayed. AuthenticateZeroCache bounds the body
+        // to 1 MiB; a separate count limit rejects valid protocol messages.
+        if (! is_array($body) || ! array_is_list($body) || count($body) !== 2 || $body[0] !== 'transform' || ! is_array($body[1]) || ! array_is_list($body[1])) {
             return ['kind' => 'TransformFailed', 'origin' => 'server', 'reason' => 'parse', 'message' => 'Invalid transform envelope.', 'queryIDs' => []];
         }
 

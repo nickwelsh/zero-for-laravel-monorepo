@@ -4,12 +4,49 @@ declare(strict_types=1);
 
 namespace ZeroForLaravel\Publication;
 
+use Illuminate\Support\Facades\DB;
 use LogicException;
+use ZeroForLaravel\Metadata\ModelDiscovery;
 use ZeroForLaravel\Metadata\ModelRegistry;
 
 final readonly class PublicationManager
 {
     public function __construct(private ModelRegistry $registry) {}
+
+    /**
+     * Call before altering a published table in a migration. Do not resolve the
+     * registry against an intermediate schema; MigrationsEnded rebuilds it.
+     */
+    public static function releaseTable(string $table, ?string $connection = null): void
+    {
+        $db = DB::connection($connection);
+        if (! config()->boolean('zero.sync_publication_on_migrate') || $db->pretending() || $db->getDriverName() !== 'pgsql') {
+            return;
+        }
+
+        $classes = (new ModelDiscovery)->registered();
+        if ($classes === [] || (new $classes[0])->getConnection()->getName() !== $db->getName()) {
+            return;
+        }
+
+        $name = config()->string('zero.publication');
+        if (! preg_match('/^[A-Za-z][A-Za-z0-9_]{0,62}$/D', $name) || ! preg_match('/^[A-Za-z_][A-Za-z0-9_]{0,62}$/D', $table)) {
+            throw new LogicException('Invalid publication or table identifier.');
+        }
+
+        $db->transaction(function () use ($db, $name, $table): void {
+            $db->select('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [$name]);
+            $all = $db->scalar('SELECT puballtables FROM pg_publication WHERE pubname = ?', [$name]);
+            $schemas = $db->selectOne('SELECT 1 FROM pg_publication_namespace n JOIN pg_publication p ON p.oid = n.pnpubid WHERE p.pubname = ?', [$name]);
+            if ($all || $schemas !== null) {
+                throw new LogicException('Choose a dedicated table publication before releasing membership.');
+            }
+
+            if ($db->selectOne("SELECT 1 FROM pg_publication_tables WHERE pubname = ? AND schemaname = 'public' AND tablename = ?", [$name, $table]) !== null) {
+                $db->statement('ALTER PUBLICATION "'.$name.'" DROP TABLE public."'.$table.'"');
+            }
+        });
+    }
 
     /**
      * @return list<string>
@@ -22,7 +59,7 @@ final readonly class PublicationManager
             throw new LogicException('Zero publications require PostgreSQL 15 or later.');
         }
 
-        if (! preg_match('/^[A-Za-z][A-Za-z0-9_]*$/D', $name)) {
+        if (! preg_match('/^[A-Za-z][A-Za-z0-9_]{0,62}$/D', $name)) {
             throw new LogicException('Invalid publication identifier; underscore prefixes are reserved by Zero.');
         }
 

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace ZeroForLaravel\Generation;
 
+use LogicException;
 use ZeroForLaravel\Metadata\ModelRegistry;
 
 final class TypeScriptGenerator
@@ -19,6 +20,7 @@ final class TypeScriptGenerator
 
     public function generate(ModelRegistry $registry): string
     {
+        $domains = resolve(\ZeroForLaravel\Domain\DomainRegistry::class)->contracts();
         $models = $registry->all();
         ksort($models);
         $tables = [];
@@ -75,7 +77,22 @@ final class TypeScriptGenerator
         $lines[] = 'export const schema = createSchema({tables: ['.implode(', ', $names).'], relationships: ['.implode(', ', $relations).'], enableLegacyQueries: false, enableLegacyMutators: false});';
         $definitions = array_map(fn (\ZeroForLaravel\Metadata\ModelMetadata $model): array => $model->toArray(), $models);
         $lines[] = 'export const definitions = '.$this->json((object) $definitions, true).' as const satisfies ContractMap;';
-        $lines[] = 'export const {models, queries, mutators} = createZeroForLaravel(schema, definitions);';
+        if ($domains === []) {
+            $lines[] = 'export const {models, queries, mutators} = createZeroForLaravel(schema, definitions);';
+        } else {
+            if (isset($models['actions'])) {
+                throw new LogicException('The actions model name is reserved when registering domain mutations.');
+            }
+
+            $lines[] = "import {createDomainMutations, type DomainContracts, type DomainInput} from '@nickwelsh/zero-for-laravel';";
+            $lines[] = 'export const domainDefinitions = '.$this->json((object) $domains, true).' as const satisfies DomainContracts;';
+            $lines[] = 'export type DomainInputs = {[N in keyof typeof domainDefinitions]: DomainInput<typeof domainDefinitions[N]>};';
+            $lines[] = 'const runtime = createZeroForLaravel(schema, definitions);';
+            $lines[] = 'export const {models, queries} = runtime;';
+            $lines[] = 'export const crudMutators = runtime.mutators;';
+            $lines[] = 'export const {mutators, actions} = createDomainMutations(schema, runtime.mutators, domainDefinitions);';
+        }
+
         foreach ($models as $model) {
             $lines[] = 'export const '.$model->name.' = models.'.$model->name.';';
             $lines[] = 'export type '.$model->name.' = ModelInstance<typeof schema, typeof definitions, '.$this->json($model->name).'>;';

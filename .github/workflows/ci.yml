@@ -64,8 +64,8 @@ jobs:
       ZERO_TEST_PG_PASSWORD: postgres
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - name: Install spelling checker
-        run: sudo apt-get update && sudo apt-get install --yes aspell aspell-en
+      - name: Install validation prerequisites
+        run: sudo apt-get update && sudo apt-get install --yes aspell aspell-en lsof postgresql-client
       - uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # v2
         with:
           php-version: ${{ matrix.php }}
@@ -85,6 +85,8 @@ jobs:
           path: examples/todos/resources/js
       - run: pnpm --filter @nickwelsh/zero-for-laravel build
       - run: pnpm check
+      - run: pnpm test:integration
+        if: matrix.php == '8.3' && matrix.laravel == '^13.0'
       - run: pnpm --filter @zero-for-laravel/docs deploy:check
       - run: pnpm test:coverage
         if: matrix.php == '8.3' && matrix.laravel == '^13.0'

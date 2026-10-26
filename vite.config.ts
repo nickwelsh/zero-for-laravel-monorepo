@@ -151,7 +151,7 @@ export default defineConfig({
         },
     },
     test: {
-        include: ['packages/**/*.test.{ts,tsx}', 'tests/interop/**/*.test.ts'],
+        include: ['packages/**/*.test.{ts,tsx}', 'tests/interop/**/*.test.ts', 'tests/integration/**/*.test.tsx'],
         coverage: {
             provider: 'v8',
             include: ['packages/client/src/**/*.{ts,tsx}'],

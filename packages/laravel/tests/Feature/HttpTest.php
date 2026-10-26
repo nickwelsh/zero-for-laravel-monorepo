@@ -44,6 +44,34 @@ test('bad json returns protocol error without leaking exceptions', function (): 
         ->assertOk()->assertJsonPath('kind', 'TransformFailed')->assertJsonPath('reason', 'parse');
 });
 
+test('query transforms accept large revalidation batches while authorizing every query', function (): void {
+    /** @var HttpTestCase $this */
+    $user = (new User)->setKeyType('string');
+    $user->forceFill(['id' => 'alice']);
+
+    $queries = [];
+    for ($index = 0; $index < 257; $index++) {
+        $queries[] = ['id' => 'q'.$index, 'name' => 'Task.all', 'args' => [(object) []]];
+    }
+
+    $queries[] = ['id' => 'invalid', 'name' => 'Task.all', 'args' => [['filters' => ['secret' => 'forged']]]];
+    $response = $this->actingAs($user)->withHeader('X-Api-Key', 'private-test-secret')
+        ->postJson('/zero/query', ['transform', $queries])
+        ->assertOk()->assertJsonPath('kind', 'QueryResponse')->assertJsonCount(258, 'queries')
+        ->assertJsonPath('queries.257.error', 'parse');
+    for ($index = 0; $index < 257; $index++) {
+        $response->assertJsonPath('queries.'.$index.'.ast.where.conditions.0.right.value', 'alice');
+    }
+});
+
+test('the cache request size limit still bounds transform work', function (): void {
+    /** @var HttpTestCase $this */
+    $this->withHeader('X-Api-Key', 'private-test-secret')
+        ->postJson('/zero/query', ['transform', [[
+            'id' => 'large', 'name' => 'Task.all', 'args' => [['filters' => ['title' => str_repeat('x', 1048576)]]],
+        ]]])->assertStatus(413);
+});
+
 test('generation command writes verified contracts and can detect drift', function (): void {
     /** @var HttpTestCase $this */
     $path = sys_get_temp_dir().'/zero-for-laravel-'.uniqid().'.ts';
@@ -123,4 +151,20 @@ test('react generation binds the contracts and preserves editable connection con
 
         rmdir($directory);
     }
+});
+
+test('configured discovery roots find opted-in modular models without publishing unrelated classes', function (): void {
+    config()->set('zero.models', []);
+    config()->set('zero.discovery', [['path' => __DIR__.'/../Fixtures/Module', 'namespace' => 'ZeroForLaravel\\Tests\\Fixtures\\Module']]);
+
+    app()->forgetInstance(\ZeroForLaravel\Metadata\ModelRegistry::class);
+    $registry = resolve(\ZeroForLaravel\Metadata\ModelRegistry::class);
+    expect(array_keys($registry->all()))->toBe(['OutsideTask']);
+});
+
+test('exposure reports reflect the same private column and authorization metadata', function (): void {
+    /** @var HttpTestCase $this */
+    $command = $this->artisan('zero:exposure');
+    $this->assertInstanceOf(\Illuminate\Testing\PendingCommand::class, $command);
+    $command->expectsOutputToContain('Published:')->expectsOutputToContain('Owner rules:')->assertSuccessful()->run();
 });

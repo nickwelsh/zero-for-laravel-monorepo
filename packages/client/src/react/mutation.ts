@@ -5,7 +5,7 @@ import type { ClientContext, ContractMap, Operation, RecordId } from '../contrac
 import type { Mutation, OperationInput } from '../mutation';
 import { InputError } from '../validation';
 import { mutationFormInput, type MutationDraft } from '../form';
-import type { CallbackSubmission, FormDescriptor, SubmissionResult } from '@formbraid/core';
+import type { CallbackSubmission, FormDescriptor, SubmissionResult } from '../form-contract';
 
 export type MutationState = {
     status: 'idle' | 'pending' | 'success' | 'failure';

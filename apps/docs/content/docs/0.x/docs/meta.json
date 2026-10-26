@@ -10,10 +10,12 @@
         "react",
         "mutations",
         "nested-mutations",
+        "domain-mutations",
         "records-and-casts",
         "replication",
         "configuration",
         "constraints",
+        "local-development",
         "development"
     ]
 }

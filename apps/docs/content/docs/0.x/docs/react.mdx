@@ -59,7 +59,7 @@ function Tasks() {
 `retry()`, and a `status` of `idle`, `loading`, `refreshing`, `failure`, `stale`, or
 `success`. Disabled queries are idle; incomplete empty results are loading;
 incomplete current-query rows are refreshing; complete empty results succeed.
-Query errors with current data are stale; errors without data are failures.
+Previously completed empty results remain usable during background synchronization and become stale on error. Query errors with usable data are stale; errors without usable data are failures.
 Connection state remains separate. `render()` accepts the six matching handlers:
 `onIdle`, `onLoading`, `onRefreshing(rows)`, `onFailure(error)`,
 `onStale([rows, error])`, and `onSuccess(rows)`.
@@ -82,7 +82,7 @@ Task.query()
 Builders are immutable and track included result shapes. Singular queries allow
 includes but not filters or pagination. Infinite loading expands one live ordered
 query, uses a lookahead row, resets on query/client changes, and respects `maxLimit`.
-`hasMore` is unknown until sufficient data arrives; `capped` reports the maximum.
+`hasMore` is unknown until synchronization completes and false when the window cannot grow. `capped` reports the maximum; `exhausted` proves no further rows exist, and `stopReason` is `maximum`, `exhausted`, or undefined. An exact-cap result is capped without proving exhaustion. This grows a bounded live result window; it does not guarantee unrestricted dataset traversal.
 
 `useFilters(Task, ['done', 'title'])` returns `[filters, Controls]` for
 `.filters(filters)`. `useFilter` also returns a third setter. Undefined unsets a
@@ -137,3 +137,24 @@ Generated exports include both `Task` (instance type and model value) and `TaskR
 Continue with [mutations](./mutations.mdx) for forms and field permissions,
 [queries](./queries.mdx) for richer filters, or
 [records and casts](./records-and-casts.mdx) for DTO typing.
+
+## Sort transitions and stable data
+
+For a root sort-only change, `useData` keeps the last completed ordering subscribed
+and live until the replacement completes. Rapid sorts and retry keep using that
+committed subscription; superseded completions cannot replace the current query.
+A replacement error exposes stale rows plus the replacement error and retry.
+Completed empty results are valid committed results too.
+
+Filters, included relationships (including their ordering), pagination scope,
+contracts, and Zero identity/context changes immediately isolate prior rows.
+Unmounting releases native subscriptions; Zero's `ttl` option independently owns
+retention and continued synchronization after subscriptions are removed.
+
+Inline selections such as `useData(Task.query.all())` reuse decoded data when their
+semantics, contracts, authorization identity, and native result are unchanged.
+Decoding is local to the hook; there is no global snapshot cache. Dates and nested
+snapshots keep their references across an unrelated rerender.
+
+Query-only applications do not need FormBraid. Its optional peer is used only by
+consumers that opt into forms; the package's producer declarations are structural.

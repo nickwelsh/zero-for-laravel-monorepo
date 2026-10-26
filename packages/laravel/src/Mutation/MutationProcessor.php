@@ -11,6 +11,8 @@ use Illuminate\Database\QueryException;
 use Illuminate\Validation\ValidationException;
 use LogicException;
 use Throwable;
+use ZeroForLaravel\Domain\DomainRegistry;
+use ZeroForLaravel\Domain\OperationException;
 use ZeroForLaravel\Metadata\ModelRegistry;
 use ZeroForLaravel\Support\Input;
 use ZeroForLaravel\ZeroContext;
@@ -100,7 +102,11 @@ final readonly class MutationProcessor
                         Input::fail('args', 'Expected one argument object.');
                     }
 
-                    $this->executor->execute($mutation['name'], $mutation['args'][0], $context, $user);
+                    if (str_starts_with($mutation['name'], 'actions.')) {
+                        resolve(DomainRegistry::class)->execute($mutation['name'], $mutation['args'][0], $context, $user);
+                    } else {
+                        $this->executor->execute($mutation['name'], $mutation['args'][0], $context, $user);
+                    }
 
                     return ['id' => $id, 'result' => (object) []];
                 });
@@ -108,6 +114,8 @@ final readonly class MutationProcessor
                 $failure = ['error' => 'app', 'message' => 'Validation failed.', 'details' => ['code' => 'validation', 'fields' => $error->errors()]];
             } catch (AuthorizationException) {
                 $failure = ['error' => 'app', 'message' => 'This mutation is not authorized.', 'details' => ['code' => 'forbidden']];
+            } catch (OperationException $error) {
+                $failure = ['error' => 'app', 'message' => $error->getMessage(), 'details' => ['code' => $error->operationCode]];
             } catch (ModelNotFoundException) {
                 $failure = ['error' => 'app', 'message' => 'The record is unavailable.', 'details' => ['code' => 'not_found']];
             } catch (QueryException $error) {

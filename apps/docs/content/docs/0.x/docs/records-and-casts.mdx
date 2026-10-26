@@ -59,3 +59,22 @@ milliseconds. `HasUuids` uses UUIDv7 and `HasUlids` uses ULID. Eloquent timestam
 column constants are respected. For millisecond-preserving writes, use temporal
 columns with matching precision and an Eloquent `$dateFormat` such as
 `Y-m-d H:i:s.u`. JavaScript numeric precision applies to bigint and decimal values.
+
+## Plain readonly data
+
+Use `toPlain` when a consumer needs decoded data without snapshot wrappers:
+
+```ts
+import { toPlain } from '@nickwelsh/zero-for-laravel';
+const rows = toPlain(result.data);
+const name = rows[0]?.list?.name;
+const body = rows[0]?.comments[0]?.body;
+```
+
+The projection unwraps included to-one and to-many snapshots recursively and
+preserves readonly types, dates, enums, null values, and absent relationships.
+It does not JSON-serialize or reinterpret a scalar JSON object's `data` property.
+Rows and relationship arrays are frozen. As with the existing snapshot API,
+JavaScript Date internal state is not made immutable by readonly typing; do not
+mutate decoded dates. Snapshot and bound instance methods remain available on the
+original result.

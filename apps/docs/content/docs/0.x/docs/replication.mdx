@@ -111,3 +111,41 @@ API guard and use Zero's `auth` token or allowed client authorization headers.
 The default middleware is `['api', 'auth']`; choose the guard/session setup for
 your application. Keep Zero's periodic auth revalidation and query retransformation
 enabled so server context changes are reevaluated.
+
+## Publication-sensitive migrations
+
+With `zero.sync_publication_on_migrate` enabled, final metadata is rebuilt only
+after a successful PostgreSQL migration batch. Pretend runs, rollbacks, disabled
+synchronization, and unrelated connections do not rebuild the publication.
+
+Before dropping or changing a column referenced by a publication, release only
+the affected table's membership from inside its migration:
+
+```php
+use ZeroForLaravel\Publication\PublicationManager;
+
+PublicationManager::releaseTable('tasks', $this->getConnection());
+Schema::table('tasks', fn (Blueprint $table) => $table->dropColumn('old_column'));
+```
+
+The helper uses the configured dedicated publication and checks connection identity
+without resolving model columns against the intermediate schema. Final membership
+and explicit column restrictions are restored from fresh metadata when the entire
+batch succeeds. Do not call `zero:sync-publication` between migrations that leave
+an intermediate schema incompatible with final model definitions.
+
+If a later migration fails, successfully committed earlier releases may leave an
+affected table unpublished. Stop deployment, inspect the migration error and
+`zero:doctor`, repair/finish the batch, then run `zero:generate --check` and
+`zero:sync-publication`. Do not declare synchronization ready or automatically
+reconstruct final metadata during the failed batch. PostgreSQL transactions roll
+back a release with its own failed migration; previously committed migrations
+remain committed.
+
+Deploy additive schema changes first, regenerate/version matching PHP and JS
+contracts, synchronize publication membership, and verify authenticated subscribed
+queries before removing compatibility paths. Coordinate destructive schema changes
+with cache/client rollout and pause affected traffic while membership is released.
+Publication synchronization restricts what enters the cache; query callbacks enforce
+which clients can see those published rows. Neither successful publication DDL nor
+cache process health establishes completed replica backfill.

@@ -350,7 +350,7 @@ function Tasks() {
 `retry()`, and a `status` of `idle`, `loading`, `refreshing`, `failure`, `stale`, or
 `success`. Disabled queries are idle; incomplete empty results are loading;
 incomplete current-query rows are refreshing; complete empty results succeed.
-Query errors with current data are stale; errors without data are failures.
+Previously completed empty results remain usable during background synchronization and become stale on error. Query errors with usable data are stale; errors without usable data are failures.
 Connection state remains separate. `render()` accepts the six matching handlers:
 `onIdle`, `onLoading`, `onRefreshing(rows)`, `onFailure(error)`,
 `onStale([rows, error])`, and `onSuccess(rows)`.
@@ -373,7 +373,7 @@ Task.query()
 Builders are immutable and track included result shapes. Singular queries allow
 includes but not filters or pagination. Infinite loading expands one live ordered
 query, uses a lookahead row, resets on query/client changes, and respects `maxLimit`.
-`hasMore` is unknown until sufficient data arrives; `capped` reports the maximum.
+`hasMore` is unknown until synchronization completes and false when the window cannot grow. `capped` reports the maximum; `exhausted` proves no further rows exist, and `stopReason` is `maximum`, `exhausted`, or undefined. An exact-cap result is capped without proving exhaustion. This grows a bounded live result window; it does not guarantee unrestricted dataset traversal.
 
 `useFilters(Task, ['done', 'title'])` returns `[filters, Controls]` for
 `.filters(filters)`. `useFilter` also returns a third setter. Undefined unsets a
@@ -485,3 +485,14 @@ MIT licensed.
 
 See [tooling](docs/tooling.md) for workspace commands, supported runtimes, and the
 settings adapted or omitted from the Laravel application reference.
+
+## Unreleased correctness and development additions
+
+The source adds typed filter shorthand, `toPlain()` projection, live sort retention,
+explicit infinite-window stop reasons, optional FormBraid, and named domain actions.
+Package-owned `zero:dev`, `zero:doctor`, `zero:exposure`, and guarded replica-file
+reset commands replace reusable local startup plumbing. These additions have not
+been published; see [the changelog](CHANGELOG.md),
+[local startup and recovery](apps/docs/content/docs/0.x/docs/local-development.mdx),
+[domain mutations](apps/docs/content/docs/0.x/docs/domain-mutations.mdx), and
+[publication-sensitive migrations](apps/docs/content/docs/0.x/docs/replication.mdx).

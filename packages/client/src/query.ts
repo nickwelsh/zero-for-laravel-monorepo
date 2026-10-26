@@ -19,6 +19,7 @@ import type {
     ModelRow,
     Filter,
     FilterName,
+    FilterValue,
     IncludeName,
     RelatedRow,
     RelatedName,
@@ -180,6 +181,16 @@ function buildQuery(
     return query;
 }
 
+/** Canonicalize object keys; ordered arrays (including sort precedence) stay ordered. */
+export function selectionKey(value: unknown): string {
+    return JSON.stringify(value, (_key, child: unknown) =>
+        child && typeof child === 'object' && !Array.isArray(child)
+            ? // oxlint-disable-next-line unicorn/no-array-sort -- Entries is a freshly owned array.
+              Object.fromEntries(Object.entries(child).sort(([a], [b]) => a.localeCompare(b)))
+            : child,
+    );
+}
+
 export type SelectionData<Q> = Q extends { decode(raw: unknown): infer Data } ? Data : never;
 
 export class Selection<
@@ -207,7 +218,7 @@ export class Selection<
         return this.definitions[this.name]!;
     }
     get key(): string {
-        return JSON.stringify([this.name, this.one, this.args, this.pageSize]);
+        return selectionKey([this.name, this.one, this.args, this.pageSize]);
     }
 
     private copy<NextRow = Row>(args: QueryArgs, pageSize = this.pageSize): Selection<S, D, N, NextRow, One> {
@@ -225,10 +236,18 @@ export class Selection<
         );
     }
 
+    filter<F extends FilterName<D, N>>(this: Selection<S, D, N, Row>, filter: Filter<D, N, F>): Selection<S, D, N, Row>;
     filter<F extends FilterName<D, N>>(
         this: Selection<S, D, N, Row>,
-        filter: Filter<D, N, F>,
+        name: F,
+        value: FilterValue<D, N, F> | undefined,
+    ): Selection<S, D, N, Row>;
+    filter(
+        this: Selection<S, D, N, Row>,
+        input: Filter<D, N> | FilterName<D, N>,
+        value?: unknown,
     ): Selection<S, D, N, Row> {
+        const filter = typeof input === 'string' ? { model: this.name, name: input, value } : input;
         if (filter.model !== this.name) fail('filter', 'Filter belongs to another model.');
         const definition = this.contract.filters[filter.name];
         if (!definition) fail('filter', 'Unknown filter.');
@@ -285,6 +304,17 @@ export class Selection<
     limit(this: Selection<S, D, N, Row>, limit: number): Selection<S, D, N, Row> {
         return this.copy({ ...this.args, limit });
     }
+
+    /** Replace ordering, including returning to the model default with undefined. */
+    reorder(
+        this: Selection<S, D, N, Row>,
+        order: readonly (readonly [D[N]['sorts'][number], 'asc' | 'desc'])[] | undefined,
+    ): Selection<S, D, N, Row> {
+        const { order: _order, ...args } = this.args;
+        return this.copy(
+            order === undefined ? args : { ...args, order: order.map(([field, direction]) => [field, direction]) },
+        );
+    }
     withTrashed(
         this: Selection<S, D, N, Row> & ('trashed' extends FilterName<D, N> ? unknown : never),
     ): Selection<S, D, N, Row> {
@@ -302,7 +332,8 @@ export class Selection<
         });
     }
     infinite(this: Selection<S, D, N, Row>, pageSize = this.contract.defaultLimit): Selection<S, D, N, Row> {
-        return this.copy({ ...this.args, limit: pageSize }, pageSize);
+        if (!Number.isInteger(pageSize) || pageSize < 1) fail('limit', 'Page size must be a positive integer.');
+        return this.copy({ ...this.args, limit: Math.min(pageSize, this.contract.maxLimit) }, pageSize);
     }
 
     request(): QueryRequest<

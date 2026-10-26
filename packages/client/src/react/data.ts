@@ -2,7 +2,7 @@ import { useQuery, useZero, useConnectionState, type UseQueryOptions } from '@ro
 import type { Schema, QueryResultDetails, ConnectionState, QueryRequest } from '@rocicorp/zero';
 import { useMemo, useState } from 'react';
 import type { ClientContext, ModelContract, QueryArgs } from '../contract';
-import type { SelectionData } from '../query';
+import { selectionKey, type SelectionData } from '../query';
 
 export type DataStatus = 'idle' | 'loading' | 'refreshing' | 'failure' | 'stale' | 'success';
 export type RenderHandlers<T, R> = {
@@ -17,6 +17,9 @@ export interface InfiniteData {
     readonly hasMore: boolean | undefined;
     readonly limit: number;
     readonly capped: boolean;
+    /** True only when synchronization proves there are no further rows. */
+    readonly exhausted: boolean;
+    readonly stopReason: 'maximum' | 'exhausted' | undefined;
     loadMore(): void;
 }
 export interface Data<T> {
@@ -38,58 +41,136 @@ export interface ReadSelection {
     readonly args: Readonly<QueryArgs>;
     readonly pageSize?: number | undefined;
     readonly one: boolean;
+    readonly schema?: unknown;
+    readonly definitions?: unknown;
+    readonly queries?: unknown;
+    readonly mutators?: unknown;
+    readonly defaults?: unknown;
     request(): unknown;
     decode(raw: unknown): unknown;
     limit?(limit: number): ReadSelection;
 }
 
-export function useData<Q extends ReadSelection>(selection: Q, options: UseQueryOptions = {}): Data<SelectionData<Q>> {
+// Stable semantics keep decoding local to this hook and its authorization identity.
+function useSelection<Q extends ReadSelection>(selection: Q, identity: unknown, context: string): Q {
+    // Selection identity is defined by its immutable contract and semantic key.
+    return useMemo(
+        () => selection,
+        // oxlint-disable-next-line react-hooks-plugin/exhaustive-deps
+        [
+            selection.key,
+            selection.contract,
+            selection.schema,
+            selection.definitions,
+            selection.queries,
+            selection.mutators,
+            selection.defaults,
+            identity,
+            context,
+        ],
+    );
+}
+
+type NativeRequest = QueryRequest<
+    string,
+    QueryArgs,
+    QueryArgs,
+    Schema,
+    Record<string, unknown> | undefined,
+    ClientContext
+>;
+
+export function useData<Q extends ReadSelection>(input: Q, options: UseQueryOptions = {}): Data<SelectionData<Q>> {
     type Result = SelectionData<Q>;
     const zero = useZero<Schema, undefined, ClientContext>();
     const connection = useConnectionState();
-    const identity = zero;
-    const key = selection.key;
-    const initial = selection.args.limit ?? selection.contract.defaultLimit;
-    const [page, setPage] = useState({ key, identity, limit: initial });
-    if (page.key !== key || page.identity !== identity) {
-        setPage({ key, identity, limit: initial });
-    }
-    // A changed query/client uses its initial limit immediately, before effects.
-    const limit = page.key === key && page.identity === identity ? page.limit : initial;
+    const context = selectionKey(zero.context);
+    const selection = useSelection(input, zero, context);
     const max = selection.contract.maxLimit;
-    const requested = selection.pageSize === undefined ? selection.args.limit : Math.min(limit + 1, max);
-    const request = useMemo(() => {
-        if (selection.pageSize === undefined || selection.one) return selection.request();
-        return selection.limit!(requested!).request();
-    }, [selection, requested]);
-    const [raw, details] = useQuery(
-        request as QueryRequest<
-            string,
-            QueryArgs,
-            QueryArgs,
-            Schema,
-            Record<string, unknown> | undefined,
-            ClientContext
-        >,
-        options,
+    const initial = Math.min(selection.args.limit ?? selection.contract.defaultLimit, max);
+    // Only root ordering may change within a retained scope. Includes and their
+    // ordering, filters, limits, contracts, and authorization remain part of it.
+    const { order: _order, ...scopeArgs } = selection.args;
+    const scopeKey = selectionKey([selection.contract.name, selection.one, scopeArgs, selection.pageSize]);
+    const window = useMemo(
+        () => ({
+            scopeKey,
+            zero,
+            context,
+            contract: selection.contract,
+            schema: selection.schema,
+            definitions: selection.definitions,
+            queries: selection.queries,
+            mutators: selection.mutators,
+            defaults: selection.defaults,
+        }),
+        [
+            scopeKey,
+            zero,
+            context,
+            selection.contract,
+            selection.schema,
+            selection.definitions,
+            selection.queries,
+            selection.mutators,
+            selection.defaults,
+        ],
     );
+    const [page, setPage] = useState({ window, limit: initial });
+    if (page.window !== window) setPage({ window, limit: initial });
+    const limit = Math.min(page.window === window ? page.limit : initial, max);
+    const scope = useMemo(() => ({ window, limit }), [window, limit]);
+    const requested = selection.pageSize === undefined ? selection.args.limit : Math.min(limit + 1, max);
+    const request = useMemo(
+        () =>
+            (selection.pageSize === undefined || selection.one
+                ? selection.request()
+                : selection.limit!(requested!).request()) as NativeRequest,
+        [selection, requested],
+    );
+    const [raw, details] = useQuery(request, options);
     const enabled = options.enabled ?? true;
+    const [committed, setCommitted] = useState({ scope, selection, request, complete: false });
+    const retain =
+        enabled &&
+        committed.complete &&
+        committed.scope === scope &&
+        committed.request !== request &&
+        details.type !== 'complete';
+    // A second native subscription keeps the committed ordering live. Zero owns
+    // materialization, deduplication, TTL, retries, and subscription cleanup.
+    const [previousRaw] = useQuery(retain ? committed.request : undefined, options);
+    if (
+        committed.scope !== scope ||
+        (enabled && details.type === 'complete' && (committed.request !== request || !committed.complete))
+    ) {
+        setCommitted({ scope, selection, request, complete: enabled && details.type === 'complete' });
+    }
+    const visibleSelection = retain ? committed.selection : selection;
+    const visibleRaw = retain ? previousRaw : raw;
     const decodedResult = useMemo(() => {
         try {
-            return { value: selection.decode(raw), error: undefined };
+            return { value: visibleSelection.decode(visibleRaw), error: undefined };
         } catch (error) {
             return {
-                value: selection.one ? undefined : [],
+                value: visibleSelection.one ? undefined : [],
                 error: error instanceof Error ? error : new Error(String(error)),
             };
         }
-    }, [raw, selection]);
+    }, [visibleRaw, visibleSelection]);
     const decoded = decodedResult.value;
-    const data = (
-        selection.pageSize !== undefined && Array.isArray(decoded) ? decoded.slice(0, limit) : decoded
-    ) as Result;
+    const data = useMemo(
+        () =>
+            (selection.pageSize !== undefined && Array.isArray(decoded) ? decoded.slice(0, limit) : decoded) as Result,
+        [decoded, selection.pageSize, limit],
+    );
     const complete = details.type === 'complete';
-    const hasData = Array.isArray(data) ? data.length > 0 : data !== undefined;
+    const hasData =
+        !decodedResult.error &&
+        (retain ||
+            (committed.scope === scope && committed.request === request && committed.complete) ||
+            complete ||
+            (Array.isArray(data) ? data.length > 0 : data !== undefined));
     const error = decodedResult.error ?? (details.type === 'error' ? new Error(details.error.message) : undefined);
     const status: DataStatus = !enabled
         ? 'idle'
@@ -102,27 +183,57 @@ export function useData<Q extends ReadSelection>(selection: Q, options: UseQuery
             : hasData
               ? 'refreshing'
               : 'loading';
+    const exhausted =
+        !decodedResult.error &&
+        complete &&
+        Array.isArray(decoded) &&
+        decoded.length <= limit &&
+        (requested! > limit || decoded.length < limit);
+    const capped = limit >= max;
     const infinite: InfiniteData | undefined =
         selection.pageSize === undefined
             ? undefined
             : {
                   limit,
-                  capped: limit >= max,
-                  hasMore: Array.isArray(decoded) && decoded.length > limit ? true : complete ? false : undefined,
+                  capped,
+                  exhausted,
+                  stopReason:
+                      !enabled || error || !complete
+                          ? undefined
+                          : exhausted
+                            ? 'exhausted'
+                            : capped
+                              ? 'maximum'
+                              : undefined,
+                  // At the cap, advancement is impossible even when exhaustion is unknown.
+                  hasMore: !enabled
+                      ? undefined
+                      : capped
+                        ? false
+                        : error || !complete
+                          ? undefined
+                          : Array.isArray(decoded) && decoded.length > limit
+                            ? true
+                            : exhausted
+                              ? false
+                              : undefined,
                   loadMore: () => {
                       if (
                           !enabled ||
-                          details.type !== 'complete' ||
+                          error ||
+                          !complete ||
                           !Array.isArray(decoded) ||
                           decoded.length <= limit ||
-                          limit >= max
+                          capped
                       )
                           return;
-                      setPage({
-                          key,
-                          identity,
-                          limit: Math.min(limit + selection.pageSize!, max),
-                      });
+                      setPage((current) => ({
+                          window,
+                          limit: Math.min(
+                              (current.window === window ? current.limit : initial) + selection.pageSize!,
+                              max,
+                          ),
+                      }));
                   },
               };
     return {

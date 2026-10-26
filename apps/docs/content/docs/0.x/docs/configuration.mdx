@@ -76,3 +76,21 @@ const client = createZeroForLaravel(schema, definitions, {
 Here `generateId` is application code. IDs must still match the model's UUID or
 ULID strategy. Native Zero options control transport and local storage. The
 [generated API reference](/docs/0.x/api) lists the factory and provider types.
+
+## Modular model registration
+
+`zero.models` is an explicit list and takes precedence over discovery. When it is
+empty, `zero.discovery` lists PSR-4 roots to scan:
+
+```php
+'discovery' => [
+    ['path' => app_path('Models'), 'namespace' => 'App\\Models'],
+    ['path' => base_path('modules/Tasks/Models'), 'namespace' => 'Modules\\Tasks\\Models'],
+],
+```
+
+Only concrete Eloquent models with a Zero definition or visibility/query/mutation
+attributes opt in. Discovery does not expose every model in those directories.
+Explicit visibility, required keys, `$visible` replication allowlists, and override
+precedence remain enforced. No modular-framework dependency is required.
+Use `zero:exposure` to inspect the resulting columns and permissions.

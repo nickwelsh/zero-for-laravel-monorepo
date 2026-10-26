@@ -11,7 +11,11 @@ use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\ServiceProvider;
 use LogicException;
+use ZeroForLaravel\Console\DevCommand;
+use ZeroForLaravel\Console\DoctorCommand;
+use ZeroForLaravel\Console\ExposureCommand;
 use ZeroForLaravel\Console\GenerateCommand;
+use ZeroForLaravel\Console\ResetCommand;
 use ZeroForLaravel\Console\SyncPublicationCommand;
 use ZeroForLaravel\Http\AuthenticateZeroCache;
 use ZeroForLaravel\Http\ZeroController;
@@ -26,24 +30,9 @@ final class ZeroServiceProvider extends ServiceProvider
     public function register(): void
     {
         $this->mergeConfigFrom(__DIR__.'/../config/zero.php', 'zero');
+        $this->app->singleton(Domain\DomainRegistry::class, fn (): Domain\DomainRegistry => new Domain\DomainRegistry(config()->array('zero.domain_mutations')));
         $this->app->singleton(function (Application $app): ModelRegistry {
-            $models = config()->array('zero.models');
-            if (! array_is_list($models)) {
-                throw new LogicException('Zero models must be a list of Eloquent model classes.');
-            }
-
-            $classes = [];
-            foreach ($models as $model) {
-                if (! is_string($model) || ! is_subclass_of($model, \Illuminate\Database\Eloquent\Model::class)) {
-                    throw new LogicException('Zero models must be a list of Eloquent model classes.');
-                }
-
-                $classes[] = $model;
-            }
-
-            if ($models === []) {
-                $classes = (new ModelDiscovery)->discover(app_path('Models'), $app->getNamespace().'Models');
-            }
+            $classes = $app->make(ModelDiscovery::class)->registered();
 
             return new ModelRegistry($classes);
         });
@@ -57,7 +46,7 @@ final class ZeroServiceProvider extends ServiceProvider
     {
         if ($this->app->runningInConsole()) {
             $this->publishes([__DIR__.'/../config/zero.php' => config_path('zero.php')], 'zero-config');
-            $this->commands([GenerateCommand::class, SyncPublicationCommand::class]);
+            $this->commands([GenerateCommand::class, SyncPublicationCommand::class, DevCommand::class, DoctorCommand::class, ResetCommand::class, ExposureCommand::class]);
             Event::listen(MigrationsEnded::class, function (MigrationsEnded $event): void {
                 if ($event->method !== 'up' || ($event->options['pretend'] ?? false) || ! config()->boolean('zero.sync_publication_on_migrate')) {
                     return;
@@ -69,12 +58,15 @@ final class ZeroServiceProvider extends ServiceProvider
                     return;
                 }
 
+                // Check connection identity without resolving final column metadata.
+                $classes = $this->app->make(ModelDiscovery::class)->registered();
+                if ($classes === [] || (new $classes[0])->getConnection()->getName() !== $connection->getName()) {
+                    return;
+                }
+
                 // Migrations may have changed columns on an already-resolved registry.
                 $this->app->forgetInstance(ModelRegistry::class);
                 $registry = $this->app->make(ModelRegistry::class);
-                if ($registry->all() === [] || $registry->connection()->getName() !== $connection->getName()) {
-                    return;
-                }
 
                 (new PublicationManager($registry))->sync(config()->string('zero.publication'));
             });

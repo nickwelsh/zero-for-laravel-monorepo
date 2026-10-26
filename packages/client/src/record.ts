@@ -15,9 +15,38 @@ type Data<S extends Schema, D extends ContractMap, N extends keyof D & string, R
 };
 
 export class ModelSnapshot<T> {
+    // Type identity must match the runtime instanceof check: JSON with a `data`
+    // property is not a model snapshot. This declaration emits no extra field.
+    declare private readonly snapshotBrand: void;
+
     constructor(readonly data: T) {
         Object.freeze(data);
     }
+}
+
+/** Unwrap snapshots only. Scalar JSON objects (including a `data` key) stay scalar. */
+type ReadonlyValue<T> = T extends Date
+    ? T
+    : T extends readonly (infer Item)[]
+      ? readonly ReadonlyValue<Item>[]
+      : T extends object
+        ? { readonly [K in keyof T]: ReadonlyValue<T[K]> }
+        : T;
+
+export type PlainData<T> =
+    T extends ModelSnapshot<infer Row>
+        ? { readonly [K in keyof Row]: PlainData<Row[K]> }
+        : T extends readonly (infer Item)[]
+          ? readonly PlainData<Item>[]
+          : ReadonlyValue<T>;
+
+export function toPlain<T>(value: T): PlainData<T> {
+    if (value instanceof ModelSnapshot)
+        return Object.freeze(
+            Object.fromEntries(Object.entries(value.data as object).map(([key, child]) => [key, toPlain(child)])),
+        ) as PlainData<T>;
+    if (Array.isArray(value)) return Object.freeze(value.map((child) => toPlain(child))) as PlainData<T>;
+    return value as PlainData<T>;
 }
 
 export type ModelInstance<
@@ -44,6 +73,21 @@ export class RelationSelection<
     readonly key: string;
     readonly contract: D[N];
     private readonly parent: Selection<S, D, N, ModelRow<D, N>, true>;
+    get schema() {
+        return this.parent.schema;
+    }
+    get definitions() {
+        return this.parent.definitions;
+    }
+    get queries() {
+        return this.parent.queries;
+    }
+    get mutators() {
+        return this.parent.mutators;
+    }
+    get defaults() {
+        return this.parent.defaults;
+    }
     constructor(
         schema: S,
         definitions: D,
