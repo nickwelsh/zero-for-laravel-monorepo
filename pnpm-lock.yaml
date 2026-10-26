@@ -275,8 +275,8 @@ importers:
         specifier: ^0.4.1
         version: 0.4.5(@types/react@19.3.0)
       '@rollup/rollup-linux-x64-gnu':
-        specifier: 4.64.6
-        version: 4.64.6
+        specifier: 4.64.12
+        version: 4.64.12
       '@rollup/rollup-win32-x64-msvc':
         specifier: 4.64.6
         version: 4.64.6
@@ -3178,8 +3178,8 @@ packages:
   '@rolldown/pluginutils@1.0.1':
     resolution: {integrity: sha512-2j9bGt5Jh8hj+vPtgzPtl72j0yRxHAyumoo6TNfAjsLB04UtpSvPbPcDcBMxz7n+9CYB0c1GxQFxYRg2jimqGw==}
 
-  '@rollup/rollup-linux-x64-gnu@4.64.6':
-    resolution: {integrity: sha512-05v6wFKDKJPZs9xlytVrrRu6IbRuoSvlH9xNwEOafXsKyjBFZPvAcZz2VIAB/M+lblYeKa9iOYC4RDVdfcAAaw==}
+  '@rollup/rollup-linux-x64-gnu@4.64.12':
+    resolution: {integrity: sha512-mkbjxPqpR91u1JD7xY4aLZhr/Mqka4/RqGcG4WNGgN/lC1o7TzyCyqJoSJXp9qVVxMwpJGFlEF1VlERb+Ghw1Q==}
     cpu: [x64]
     os: [linux]
     libc: [glibc]
@@ -10780,7 +10780,7 @@ snapshots:
 
   '@rolldown/pluginutils@1.0.1': {}
 
-  '@rollup/rollup-linux-x64-gnu@4.64.6':
+  '@rollup/rollup-linux-x64-gnu@4.64.12':
     optional: true
 
   '@rollup/rollup-win32-x64-msvc@4.64.6':
