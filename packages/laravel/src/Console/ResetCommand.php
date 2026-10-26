@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace ZeroForLaravel\Console;
 
 use Illuminate\Console\Command;
+use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Process;
 use LogicException;
 use Symfony\Component\Process\ExecutableFinder;
@@ -135,7 +136,7 @@ final class ResetCommand extends Command
             }
 
             foreach ($targets as $target) {
-                if (! unlink($target)) {
+                if (! File::delete($target)) {
                     throw new LogicException('A replica file could not be removed. Inspect the dry run before retrying.');
                 }
             }

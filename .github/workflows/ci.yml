@@ -66,6 +66,21 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Install validation prerequisites
         run: sudo apt-get update && sudo apt-get install --yes aspell aspell-en lsof postgresql-client
+      - name: Enable logical replication for live integration tests
+        if: matrix.php == '8.3' && matrix.laravel == '^13.0'
+        env:
+          POSTGRES_CONTAINER: ${{ job.services.postgres.id }}
+          PGPASSWORD: postgres
+        run: |
+          psql -h 127.0.0.1 -U postgres -d laravel_zero_test -v ON_ERROR_STOP=1 -c "ALTER SYSTEM SET wal_level = 'logical'"
+          docker restart "$POSTGRES_CONTAINER"
+          for attempt in {1..30}; do
+            if pg_isready -h 127.0.0.1 -U postgres -d laravel_zero_test; then
+              break
+            fi
+            sleep 1
+          done
+          test "$(psql -h 127.0.0.1 -U postgres -d laravel_zero_test -Atc 'SHOW wal_level')" = logical
       - uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # v2
         with:
           php-version: ${{ matrix.php }}

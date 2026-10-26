@@ -10,6 +10,7 @@ use Illuminate\Database\Migrations\Migrator;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Schema;
 use RuntimeException;
 use ZeroForLaravel\Attributes\ZeroPublic;
@@ -169,11 +170,11 @@ PHP));
         expect(DB::scalar("SELECT attnames::text FROM pg_publication_tables WHERE pubname = 'laravel_zero_test_publication'"))->toContain('title');
     } finally {
         if (file_exists($directory.'/recover')) {
-            unlink($directory.'/recover');
+            File::delete($directory.'/recover');
         }
 
-        unlink($first);
-        unlink($second);
+        File::delete($first);
+        File::delete($second);
         rmdir($directory);
     }
 });
