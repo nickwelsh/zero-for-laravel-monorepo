@@ -88,7 +88,8 @@ test('domain inputs have bounded validation and authoritative ownership', functi
 
 test('generation emits explicit domain contracts and typed native bindings', function (): void {
     /** @var PostgresTestCase $this */
+    config()->set('zero.route_prefix', '/api/domain/');
     app()->instance(DomainRegistry::class, new DomainRegistry(['completeTasks' => CompleteTasks::class]));
     $source = (new TypeScriptGenerator)->generate(new ModelRegistry($this->models()));
-    expect($source)->toContain('domainDefinitions', 'DomainInputs', 'createDomainMutations(schema, runtime.mutators', '"maxItems": 3');
+    expect($source)->toContain('domainDefinitions', 'DomainInputs', 'createDomainMutations(schema, runtime.mutators', '"maxItems": 3', 'resultURL: "/api/domain/results"');
 });
