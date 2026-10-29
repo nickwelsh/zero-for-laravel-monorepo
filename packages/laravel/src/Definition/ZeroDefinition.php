@@ -14,6 +14,8 @@ final class ZeroDefinition
 {
     public bool $public = false;
 
+    public ?\ZeroForLaravel\Search\ScoutSearch $search = null;
+
     /** @var list<array{field: string, op: string, value: array{context: string}|array{literal: string|int|float|bool|null}}> */
     public array $authorization = [];
 
@@ -30,7 +32,7 @@ final class ZeroDefinition
     public array $scopeRelations = [];
 
     /**
-     * @var array<string, array{kind: string, field: string, operator?: string, members?: list<array<string, mixed>>, callback?: Closure, expression?: array<string, mixed>}>
+     * @var array<string, array{kind: string, field: string, operator?: string, members?: list<array<string, mixed>>, conditions?: array<string, array<string, mixed>>, maxItems?: int, prefix?: string, suffix?: string, callback?: Closure, expression?: array<string, mixed>}>
      */
     public array $filters = [];
 
@@ -64,6 +66,13 @@ final class ZeroDefinition
     public static function make(): self
     {
         return new self;
+    }
+
+    public function search(\ZeroForLaravel\Search\ScoutSearch $search): self
+    {
+        $this->search = $search;
+
+        return $this;
     }
 
     public function allowedNestedMutations(string $operation, NestedMutation ...$mutations): self
@@ -147,6 +156,11 @@ final class ZeroDefinition
             }
 
             $this->filters[$filter->name] = $filter->toArray();
+            foreach ([$filter->toArray(), ...array_values($filter->conditions)] as $member) {
+                if ($member['kind'] === 'related' && is_string($member['field'])) {
+                    $this->relations($member['field']);
+                }
+            }
         }
 
         return $this;

@@ -86,11 +86,13 @@ final class TypeScriptGenerator
 
             $lines[] = "import {createDomainMutations, type DomainContracts, type DomainInput} from '@nickwelsh/zero-for-laravel';";
             $lines[] = 'export const domainDefinitions = '.$this->json((object) $domains, true).' as const satisfies DomainContracts;';
+            $lines[] = 'export const domainRules = '.$this->json((object) resolve(\ZeroForLaravel\Domain\DomainRegistry::class)->formRules()).' as const;';
+            $lines[] = 'export const domainResults = '.$this->json((object) resolve(\ZeroForLaravel\Domain\DomainRegistry::class)->resultContracts()).' as const satisfies DomainContracts;';
             $lines[] = 'export type DomainInputs = {[N in keyof typeof domainDefinitions]: DomainInput<typeof domainDefinitions[N]>};';
             $lines[] = 'const runtime = createZeroForLaravel(schema, definitions);';
             $lines[] = 'export const {models, queries} = runtime;';
             $lines[] = 'export const crudMutators = runtime.mutators;';
-            $lines[] = 'export const {mutators, actions} = createDomainMutations(schema, runtime.mutators, domainDefinitions);';
+            $lines[] = 'export const {mutators, actions} = createDomainMutations(schema, runtime.mutators, domainDefinitions, {formRules: domainRules, results: domainResults, resultURL: '.$this->json('/'.trim(config()->string('zero.route_prefix'), '/').'/results').'});';
         }
 
         foreach ($models as $model) {

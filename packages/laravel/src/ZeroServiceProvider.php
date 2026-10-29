@@ -30,6 +30,10 @@ final class ZeroServiceProvider extends ServiceProvider
     public function register(): void
     {
         $this->mergeConfigFrom(__DIR__.'/../config/zero.php', 'zero');
+        if (class_exists(\Typesense\Client::class)) {
+            $this->app->singletonIf(\Typesense\Client::class, fn (): \Typesense\Client => new \Typesense\Client(config()->array('scout.typesense.client-settings')));
+        }
+
         $this->app->singleton(Domain\DomainRegistry::class, fn (): Domain\DomainRegistry => new Domain\DomainRegistry(config()->array('zero.domain_mutations')));
         $this->app->singleton(function (Application $app): ModelRegistry {
             $classes = $app->make(ModelDiscovery::class)->registered();
@@ -82,6 +86,11 @@ final class ZeroServiceProvider extends ServiceProvider
 
                 $names[] = $name;
             }
+
+            Route::prefix(config()->string('zero.route_prefix'))->middleware($names)->group(function (): void {
+                Route::post('results/{operation}', [ZeroController::class, 'result'])
+                    ->where('operation', '[a-zA-Z][a-zA-Z0-9_]{0,63}')->name('zero.result');
+            });
 
             Route::prefix(config()->string('zero.route_prefix'))->middleware(array_merge([AuthenticateZeroCache::class], $names))->group(function (): void {
                 Route::post('query', [ZeroController::class, 'query'])->name('zero.query');

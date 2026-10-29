@@ -99,3 +99,12 @@ class NullablePartialTask extends Task
         return ZeroDefinition::make()->allowedFilters([AllowedFilter::partial('list_id')]);
     }
 }
+
+test('bounded ID sets and parameterized condition groups preserve related authorization', function (): void {
+    /** @var TestCase $this */
+    $registry = new ModelRegistry($this->models());
+    $registry->get('Task')->definition->allowedFilters(AllowedFilter::in('ids', 'id', max: 2), AllowedFilter::conditions('rules', [AllowedFilter::exact('done'), AllowedFilter::related('list_name', 'list', 'id')]));
+    $ast = (new QueryCompiler($registry))->compile('Task.all', ['filters' => ['ids' => ['a', 'b'], 'rules' => ['match' => 'any', 'rules' => [['field' => 'done', 'value' => false], ['field' => 'list_name', 'value' => 'owned']]]]], new ZeroContext(['user_id' => 'alice']));
+    expect(json_encode($ast))->toContain('IN', 'EXISTS', 'alice', 'owned');
+    expect(fn (): array => (new QueryCompiler($registry))->compile('Task.all', ['filters' => ['ids' => ['a', 'b', 'c']]], new ZeroContext(['user_id' => 'alice'])))->toThrow(ValidationException::class);
+});

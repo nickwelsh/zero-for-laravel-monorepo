@@ -5,6 +5,7 @@ require __DIR__.'/../../packages/laravel/vendor/autoload.php';
 use Illuminate\Container\Container;
 use Illuminate\Database\Capsule\Manager;
 use Illuminate\Database\Schema\Blueprint;
+use ZeroForLaravel\Definition\AllowedFilter;
 use ZeroForLaravel\Generation\TypeScriptGenerator;
 use ZeroForLaravel\Metadata\ModelRegistry;
 use ZeroForLaravel\Query\QueryCompiler;
@@ -54,6 +55,16 @@ Container::setInstance($capsule->getContainer());
 $registry = new ModelRegistry([Task::class, TaskList::class, Tag::class, Comment::class]);
 if (($argv[3] ?? null) === 'scope') {
     $registry->get('Task')->definition->enforceServerScope(fn (\ZeroForLaravel\Query\ZQLBuilder $query) => $query->where(fn (\ZeroForLaravel\Query\ZeroOperator $op) => $op->or($op->cmp('done', true), $op->cmp('title', 'shared'))));
+}
+if (in_array($argv[3] ?? null, ['junction', 'junction-scope'], true)) {
+    $registry->get('Task')->definition->allowedFilters([
+        AllowedFilter::related('tag', 'tags', 'id'),
+        AllowedFilter::conditions('rules', [AllowedFilter::related('tag', 'tags', 'name')]),
+    ]);
+    $registry->get('Tag')->definition->defaultSort('name');
+    if ($argv[3] === 'junction-scope') {
+        $registry->get('Task')->definition->enforceServerScope(fn (\ZeroForLaravel\Query\ZQLBuilder $query) => $query->whereExists('tags'), relations: ['tags']);
+    }
 }
 if (($argv[1] ?? null) === 'generate') {
     echo (new TypeScriptGenerator)->generate($registry);

@@ -24,10 +24,10 @@ const table2 = table("todos").columns({
   "created_at": number().optional(),
   "updated_at": number().optional(),
 } ).primaryKey("id");
-const table2Relations = relationships(table2, ({one, many}) => ({
+const table2Relations = relationships(table2, ({one}) => ({
   "list": one({sourceField: ["list_id"], destField: ["id"], destSchema: table1}),
 }));
-const table1Relations = relationships(table1, ({one, many}) => ({
+const table1Relations = relationships(table1, ({many}) => ({
   "todos": many({sourceField: ["id"], destField: ["list_id"], destSchema: table2}),
   "memberships": many({sourceField: ["id"], destField: ["list_id"], destSchema: table0}),
 }));

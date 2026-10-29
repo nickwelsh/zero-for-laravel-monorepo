@@ -10,7 +10,8 @@ import {
     type MutatorDefinition,
     type AnyMutatorRegistry,
 } from '@rocicorp/zero';
-import { mutationForm, type MutationDefinition } from './form';
+import { mutationForm, mutationFormInput, type MutationDefinition, type MutationDraft } from './form';
+import { completeMutation, operationForm, type MutationClient, type MutationFormOptions } from './operation';
 import { ulid } from 'ulid';
 import { v7 as uuidv7 } from 'uuid';
 import type {
@@ -501,6 +502,30 @@ export class Mutation<
             return result;
         };
         return patch(this.contract, this.nested, formValues, defaultValues) as Partial<Input>;
+    }
+
+    async execute(
+        client: MutationClient<S>,
+        input: Input,
+        options: { signal?: AbortSignal } = {},
+    ): Promise<{ id: RecordId<D, N> }> {
+        options.signal?.throwIfAborted();
+        const request = this.prepare(input);
+        await completeMutation(client.mutate(request), options.signal);
+        return { id: request.args.id };
+    }
+
+    createForm(client: MutationClient<S>, options: MutationFormOptions<MutationDraft<Input> & object> = {}) {
+        const generated = this.form.definition;
+        return operationForm(
+            generated,
+            async (values, signal) => {
+                const patch = this.formValues(values, generated.defaultValues);
+                const input = mutationFormInput(this.definitions, this.contract, this.nested, patch);
+                return this.execute(client, input as Input, { signal });
+            },
+            options,
+        );
     }
 
     prepare(formInput: Input): MutateRequest<MutationArgs<RecordId<D, N>>, S, ClientContext> {

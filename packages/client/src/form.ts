@@ -115,7 +115,12 @@ function fieldType(column: Column): FieldDefinition['type'] {
     return column.type === 'json' ? 'object' : column.type;
 }
 
-function fieldDefinition(name: string, column: Column, rules: readonly string[], required: boolean): FieldDefinition {
+export function fieldDefinition(
+    name: string,
+    column: Column,
+    rules: readonly string[],
+    required: boolean,
+): FieldDefinition {
     const type = fieldType(column);
     const constraints: { -readonly [K in keyof Constraints]: Constraints[K] } = { required };
     const numeric = column.type === 'number' || column.cast === 'integer' || column.cast === 'float';

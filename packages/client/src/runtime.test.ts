@@ -266,3 +266,47 @@ it('filter shorthand shares conversion, removal and validation with filter objec
     });
     expect(() => Task.query.all().filter('done', 'false' as never)).toThrow();
 });
+
+describe('bounded declared filters', () => {
+    const runtime = createZeroForLaravel(schema, {
+        ...definitions,
+        Task: {
+            ...definitions.Task,
+            filters: {
+                ...definitions.Task.filters,
+                ids: { kind: 'in', field: 'id', maxItems: 2 },
+                list_name: { kind: 'related', field: 'list', operator: 'id' },
+                rules: {
+                    kind: 'conditions',
+                    field: '',
+                    maxItems: 2,
+                    conditions: {
+                        done: { kind: 'exact', field: 'done' },
+                        list: { kind: 'related', field: 'list', operator: 'id' },
+                    },
+                },
+            },
+        },
+    } as const);
+    it('builds sets and related groups through the native generated query', () => {
+        const selection = runtime.models.Task.query
+            .all()
+            .filter('ids', ['a', 'b'])
+            .filter('rules', {
+                match: 'any',
+                rules: [
+                    { field: 'done', value: false },
+                    { field: 'list', value: 'owned' },
+                ],
+            });
+        expect(selection.args.filters?.ids).toEqual(['a', 'b']);
+        expect(() => selection.request()).not.toThrow();
+        expect(() => runtime.models.Task.query.all().filter('ids', ['a', 'b', 'c']).request()).toThrow(/bounded/);
+        expect(() =>
+            runtime.models.Task.query
+                .all()
+                .filter('rules', { match: 'all', rules: [{ field: 'secret', value: 'x' }] } as never)
+                .request(),
+        ).toThrow(/Unknown/);
+    });
+});

@@ -15,6 +15,7 @@ minimumReleaseAgeExclude:
   - '@nickwelsh/refquill-win32-x64@0.1.0'
   - '@nickwelsh/refquill@0.1.0'
 allowBuilds:
+  typesense-instantsearch-adapter: false
   esbuild: true
   workerd: true
   '@rocicorp/zero-sqlite3': true

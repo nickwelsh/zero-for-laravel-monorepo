@@ -126,7 +126,10 @@ export function useData<Q extends ReadSelection>(input: Q, options: UseQueryOpti
             (selection.pageSize === undefined || selection.one
                 ? selection.request()
                 : selection.limit!(requested!).request()) as NativeRequest,
-        [selection, requested],
+        // The selection object may be recreated by a consumer or compiler while
+        // its query remains identical. Native resource identity follows semantics.
+        // oxlint-disable-next-line react-hooks-plugin/exhaustive-deps
+        [selection.key, window, requested],
     );
     const [raw, details] = useQuery(request, options);
     const enabled = options.enabled ?? true;

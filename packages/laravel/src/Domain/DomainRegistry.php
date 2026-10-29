@@ -27,11 +27,8 @@ final class DomainRegistry
                 throw new LogicException('Domain mutations require a FormRequest with explicit authorize().');
             }
 
-            foreach ($class::input() as $field => $spec) {
-                if (! preg_match('/^[a-zA-Z][a-zA-Z0-9_]*$/D', $field) || ! in_array($spec['type'], ['string', 'number', 'boolean'], true) || (($spec['array'] ?? false) && (($spec['maxItems'] ?? 0) < 1 || $spec['maxItems'] > 100))) {
-                    throw new LogicException('Domain inputs support scalar fields and explicitly bounded scalar arrays (1–100 items).');
-                }
-            }
+            $this->validateDefinition($class::input());
+            $this->validateDefinition($class::output());
 
             $this->operations[$name] = $class;
         }
@@ -43,7 +40,69 @@ final class DomainRegistry
         return array_map(fn (string $class): array => $class::input(), $this->operations);
     }
 
+    /** Portable FormRequest rules for generated named-action forms.
+     * @return array<string, array<string, list<string>>>
+     */
+    public function formRules(): array
+    {
+        $forms = [];
+        foreach ($this->operations as $name => $class) {
+            $columns = [];
+            foreach ($class::input() as $field => $spec) {
+                $columns[$field] = ['type' => ($spec['array'] ?? false) ? 'json' : $spec['type'], 'nullable' => $spec['nullable'] ?? false, 'date' => false, 'enum' => null, 'hasDefault' => false, 'default' => null];
+            }
+
+            [$rules] = (new \ZeroForLaravel\Generation\RuleExtractor)->extract(['action' => $class::request()], array_keys($columns), $columns, ['action']);
+            $forms[$name] = $rules['action'] ?? [];
+        }
+
+        return $forms;
+    }
+
+    /** @return array<string, array<string, array{type: 'string'|'number'|'boolean', optional?: bool, nullable?: bool, array?: bool, maxItems?: int}>> */
+    public function resultContracts(): array
+    {
+        return array_filter(array_map(fn (string $class): array => $class::output(), $this->operations));
+    }
+
+    /** @return array<string, mixed> */
+    public function resolveResult(string $name, mixed $arguments, ZeroContext $context, ?Authenticatable $user): array
+    {
+        [$class, $input] = $this->authorizedInput($name, $arguments, $context, $user);
+        abort_if($class::output() === [], 404);
+        $action = resolve($class);
+        if (! $action instanceof DomainMutation) {
+            throw new LogicException('Invalid domain action binding.');
+        }
+
+        $result = $action->result($input, $context);
+
+        return $this->validate($class::output(), $result);
+    }
+
     public function execute(string $name, mixed $arguments, ZeroContext $context, ?Authenticatable $user): void
+    {
+        [$class, $input] = $this->authorizedInput($name, $arguments, $context, $user);
+        $action = resolve($class);
+        if (! $action instanceof DomainMutation) {
+            throw new LogicException('Invalid domain action binding.');
+        }
+
+        $action->handle($input, $context);
+    }
+
+    /** @param array<string, array{type: 'string'|'number'|'boolean', optional?: bool, nullable?: bool, array?: bool, maxItems?: int}> $fields */
+    private function validateDefinition(array $fields): void
+    {
+        foreach ($fields as $field => $spec) {
+            if (! preg_match('/^[a-zA-Z][a-zA-Z0-9_]*$/D', $field) || ! in_array($spec['type'], ['string', 'number', 'boolean'], true) || (($spec['array'] ?? false) && (($spec['maxItems'] ?? 0) < 1 || $spec['maxItems'] > 100))) {
+                throw new LogicException('Domain contracts support scalar fields and explicitly bounded scalar arrays (1–100 items).');
+            }
+        }
+    }
+
+    /** @return array{class-string<DomainMutation>, array<string, mixed>} */
+    private function authorizedInput(string $name, mixed $arguments, ZeroContext $context, ?Authenticatable $user): array
     {
         $operation = substr($name, strlen('actions.'));
         $class = $this->operations[$operation] ?? null;
@@ -51,7 +110,7 @@ final class DomainRegistry
             Input::fail('name', 'Unknown domain mutation.');
         }
 
-        $input = $this->validate($class, $arguments);
+        $input = $this->validate($class::input(), $arguments);
         $requestClass = $class::request();
         $request = FormRequest::createFrom(resolve('request'), new $requestClass);
         $request->setContainer(app())->setRedirector(resolve('redirect'));
@@ -62,23 +121,19 @@ final class DomainRegistry
         $request->attributes->set(ZeroContext::class, $context);
         $request->validateResolved();
         // FormRequest normalization must still obey the published wire contract.
-        $input = $this->validate($class, $request->validated());
-        $action = resolve($class);
-        if (! $action instanceof DomainMutation) {
-            throw new LogicException('Invalid domain action binding.');
-        }
+        $input = $this->validate($class::input(), $request->validated());
 
-        $action->handle($input, $context);
+        return [$class, $input];
     }
 
-    /** @param class-string<DomainMutation> $class
+    /** @param array<string, array{type: 'string'|'number'|'boolean', optional?: bool, nullable?: bool, array?: bool, maxItems?: int}> $fields
      * @return array<string, mixed>
      */
-    private function validate(string $class, mixed $arguments): array
+    private function validate(array $fields, mixed $arguments): array
     {
         $input = Input::object($arguments, 'input');
-        Input::keys($input, array_keys($class::input()), 'input');
-        foreach ($class::input() as $field => $spec) {
+        Input::keys($input, array_keys($fields), 'input');
+        foreach ($fields as $field => $spec) {
             if (! array_key_exists($field, $input)) {
                 if ($spec['optional'] ?? false) {
                     continue;

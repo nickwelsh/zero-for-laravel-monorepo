@@ -334,13 +334,22 @@ final class ModelRegistry
         }
 
         $writable = array_values(array_intersect(array_diff($this->fillable($model), array_filter(array_merge([$model->getKeyName(), $created, $updated, $deleted], array_keys($fills)))), array_keys($columns)));
-        $filterDefinitions = array_values($definition->filters);
-        foreach ($definition->filters as $filter) {
-            foreach ($filter['members'] ?? [] as $member) {
-                $filterDefinitions[] = $member;
+        $filterDefinitions = [];
+        $pendingFilters = array_values($definition->filters);
+        while ($pendingFilters !== []) {
+            $filter = \ZeroForLaravel\Support\Input::object(array_pop($pendingFilters), 'filter');
+            $filterDefinitions[] = $filter;
+            $members = $filter['members'] ?? [];
+            $conditions = $filter['conditions'] ?? [];
+            if (! is_array($members) || ! is_array($conditions)) {
+                throw new LogicException('Invalid filter members.');
             }
 
-            if ($filter['kind'] === 'callback' && $filter['field'] !== '') {
+            foreach ([...$members, ...array_values($conditions)] as $member) {
+                $pendingFilters[] = \ZeroForLaravel\Support\Input::object($member, 'filter');
+            }
+
+            if ($filter['kind'] === 'callback' && is_string($filter['field']) && $filter['field'] !== '') {
                 $this->requireColumn($columns, $name, $filter['field']);
             }
         }
@@ -350,13 +359,13 @@ final class ModelRegistry
                 throw new LogicException('Invalid filter definition.');
             }
 
-            if (in_array($filter['kind'], ['exact', 'partial', 'beginsWith', 'endsWith', 'operator'], true)) {
+            if (in_array($filter['kind'], ['exact', 'partial', 'beginsWith', 'endsWith', 'operator', 'in', 'pattern'], true)) {
                 $this->requireColumn($columns, $name, $filter['field']);
                 if ($columns[$filter['field']]['type'] === 'json') {
                     throw new LogicException("{$name}: JSON filters are not supported by Zero.");
                 }
 
-                if (in_array($filter['kind'], ['partial', 'beginsWith', 'endsWith'], true) && $columns[$filter['field']]['type'] !== 'string') {
+                if (in_array($filter['kind'], ['partial', 'beginsWith', 'endsWith', 'pattern'], true) && $columns[$filter['field']]['type'] !== 'string') {
                     throw new LogicException("{$name}: partial filters require a string field.");
                 }
             }

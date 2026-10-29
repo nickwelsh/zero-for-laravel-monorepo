@@ -56,6 +56,7 @@ final class ModelMetadata
     public function toArray(): array
     {
         return [
+            ...($this->definition->search instanceof \ZeroForLaravel\Search\ScoutSearch ? ['search' => $this->definition->search->metadata()] : []),
             'name' => $this->name, 'table' => $this->table, 'key' => $this->key,
             'columns' => $this->columns, 'queries' => $this->queries,
             'mutations' => $this->mutations, 'authorization' => $this->authorization,

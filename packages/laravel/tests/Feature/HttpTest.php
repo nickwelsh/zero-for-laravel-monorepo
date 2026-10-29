@@ -168,3 +168,27 @@ test('exposure reports reflect the same private column and authorization metadat
     $this->assertInstanceOf(\Illuminate\Testing\PendingCommand::class, $command);
     $command->expectsOutputToContain('Published:')->expectsOutputToContain('Owner rules:')->assertSuccessful()->run();
 });
+
+test('optional action results require authentication, reapply authorization and expose only the declared read result', function (): void {
+    /** @var HttpTestCase $this */
+    $registry = new \ZeroForLaravel\Domain\DomainRegistry(['completeTasks' => \ZeroForLaravel\Tests\Fixtures\CompleteTasks::class]);
+    app()->instance(\ZeroForLaravel\Domain\DomainRegistry::class, $registry);
+    $task = \ZeroForLaravel\Tests\Fixtures\Task::create(['user_id' => 'alice', 'title' => 'Result']);
+    $payload = ['ids' => [$task->getKey()]];
+    $this->postJson('/zero/results/completeTasks', $payload)->assertUnauthorized();
+    $alice = (new User)->setKeyType('string')->forceFill(['id' => 'alice']);
+    $this->actingAs($alice)->postJson('/zero/results/completeTasks', $payload)->assertOk()->assertExactJson($payload);
+    expect($task->fresh()?->done)->toBeFalse();
+    $bob = (new User)->setKeyType('string')->forceFill(['id' => 'bob']);
+    $this->actingAs($bob)->postJson('/zero/results/completeTasks', $payload)->assertForbidden();
+});
+
+test('result reads reject invalid input and cross-owner records', function (): void {
+    /** @var HttpTestCase $this */
+    app()->instance(\ZeroForLaravel\Domain\DomainRegistry::class, new \ZeroForLaravel\Domain\DomainRegistry(['completeTasks' => \ZeroForLaravel\Tests\Fixtures\CompleteTasks::class]));
+    $alice = (new User)->setKeyType('string')->forceFill(['id' => 'alice']);
+    $task = \ZeroForLaravel\Tests\Fixtures\Task::create(['user_id' => 'bob', 'title' => 'Private']);
+    $this->actingAs($alice)->postJson('/zero/results/completeTasks', ['ids' => [$task->getKey()]])->assertNotFound();
+    $this->postJson('/zero/results/completeTasks', ['ids' => ['invalid']])->assertUnprocessable()->assertJsonValidationErrors('ids.0');
+    $this->postJson('/zero/results/completeTasks', ['ids' => [$task->getKey()], 'user_id' => 'bob'])->assertUnprocessable();
+});

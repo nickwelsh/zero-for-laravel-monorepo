@@ -114,49 +114,52 @@ function buildQuery(
         const target = defs[relation.model];
         if (!target) fail('authorization', 'Unknown authorization model.');
         query = query.whereExists(name, (related) =>
-            buildQuery(related as DynamicQuery, defs, target, {}, ctx, false, depth + 1),
+            buildQuery(related as DynamicQuery, defs, target, {}, ctx, relation.path.length > 1, depth + 1),
         );
     }
     const filters = 'filters' in args ? (args.filters ?? {}) : {};
     const trashed = filters.trashed ?? 'without';
     if (model.timestamps.deleted && trashed !== 'with')
         query = query.where(model.timestamps.deleted as never, trashed === 'only' ? 'IS NOT' : 'IS', null as never);
-    for (const [name, value] of Object.entries(filters)) {
-        const filter = model.filters[name]!;
-        if (filter.kind === 'trashed') continue;
-        if (filter.kind === 'belongsTo') {
-            const target = defs[model.relations[filter.field]!.model]!;
-            query = query.whereExists(filter.field, (related) =>
-                buildQuery(related as DynamicQuery, defs, target, {}, ctx, false, depth + 1).where(
-                    target.key as never,
-                    value as never,
+    const predicate = (eb: any, filter: ModelContract['filters'][string], value: any): any => {
+        if (filter.kind === 'related' || filter.kind === 'belongsTo') {
+            const relation = model.relations[filter.field]!;
+            const target = defs[relation.model]!;
+            return eb.exists(filter.field, (related: any) =>
+                buildQuery(related, defs, target, {}, ctx, relation.path.length > 1, depth + 1).where(
+                    (filter.kind === 'related' ? filter.operator! : target.key) as never,
+                    value,
                 ),
             );
-        } else if (filter.kind === 'group' || filter.kind === 'callback') {
-            query = query.where((eb) => {
-                const expression = (node: FilterExpression): ReturnType<typeof eb.cmp> => {
-                    if (node.type !== 'simple')
-                        return node.type === 'or'
-                            ? eb.or(...node.conditions.map(expression))
-                            : eb.and(...node.conditions.map(expression));
-                    const operand = node.right.type === 'filterValue' ? value : node.right.value;
-                    return eb.cmp(
-                        node.left.name as never,
-                        (operand === null && node.op === '=' ? 'IS' : node.op) as never,
-                        operand as never,
-                    );
-                };
-                if (filter.kind === 'callback') return expression(filter.expression!);
-                const members = filter.members!.map((member) => {
-                    const [op, operand] = filterComparison(model, member, value, name);
-                    return eb.cmp(member.field as never, op as never, operand as never);
-                });
-                return filter.operator === 'or' ? eb.or(...members) : eb.and(...members);
-            });
-        } else {
-            const [operator, operand] = filterComparison(model, filter, value, name);
-            query = query.where(filter.field as never, operator as never, operand as never);
         }
+        if (filter.kind === 'conditions') {
+            const members = value.rules.map((rule: { field: string; value: unknown }) =>
+                predicate(eb, filter.conditions![rule.field]!, rule.value),
+            );
+            return value.match === 'all' ? eb.and(...members) : eb.or(...members);
+        }
+        if (filter.kind === 'in') return eb.cmp(filter.field, 'IN', value);
+        if (filter.kind === 'group') {
+            const members = filter.members!.map((member) => predicate(eb, member, value));
+            return filter.operator === 'or' ? eb.or(...members) : eb.and(...members);
+        }
+        if (filter.kind === 'callback') {
+            const expression = (node: FilterExpression): any => {
+                if (node.type !== 'simple')
+                    return node.type === 'or'
+                        ? eb.or(...node.conditions.map(expression))
+                        : eb.and(...node.conditions.map(expression));
+                const operand = node.right.type === 'filterValue' ? value : node.right.value;
+                return eb.cmp(node.left.name, operand === null && node.op === '=' ? 'IS' : node.op, operand as never);
+            };
+            return expression(filter.expression!);
+        }
+        const [operator, operand] = filterComparison(model, filter, value, 'filter');
+        return eb.cmp(filter.field, operator, operand);
+    };
+    for (const [name, value] of Object.entries(filters)) {
+        const filter = model.filters[name]!;
+        if (filter.kind !== 'trashed') query = query.where((eb) => predicate(eb, filter, value));
     }
     if (!junction) {
         const order = args.order ?? model.defaultOrder;
@@ -261,7 +264,7 @@ export class Selection<
                           operator: (filter.value as { operator: string }).operator,
                           value: columnValue((filter.value as { value: unknown }).value, column, filter.name, true),
                       }
-                    : column
+                    : column && !['in', 'conditions', 'related'].includes(definition.kind)
                       ? columnValue(filter.value, column, filter.name, true)
                       : (filter.value as ReadonlyJSONValue);
         }

@@ -19,6 +19,14 @@ final class ZeroController
         return response()->json($processor->process($this->body($request), $this->context($request)));
     }
 
+    public function result(Request $request, \ZeroForLaravel\Domain\DomainRegistry $registry, string $operation): JsonResponse
+    {
+        abort_unless($request->user() !== null, 401);
+        abort_if(strlen($request->getContent()) > 1048576, 413);
+
+        return response()->json($registry->resolveResult('actions.'.$operation, $this->body($request), $this->context($request), $request->user()));
+    }
+
     public function mutate(Request $request, MutationProcessor $processor): JsonResponse
     {
         return response()->json($processor->process($this->body($request), ['appID' => $request->query('appID'), 'schema' => $request->query('schema')], $this->context($request), $request->user()));

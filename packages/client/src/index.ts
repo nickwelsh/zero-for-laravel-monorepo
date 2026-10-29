@@ -1,5 +1,5 @@
 export { createZeroForLaravel } from './runtime';
-export { createDomainMutations } from './domain';
+export { createDomainMutations, DomainOperation } from './domain';
 export type { DomainField, DomainContracts, DomainInput, DomainOptimistic } from './domain';
 export type { Model } from './runtime';
 export { Selection } from './query';
@@ -30,3 +30,14 @@ export type {
 
 export { ModelSnapshot, toPlain } from './record';
 export type { ModelInstance, RelationSelection, PlainData } from './record';
+
+export { createDomainForms, nativeMutationForm, completeMutation } from './domain-form';
+
+export { MutationResultError } from './operation';
+export type {
+    MutationClient,
+    MutationFormOptions,
+    MutationForm,
+    MutationSubmissionResult,
+    FormOperation,
+} from './operation';

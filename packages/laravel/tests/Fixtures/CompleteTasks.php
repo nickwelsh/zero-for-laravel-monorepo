@@ -41,6 +41,24 @@ class CompleteTasks extends DomainMutation
         return CompleteTasksRequest::class;
     }
 
+    public static function output(): array
+    {
+        return ['ids' => ['type' => 'string', 'array' => true, 'maxItems' => 3]];
+    }
+
+    public function result(array $input, ZeroContext $context): array
+    {
+        $ids = $input['ids'];
+        if (! is_array($ids)) {
+            throw new LogicException('Expected validated IDs.');
+        }
+
+        $tasks = Task::whereIn('id', $ids)->where('user_id', $context->get('user_id'))->get();
+        abort_unless($tasks->count() === count($ids), 404);
+
+        return ['ids' => $tasks->modelKeys()];
+    }
+
     public function handle(array $input, ZeroContext $context): void
     {
         $ids = $input['ids'];

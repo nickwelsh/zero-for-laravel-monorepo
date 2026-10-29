@@ -176,3 +176,22 @@ it('preserves an expanded live window across a sort-only transition', () => {
     expect(result.current.status).toBe('refreshing');
     expect(result.current.data.map((row) => row.data.id)).toEqual(['a', 'b', 'c', 'd']);
 });
+
+it('retains the native request when a consumer recreates an identical bounded selection', () => {
+    const runtime = createZeroForLaravel(schema, {
+        ...definitions,
+        Task: {
+            ...definitions.Task,
+            filters: { ...definitions.Task.filters, ids: { kind: 'in', field: 'id', maxItems: 10 } },
+        },
+    } as const);
+    const args = { filters: { ids: ['a', 'b'] }, limit: 2 };
+    put(args, rows);
+    const { result, rerender } = renderHook(() =>
+        useData(runtime.models.Task.query.all().filter('ids', ['a', 'b']).limit(2)),
+    );
+    expect(result.current.status).toBe('success');
+    for (let index = 0; index < 4; index++) rerender();
+    expect(result.current.data.map((row) => row.data.id)).toEqual(['a', 'b']);
+    expect(result.current.complete).toBe(true);
+});

@@ -38,6 +38,10 @@ export type FilterExpression =
     | { readonly type: 'and' | 'or'; readonly conditions: readonly FilterExpression[] };
 export interface FilterDefinition {
     readonly kind:
+        | 'pattern'
+        | 'in'
+        | 'related'
+        | 'conditions'
         | 'exact'
         | 'partial'
         | 'beginsWith'
@@ -48,12 +52,24 @@ export interface FilterDefinition {
         | 'group'
         | 'callback';
     readonly field: string;
-    readonly operator?: ComparisonOperator | 'dynamic' | 'or' | 'and';
+    readonly operator?: string;
+    readonly prefix?: string;
+    readonly suffix?: string;
+    readonly maxItems?: number;
+    readonly conditions?: Readonly<Record<string, FilterDefinition>>;
     readonly members?: readonly FilterDefinition[];
     readonly expression?: FilterExpression;
 }
 
 export interface ModelContract {
+    readonly search?: {
+        readonly index: string;
+        readonly key: string;
+        readonly queryBy: string;
+        readonly fields: Readonly<Record<string, string>>;
+        readonly facets: readonly string[];
+        readonly sorts: readonly string[];
+    };
     readonly name: string;
     readonly table: string;
     readonly key: string;
@@ -128,7 +144,33 @@ export type RecordId<D extends ContractMap, N extends keyof D> = ColumnValue<
     (string | number);
 export type ComparisonOperator = '=' | '!=' | '<' | '<=' | '>' | '>=';
 export type FilterName<D extends ContractMap, N extends keyof D> = keyof D[N]['filters'] & string;
+type DefinitionValue<D extends ContractMap, N extends keyof D, T extends FilterDefinition> = T['kind'] extends 'in'
+    ? readonly ColumnValue<D[N]['columns'][T['field'] & keyof D[N]['columns']]>[]
+    : T extends {
+            readonly kind: 'conditions';
+            readonly conditions: infer C extends Readonly<Record<string, FilterDefinition>>;
+        }
+      ? {
+            readonly match: 'all' | 'any';
+            readonly rules: readonly {
+                [K in keyof C]: { readonly field: K; readonly value: DefinitionValue<D, N, C[K]> };
+            }[keyof C][];
+        }
+      : T['kind'] extends 'related'
+        ? ColumnValue<
+              D[RelatedName<D, N, T['field'] & keyof D[N]['relations'] & string>]['columns'][T['operator'] &
+                  keyof D[RelatedName<D, N, T['field'] & keyof D[N]['relations'] & string>]['columns']]
+          >
+        : T['field'] extends keyof D[N]['columns']
+          ? ColumnValue<D[N]['columns'][T['field']]>
+          : never;
 export type FilterValue<D extends ContractMap, N extends keyof D, F extends FilterName<D, N>> =
+    F extends FilterName<D, N>
+        ? D[N]['filters'][F]['kind'] extends 'in' | 'conditions' | 'related'
+            ? DefinitionValue<D, N, D[N]['filters'][F]>
+            : FilterScalar<D, N, F>
+        : never;
+type FilterScalar<D extends ContractMap, N extends keyof D, F extends FilterName<D, N>> =
     F extends FilterName<D, N>
         ? D[N]['filters'][F] extends { readonly kind: 'callback'; readonly field: '' }
             ? boolean

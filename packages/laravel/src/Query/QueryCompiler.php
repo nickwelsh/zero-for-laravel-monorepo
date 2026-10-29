@@ -89,20 +89,8 @@ final readonly class QueryCompiler
                 continue;
             }
 
-            $field = $filter['field'];
-            if ($filter['kind'] === 'belongsTo') {
-                $relation = $model->relations[$field];
-                $target = $this->registry->get($relation['model']);
-                Input::value($value, $target->columns[$target->key], "filters.{$name}");
-                $subquery = $this->related($model, $field, [], $context, $depth + 1, true);
-                $subquery['subquery']['where'] = $this->conjunction(array_merge(
-                    isset($subquery['subquery']['where']) ? [$subquery['subquery']['where']] : [],
-                    [$this->comparison($target->key, '=', $value)],
-                ));
-                $conditions[] = ['type' => 'correlatedSubquery', 'related' => $subquery, 'op' => 'EXISTS'];
-            } else {
-                $conditions[] = $this->filterCondition($model, $filter, $value, "filters.{$name}");
-            }
+            $conditions[] = $this->filterCondition($model, $filter, $value, "filters.{$name}", $context, $depth);
+
         }
 
         $ast = ['table' => $model->table];
@@ -131,8 +119,60 @@ final readonly class QueryCompiler
     /** @param array<string, mixed> $filter
      * @return Condition
      */
-    private function filterCondition(ModelMetadata $model, array $filter, mixed $value, string $name): array
+    private function filterCondition(ModelMetadata $model, array $filter, mixed $value, string $name, ZeroContext $context, int $depth): array
     {
+        if (! is_string($filter['field'])) {
+            throw new LogicException('Invalid filter field.');
+        }
+
+        if ($filter['kind'] === 'in') {
+            if (! is_array($value) || ! array_is_list($value) || count($value) > $filter['maxItems']) {
+                Input::fail($name, 'Expected a bounded scalar list.');
+            }
+
+            foreach ($value as $item) {
+                Input::value($item, $model->columns[$filter['field']], $name);
+            }
+
+            return $this->comparison($filter['field'], 'IN', $value);
+        }
+
+        if ($filter['kind'] === 'conditions') {
+            $input = Input::object($value, $name);
+            Input::keys($input, ['match', 'rules'], $name);
+            if (! in_array($input['match'] ?? null, ['all', 'any'], true) || ! is_array($input['rules'] ?? null) || ! array_is_list($input['rules']) || count($input['rules']) < 1 || count($input['rules']) > $filter['maxItems']) {
+                Input::fail($name, 'Expected a bounded all/any condition group.');
+            }
+
+            $children = [];
+            $allowed = Input::object($filter['conditions'], $name);
+            foreach ($input['rules'] as $rule) {
+                $rule = Input::object($rule, $name);
+                Input::keys($rule, ['field', 'value'], $name);
+                if (! is_string($rule['field'] ?? null) || ! isset($allowed[$rule['field']]) || ! array_key_exists('value', $rule)) {
+                    Input::fail($name, 'Unknown condition filter.');
+                }
+
+                $children[] = $this->filterCondition($model, Input::object($allowed[$rule['field']], $name), $rule['value'], $name, $context, $depth);
+            }
+
+            return ['type' => $input['match'] === 'all' ? 'and' : 'or', 'conditions' => $children];
+        }
+
+        if (in_array($filter['kind'], ['related', 'belongsTo'], true)) {
+            $relation = $model->relations[$filter['field']];
+            $target = $this->registry->get($relation['model']);
+            $field = $filter['kind'] === 'related' ? $filter['operator'] : $target->key;
+            if (! is_string($field) || ! isset($target->columns[$field]) || $target->columns[$field]['type'] === 'json') {
+                throw new LogicException('Related filters require an exposed scalar column.');
+            }
+
+            Input::value($value, $target->columns[$field], $name);
+            $related = $this->related($model, $filter['field'], [], $context, $depth + 1, true, fn (ZQLBuilder $query): ZQLBuilder => $query->where($field, $value));
+
+            return ['type' => 'correlatedSubquery', 'related' => $related, 'op' => 'EXISTS'];
+        }
+
         if ($filter['kind'] === 'group') {
             $members = $filter['members'];
             if (! is_array($members)) {
@@ -141,7 +181,7 @@ final readonly class QueryCompiler
 
             $conditions = [];
             foreach ($members as $member) {
-                $conditions[] = $this->filterCondition($model, Input::object($member, $name), $value, $name);
+                $conditions[] = $this->filterCondition($model, Input::object($member, $name), $value, $name, $context, $depth);
             }
 
             return ['type' => $filter['operator'], 'conditions' => $conditions];
@@ -154,9 +194,6 @@ final readonly class QueryCompiler
                 }
             } else {
                 $field = $filter['field'];
-                if (! is_string($field)) {
-                    throw new LogicException('Invalid callback field.');
-                }
 
                 Input::value($value, $model->columns[$field], $name);
             }
@@ -166,7 +203,7 @@ final readonly class QueryCompiler
 
         $field = $filter['field'];
         $operator = $filter['operator'] ?? '=';
-        if (! is_string($field) || ! is_string($operator)) {
+        if (! is_string($operator)) {
             throw new LogicException('Invalid scalar filter.');
         }
 
@@ -182,12 +219,18 @@ final readonly class QueryCompiler
         }
 
         Input::value($value, $model->columns[$field], $name);
-        if (in_array($filter['kind'], ['partial', 'beginsWith', 'endsWith'], true)) {
+        if (in_array($filter['kind'], ['partial', 'beginsWith', 'endsWith', 'pattern'], true)) {
             if (! is_string($value)) {
                 Input::fail($name, 'Expected a string.');
             }
 
-            $value = ($filter['kind'] === 'beginsWith' ? '' : '%').strtr($value, ['\\' => '\\\\', '%' => '\\%', '_' => '\\_']).($filter['kind'] === 'endsWith' ? '' : '%');
+            if ($filter['kind'] === 'pattern' && (! is_string($filter['prefix']) || ! is_string($filter['suffix']))) {
+                throw new LogicException('Invalid filter pattern.');
+            }
+
+            $prefix = $filter['kind'] === 'pattern' ? $filter['prefix'] : ($filter['kind'] === 'beginsWith' ? '' : '%');
+            $suffix = $filter['kind'] === 'pattern' ? $filter['suffix'] : ($filter['kind'] === 'endsWith' ? '' : '%');
+            $value = $prefix.strtr($value, ['\\' => '\\\\', '%' => '\\%', '_' => '\\_']).$suffix;
             $operator = 'ILIKE';
         } elseif ($value === null) {
             if (! in_array($operator, ['=', '!='], true)) {
@@ -259,14 +302,20 @@ final readonly class QueryCompiler
 
         $ast['alias'] = $predicate ? 'zsubq_'.$name : $name;
         if (count($path) > 1) {
-            // Zero cannot apply an explicit ordering through a junction include.
+            // Zero cannot apply ordering through a junction relationship.
             unset($ast['orderBy']);
+            if ($predicate) {
+                $ast['alias'] = 'zsubq_zhidden_'.$name;
+            }
+
             $inner = ['correlation' => ['parentField' => $path[1]['source'], 'childField' => $path[1]['dest']], 'subquery' => $ast, 'system' => 'client'];
-            $ast = ['table' => $path[0]['table'], 'alias' => $name, 'related' => [$inner]];
+            $ast = $predicate
+                ? ['table' => $path[0]['table'], 'alias' => 'zsubq_'.$name, 'where' => ['type' => 'correlatedSubquery', 'related' => $inner, 'op' => 'EXISTS']]
+                : ['table' => $path[0]['table'], 'alias' => $name, 'related' => [$inner]];
         }
 
         $result = ['correlation' => ['parentField' => $path[0]['source'], 'childField' => $path[0]['dest']], 'subquery' => $ast, 'system' => 'client'];
-        if (count($path) > 1) {
+        if (count($path) > 1 && ! $predicate) {
             $result['hidden'] = true;
         }
 

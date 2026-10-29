@@ -234,9 +234,9 @@ function plainProjection() {
 const domain = createDomainMutations(schema, createZeroForLaravel(schema, definitions).mutators, {
     completeTasks: { ids: { type: 'string', array: true, maxItems: 3 }, notify: { type: 'boolean', optional: true } },
 } as const);
-domain.actions.completeTasks({ ids: ['id'], notify: false });
+domain.actions.completeTasks().prepare({ ids: ['id'], notify: false });
 // @ts-expect-error domain inputs are generated and typed
-domain.actions.completeTasks({ ids: [123] });
+domain.actions.completeTasks().prepare({ ids: [123] });
 // @ts-expect-error unknown operation
 domain.actions.unregistered({});
 

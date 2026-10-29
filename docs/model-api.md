@@ -330,3 +330,73 @@ using primary-key references. Each graph is limited to eight relation levels and
 100 records, including the root; the same record cannot appear twice. Connect,
 disconnect, reparenting, nested deletion, many-to-many, and polymorphic writes are
 not supported.
+
+## Optional Scout and InstantSearch integration
+
+Scout remains responsible for indexing. A model can opt into generated public search metadata with
+`ZeroDefinition::make()->search(ScoutSearch::for(SearchDocument::class))`.
+The integration reads the effective Typesense collection schema (the model override takes precedence)
+and Scout's `search-parameters.query_by`. Facets default to eligible schema facets; `facets(...)`,
+`filters(...)` and `sorts(...)` narrow the public controls. `key` on `ScoutSearch::for` identifies the
+search document field containing the canonical Zero model ID. Credentials and scope closures never
+appear in generated definitions.
+
+`ScoutSearchProvider` from `@nickwelsh/zero-for-laravel/react/search` uses the official Typesense
+InstantSearch adapter and accepts a generated model's `search` metadata and an authenticated
+`multi_search` endpoint. Ordinary InstantSearch hooks and widgets can consume the same provider.
+`useScoutHits` returns identifiers, engine counts, pagination, response scope, and search status.
+Use an approved generated selection such as `.filter('ids', hits.ids)` to hydrate records; use
+`rankSearchRows` to retain engine order and omit missing or unauthorized rows after Zero completes.
+Search counts describe the index, rather than the number of hydrated records.
+
+Register `ScoutSearchController` behind session authentication and rate limiting. Each transported
+model requires an explicit `scope(fn (ZeroContext $context): string => ...)` Typesense filter.
+The transport validates bounded expressions and approved fields, facets and sorts, enforces its
+scope, and projects hits to the hydration key with empty highlights. It does not translate arbitrary
+Eloquent authorization into search predicates. A custom browser search client may instead use a
+properly scoped search-only key; its key must enforce projection and protect facet/count metadata.
+
+The optional `createSearchGrammar` helper derives field operators and suggestions from metadata.
+Applications declare product aliases, fixed values such as `is:starred`, and date vocabulary.
+Plain text remains the engine query; structured terms compile to Typesense filters.
+
+## Bounded composable filters
+
+`AllowedFilter::in('ids', 'id', max: 1000)` declares bounded scalar sets, including an empty set.
+`AllowedFilter::related('label', 'labels', 'name')` declares a scalar comparison inside an authorized
+relationship. `AllowedFilter::conditions('rules', [...], max: 10)` accepts a bounded
+`{match: 'all' | 'any', rules: [{field, value}]}` group containing only named approved filters.
+Existing scalar groups can be members. `AllowedFilter::pattern` adds a trusted prefix/suffix around
+an escaped string input for portable patterns. Client types and PHP compilation share these semantics;
+server scopes and related-model authorization always remain authoritative.
+
+## Shared operation execution and forms
+
+Model CRUD (`Post.create()`, `post.update()`) and named actions (`actions.save()`) expose
+`.prepare(input)`, `.execute(zero, input, {signal})`, `.form.definition`, and
+`.createForm(zero, options)`. Native Zero owns durable mutation submission and replay.
+`execute` waits for authoritative server acceptance; CRUD returns `{id}` from the prepared request.
+Named operations generate their form metadata from the wire contract and portable FormRequest rules.
+
+`createForm` produces a FormBraid descriptor. Options include `bind` for fixed hidden input,
+`only` to choose fields, `defaultValues`, and presentation overrides in `fields`. Bound input wins
+over submitted values. Generated constraints and server rules are retained. Cancelling a form stops
+observation; an already submitted native mutation remains durable. Successful results carry
+`value: {resolved: true, data}` with typed data, allowing the application's action lifecycle to own navigation,
+toasts, and other success effects.
+
+A named action can optionally declare `output()` with the same bounded scalar field syntax as
+`input()` and implement the read-only `result($input, ZeroContext $context)` resolver. The generated
+operation resolves this result after native acceptance through authenticated `POST /zero/results/{operation}`
+(with the configured route prefix). The endpoint reapplies input validation and FormRequest authorization;
+the resolver must apply the same trusted owner/tenant scope as the write. It returns only the declared
+output shape. For example, a URL-deduplicating save can normalize the original input on the server and
+resolve its canonical record ID. No result is exposed by default, and the read never reruns `handle()`.
+The browser uses the same-origin session and Laravel's XSRF cookie; applications using a different auth
+transport can call `prepare` and integrate their own result read.
+
+The resolver is a subsequent authorized read, not a snapshot of the original transaction. It must be
+safe to repeat; concurrent changes or deletion can make a result unavailable. If a committed operation's
+result read fails, `execute` throws `MutationResultError` with `committed: true`; its form reports success
+with `value: {resolved: false, error}`. Retry `resolveResult(input)`, rather than repeating the write.
+`completeMutation` and `nativeMutationForm` remain low-level bridges for custom native mutators.

@@ -141,18 +141,7 @@ function validateRefinement(
     keys(filters, Object.keys(model.filters), 'filters');
     for (const [name, value] of Object.entries(filters)) {
         const filter = model.filters[name]!;
-        if (['partial', 'beginsWith', 'endsWith'].includes(filter.kind) && typeof value !== 'string')
-            fail(name, 'Expected a string.');
-        if (filter.kind === 'trashed') {
-            if (!['without', 'with', 'only'].includes(value as string)) fail(name, 'Invalid trashed filter.');
-        } else if (filter.kind === 'belongsTo') {
-            const target = defs[model.relations[filter.field]!.model]!;
-            columnValue(value, target.columns[target.key]!, name);
-        } else if (filter.kind === 'group') {
-            for (const member of filter.members ?? []) filterComparison(model, member, value, name);
-        } else if (filter.kind === 'callback' && filter.field === '') {
-            if (typeof value !== 'boolean') fail(name, 'Expected a boolean.');
-        } else filterComparison(model, filter, value, name);
+        validateFilter(defs, model, filter, value, name);
     }
     const includes = object(args.include ?? {}, 'include');
     keys(includes, model.includes, 'include');
@@ -176,7 +165,15 @@ export function freeze<T>(value: T): T {
 }
 
 export function validateRules(model: ModelContract, operation: Operation, data: Record<string, unknown>): void {
-    for (const [field, rules] of Object.entries(model.validation[operation] ?? {})) {
+    validateFormRules(model.validation[operation] ?? {}, model.columns, data);
+}
+
+export function validateFormRules(
+    rulesByField: Readonly<Record<string, readonly string[]>>,
+    columns: Readonly<Record<string, Column>>,
+    data: Record<string, unknown>,
+): void {
+    for (const [field, rules] of Object.entries(rulesByField)) {
         const value = data[field];
         if (value === undefined && rules.includes('sometimes')) continue;
         const empty =
@@ -189,8 +186,7 @@ export function validateRules(model: ModelContract, operation: Operation, data: 
         for (const rule of rules) {
             const [kind, ...parameters] = rule.split(':');
             const parameter = parameters.join(':');
-            const numeric =
-                model.columns[field]?.type === 'number' || rules.includes('numeric') || rules.includes('integer');
+            const numeric = columns[field]?.type === 'number' || rules.includes('numeric') || rules.includes('integer');
             const size = numeric
                 ? Number(value)
                 : typeof value === 'string'
@@ -246,12 +242,12 @@ export function filterComparison(
         value = expression.value;
     }
     const wire = columnValue(value, model.columns[filter.field]!, name);
-    if (['partial', 'beginsWith', 'endsWith'].includes(filter.kind)) {
+    if (['partial', 'beginsWith', 'endsWith', 'pattern'].includes(filter.kind)) {
         if (typeof wire !== 'string') fail(name, 'Expected a string.');
         const escaped = wire.replace(/[\\%_]/g, '\\$&');
         return [
             'ILIKE',
-            `${filter.kind === 'beginsWith' ? '' : '%'}${escaped}${filter.kind === 'endsWith' ? '' : '%'}`,
+            `${filter.kind === 'pattern' ? (filter.prefix ?? '') : filter.kind === 'beginsWith' ? '' : '%'}${escaped}${filter.kind === 'pattern' ? (filter.suffix ?? '') : filter.kind === 'endsWith' ? '' : '%'}`,
         ];
     }
     if (wire === null) {
@@ -288,4 +284,47 @@ export function decodeColumn(value: unknown, column: Column, field: string): unk
         }
     }
     return structuredClone(value);
+}
+
+export function validateFilter(
+    defs: ContractMap,
+    model: ModelContract,
+    filter: ModelContract['filters'][string],
+    value: unknown,
+    name: string,
+): void {
+    if (filter.kind === 'in') {
+        if (!Array.isArray(value) || value.length > filter.maxItems!) fail(name, 'Expected a bounded scalar list.');
+        for (const item of value) columnValue(item, model.columns[filter.field]!, name);
+    } else if (filter.kind === 'conditions') {
+        const input = object(value, name);
+        keys(input, ['match', 'rules'], name);
+        if (
+            !['all', 'any'].includes(input.match as string) ||
+            !Array.isArray(input.rules) ||
+            input.rules.length < 1 ||
+            input.rules.length > filter.maxItems!
+        )
+            fail(name, 'Expected a bounded all/any condition group.');
+        for (const item of input.rules as unknown[]) {
+            const rule = object(item, name);
+            keys(rule, ['field', 'value'], name);
+            if (
+                typeof rule.field !== 'string' ||
+                !Object.hasOwn(filter.conditions!, rule.field) ||
+                !Object.hasOwn(rule, 'value')
+            )
+                fail(name, 'Unknown condition filter.');
+            validateFilter(defs, model, filter.conditions![rule.field]!, rule.value, name);
+        }
+    } else if (filter.kind === 'related' || filter.kind === 'belongsTo') {
+        const target = defs[model.relations[filter.field]!.model]!;
+        columnValue(value, target.columns[filter.kind === 'related' ? filter.operator! : target.key]!, name);
+    } else if (filter.kind === 'trashed') {
+        if (!['without', 'with', 'only'].includes(value as string)) fail(name, 'Invalid trashed filter.');
+    } else if (filter.kind === 'group') {
+        for (const member of filter.members ?? []) validateFilter(defs, model, member, value, name);
+    } else if (filter.kind === 'callback' && filter.field === '') {
+        if (typeof value !== 'boolean') fail(name, 'Expected a boolean.');
+    } else filterComparison(model, filter, value, name);
 }

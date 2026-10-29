@@ -81,3 +81,64 @@ it('compiles mandatory runtime scope boolean algebra to native ZQL', async () =>
         expect(native.queries[0]).toEqual({ id: 'q', name: 'Task.all', ast: php });
     else throw new Error('Expected a native query response.');
 });
+
+for (const scenario of ['filter', 'conditions', 'scope'] as const) {
+    it(`compiles a junction ${scenario} predicate to native ZQL`, async () => {
+        const args =
+            scenario === 'filter'
+                ? { filters: { tag: 'owned' } }
+                : scenario === 'conditions'
+                  ? {
+                        filters: {
+                            rules: {
+                                match: 'any',
+                                rules: [
+                                    { field: 'tag', value: 'Reading' },
+                                    { field: 'tag', value: 'Other' },
+                                ],
+                            },
+                        },
+                    }
+                  : {};
+        const native = await handleQueryRequest({
+            schema,
+            body: ['transform', [{ id: 'q', name: 'Task.all', args: [args] }]],
+            query: {},
+            userID: 'alice',
+            handler: () => {
+                let query = createBuilder(schema).tasks.where('user_id', 'alice');
+                if (scenario !== 'scope') query = query.where('deleted_at', 'IS', null);
+                if (scenario === 'filter') {
+                    query = query.whereExists('tags', (tags) => tags.where('user_id', 'alice').where('id', 'owned'));
+                } else if (scenario === 'conditions') {
+                    query = query.where((eb) =>
+                        eb.or(
+                            eb.exists('tags', (tags) => tags.where('user_id', 'alice').where('name', 'Reading')),
+                            eb.exists('tags', (tags) => tags.where('user_id', 'alice').where('name', 'Other')),
+                        ),
+                    );
+                } else {
+                    query = query
+                        .whereExists('tags', (tags) => tags.where('user_id', 'alice'))
+                        .where('deleted_at', 'IS', null);
+                }
+                return query.orderBy('created_at', 'desc').orderBy('id', 'asc').limit(50);
+            },
+        });
+        const php = JSON.parse(
+            execFileSync(
+                'php',
+                [
+                    'tests/interop/export.php',
+                    'Task.all',
+                    JSON.stringify(args),
+                    scenario === 'scope' ? 'junction-scope' : 'junction',
+                ],
+                { encoding: 'utf8' },
+            ),
+        );
+        if ('kind' in native && native.kind === 'QueryResponse')
+            expect(native.queries[0]).toEqual({ id: 'q', name: 'Task.all', ast: php });
+        else throw new Error('Expected a native query response.');
+    });
+}
