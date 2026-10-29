@@ -13,5 +13,7 @@ node_modules/
 **/.cache/
 /.pnpm-store/
 
+/.amp/portals/*
+
 **/.docs-base/
 **/.cloudflare/

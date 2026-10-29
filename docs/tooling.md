@@ -153,6 +153,31 @@ Frontend reports go to `coverage/client`; PHP reports go to
 measuring the full suite. CI saves both reports. There is no artificial 100%
 coverage or type-coverage gate; behavior tests and level-10 analysis are required.
 
+## Amp orbs
+
+The executable `.agents/setup` installs PHP 8.5 and its extensions, Composer,
+the pinned pnpm version, both Composer projects (including development tools),
+and the locked pnpm workspace. It keeps a compatible preinstalled Node runtime
+or installs Node 24. It also generates the example's ignored Wayfinder imports
+and builds the client package so workspace exports resolve immediately.
+Amp snapshots these dependencies; warm setup checks the lockfiles without
+redownloading unchanged packages. Setup can be rerun from the repository root.
+
+PostgreSQL runs under systemd, with logical replication enabled and durability
+disabled for disposable orb data. Only loopback connections as the `postgres`
+test role use passwordless authentication. Repository-scoped login shells default
+`ZERO_TEST_PG_DATABASE` to `laravel_zero_test`, `ZERO_TEST_PG_HOST` to `127.0.0.1`,
+and `ZERO_TEST_PG_USER` to `postgres`, enabling the PostgreSQL tests in `pnpm check`.
+Existing environment overrides are preserved. `.agents/resume` checks database
+readiness and starts a stopped cluster; it never installs dependencies.
+
+Setup copies the todos environment template only when `.env` is absent. It does
+not migrate or seed the example, generate shared application secrets, authenticate
+deployment tools, or start web servers. Configure the example's database, app key,
+cache key, and public URLs per thread before running it. Use supervised orb
+services and portals rather than the template's developer-specific Herd URLs.
+Do not use the orb PostgreSQL configuration for production or durable data.
+
 ## Adaptations from the application configs
 
 - **Vite+ replaces direct Vitest, Prettier and tsup tooling.** `vp pack` builds the
