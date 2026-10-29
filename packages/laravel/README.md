@@ -2,7 +2,7 @@
 
 Laravel-owned model contracts, queries and automatic CRUD for Rocicorp Zero.
 
-Install the current stable release, **v0.3.0**, in your Laravel application:
+Install the current stable release, **v0.4.0**, in your Laravel application:
 
 ```sh
 composer require nickwelsh/zero-for-laravel

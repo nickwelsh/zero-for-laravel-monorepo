@@ -1,5 +1,31 @@
 # Changelog
 
+## [0.4.0] - 2026-10-28
+
+- Add optional Scout/Typesense search metadata, explicitly scoped authenticated
+  search transport, InstantSearch React bindings, and metadata-driven search syntax
+  and completion. Hydrate search identifiers through authorized Zero queries;
+  search counts describe the index, not the hydrated records.
+- Add bounded scalar-set and relationship filters, nested all/any condition groups,
+  and escaped portable patterns with matching PHP and client semantics.
+- Share execution and FormBraid form creation across model CRUD and named actions,
+  including bound inputs, field selection, defaults, and authoritative validation.
+- Add optional typed domain-operation results through a subsequent authenticated
+  read. Failed result reads distinguish committed writes and can be retried without
+  repeating the mutation.
+- Prepare cached Amp orb toolchains, dependencies, and disposable PostgreSQL;
+  exclude PHPStan 2.3.4 to keep fresh CI dependency resolution compatible with Rector.
+
+### v0.4.0 adoption
+
+Use matching PHP and JavaScript **v0.4.0** packages with Zero **1.10.0**, then
+regenerate contracts. PHP 8.3+, Laravel 12/13, and React 18/19 support are unchanged.
+Search is opt-in: install/configure Scout and Typesense and the optional browser
+integration peers only when using search. Explicit trusted search scopes remain
+required; index hits never replace Zero authorization. Operation result reads must
+reapply owner/tenant scope and are not snapshots of the original write transaction.
+No package-owned database migration is required. See [model API details](docs/model-api.md).
+
 ## [0.3.0] - 2026-10-26
 
 - Accept transform batches beyond 100 queries (257 valid queries covered), while
@@ -37,4 +63,5 @@ Full database decommission is intentionally outside `zero:reset`; external effec
 remain application-owned and should use after-commit jobs or an outbox. Cache root
 health and publication synchronization do not establish completed backfill.
 
+[0.4.0]: https://github.com/nickwelsh/zero-for-laravel-monorepo/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/nickwelsh/zero-for-laravel-monorepo/compare/v0.2.1...v0.3.0
