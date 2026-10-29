@@ -19,6 +19,9 @@
         "rector/rector": "^2.4",
         "typesense/typesense-php": "^6.0"
     },
+    "conflict": {
+        "phpstan/phpstan": "2.3.4"
+    },
     "autoload": {
         "psr-4": {
             "ZeroForLaravel\\": "src/"

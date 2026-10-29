@@ -75,6 +75,12 @@ dependencies still pin vulnerable releases. Remove each override once its owner
 adopts a fixed version. These overrides protect this workspace; npm consumers
 manage their own Zero peer dependency and its transitive dependencies.
 
+The library's Composer manifest excludes PHPStan 2.3.4: with Rector 2.8.2,
+its PHPDoc parser passes a `FullyQualifiedNameNode` to a constructor expecting
+`IdentifierTypeNode`, crashing `rector:check`. PHPStan 2.3.3 passes the same check.
+This exact-version conflict also applies to CI's fresh Composer updates; remove
+it after verifying a compatible upstream release.
+
 Run `pnpm audit` and `composer audit` in both Composer directories when reviewing
 updates. The npm audit also reports GHSA-vfj7-8cjw-p6xm in `braces` 3.0.3, which
 has no published fix and no upstream fix planned. It affects deeply nested glob
