@@ -1,153 +1,33 @@
 ---
-title: Nested mutations
-description: Create and update related records atomically with explicit per-edge permissions.
+title: Related writes
+description: Create related records in one checked controller mutation.
 ---
 
-Declare which child operations are allowed under each parent operation:
+Write related operations in the controller or a checked shared helper. The old
+`Model.create().with(...)` browser API is replaced by controller action bindings.
 
 ```php
-use ZeroForLaravel\Definition\NestedMutation;
-
-return ZeroDefinition::make()
-    // Existing visibility, context fills, and FormRequest declarations go here.
-    ->allowedNestedMutations('create',
-        NestedMutation::create('person'),
-    )
-    ->allowedNestedMutations('update',
-        NestedMutation::create('person'),
-        NestedMutation::update('person'),
-    );
+#[ZeroMutation]
+public function store(StorePersonRequest $request): void
+{
+    $data = $request->validated();
+    $person = Person::create(['name' => $data['name']]);
+    if (isset($data['email']) && $data['email'] !== '') {
+        Email::create(['person_id' => $person->id, 'email' => $data['email']]);
+    }
+}
 ```
 
-The relation must be a registered Eloquent `belongsTo`, `hasOne`, or `hasMany`
-relation. Read includes and nested writes have separate allowlists. Every nested
-edge needs an explicit declaration; allowing `person` does not also allow its
-relations. Child models must be registered, but need no `ZeroQuery` or `ZeroMutate`
-attributes. Configure their `mutationRequests()` normally even when their
-operations are only reachable through a parent. Nested creation requires the same
-UUID/ULID key generation as standalone creation.
+Register both models and authorize the relationship in Laravel. The compiler
+allocates stable creation-site identities, so the child uses the same parent ID
+locally and authoritatively. A rejected child write rolls back the parent too.
+The caller does not submit a table-write graph or choose arbitrary model methods.
 
-## Authorization
+Explicit operations use `Mutation::create(Model::class, data: ..., key: ...)`.
+Supported bounded list loops require unique stable item keys; preparation derives
+UUID identities by item key rather than traversal position. Ambiguous identity
+allocation and unsupported loops fail generation. Repeated ULID creation is not
+part of this initial subset.
 
-By default, Laravel checks the parent policy for the root action and the child's
-own policy for its nested action. Creating a Party with a Person checks
-`PartyPolicy::create($user)` and `PersonPolicy::create($user)`. Updating checks
-each policy against its existing record. Missing or denying policies reject the
-entire mutation. Parent update authorization also applies to relation-only patches.
-
-An optional ability adds a relationship check on the parent policy:
-
-```php
-NestedMutation::create('person')->authorize('addPerson');
-// PartyPolicy::addPerson(User $user, Party $party)
-
-NestedMutation::update('person')->authorize('updatePerson');
-// PartyPolicy::updatePerson(User $user, Party $party, Person $person)
-```
-
-To explicitly let the parent's authorization grant a nested operation:
-
-```php
-NestedMutation::create('person')->authorizeUsingParent();
-NestedMutation::update('person')->authorizeUsingParent();
-```
-
-This skips the child's policy check. Its FormRequest authorization and validation
-still run. An additional `authorize()` ability, if configured, still runs too.
-Inheritance uses the immediate parent's successful authorization, so it can
-continue through explicitly declared descendants.
-
-Each FormRequest receives its own model's fields and `id`, its authenticated user,
-and `route('model')` on the HTTP endpoint. It receives no nested relation payloads.
-Access trusted nesting context through:
-
-```php
-use ZeroForLaravel\Mutation\MutationContext;
-
-$mutation = MutationContext::from($this);
-$mutation->operation; // 'create' or 'update'
-$mutation->parent;    // The immediate Eloquent parent, or null for the root.
-$mutation->relation;  // 'person', or null for the root.
-```
-
-When the child is a `belongsTo` dependency, it must be saved before the parent.
-During those child checks, a newly created parent is still unsaved; it has its
-prepared ID and trusted context fills. Policies must account for that. For
-`hasOne`/`hasMany`, the parent is already saved within the transaction. Generated
-contracts contain allowed operations, not policy implementations or decisions.
-
-## Client and forms
-
-```tsx
-import { Form } from '@/forms'; // Your createFormbraid registry.
-
-const { form } = useMutation(Party.create().with('person'));
-return <Form form={form} />;
-```
-
-`form` is a Formbraid version-1 descriptor with a generated definition and a
-submission callback. `form.definition.fields`, `form.fields`, and `form.columns` include prefixed paths such as
-`person.first_name`; collections use templates such as `people.*.first_name`.
-Formbraid renders the selected person's fields alongside the party fields and
-owns editing and submission. No separate `onSubmit` callback is needed.
-Use its `useForm(form)` for programmatic access, including concrete paths like
-`people.0.first_name`. Values are nested objects, and errors use the same
-concrete dot paths. Relation keys supplied by the executor are excluded from
-writable form fields and generated mutation input types.
-
-Collections add an `ArrayField` container with wildcard child metadata. Supply
-an application-owned array component/layout to add and render rows; Formbraid
-does not generate repeaters. A selected to-one create starts with its writable
-defaults; a selected collection starts empty. Bound nested updates hydrate the
-included records and carry their IDs in the defaults.
-
-Direct submission uses the same nested shape:
-
-```ts
-const create = useMutation(Party.create().with('person'));
-create({ name: 'Birthday', person: { first_name: 'Nick' } });
-
-const update = useMutation(party.update().with('person'));
-update({ person: { id: person.data.id, first_name: 'Updated' } });
-
-// Explicitly create a child while updating its parent:
-const add = useMutation(party.update().with('person', 'create'));
-add({ person: { first_name: 'New' } });
-
-// Configure deeper selections on the child operation:
-Party.create().with('person', 'create', (person) => person.with('addresses'));
-```
-
-`.with(name)` uses the parent's operation. An explicit second argument chooses
-another allowed child operation. One selected operation applies to all submitted
-records for that relation; creation and update are never inferred from an ID.
-Only declared combinations and model fields are accepted, in TypeScript and on
-the server. Included snapshots supply defaults for bound nested updates. Bound
-update forms submit changed fields plus fields explicitly required by each
-model's update rules, preserving child IDs.
-
-## Execution guarantees and limits
-
-One invocation is one native Zero transaction and one Laravel database
-transaction. IDs and optimistic timestamps are prepared once before enqueueing.
-`belongsTo` dependencies are saved before their parent; `hasOne`/`hasMany`
-children are saved after it. Any failure rolls back every application write.
-External side effects from model events must run after commit.
-
-Linking keys are derived from registered relationship metadata. Callers cannot
-supply them alongside nested operations, and FormRequests or model events cannot
-rewrite them. Creates receive the derived keys for validation. Existing-child
-updates verify membership without adding those unchanged keys to their request
-input. Updates lock the existing records and reject unrelated child IDs.
-
-Omitting a relation leaves it alone. An empty collection performs no child writes;
-`null` is rejected. Creating through an occupied `hasOne` or `belongsTo` relation
-is rejected instead of replacing its existing record. Keep database foreign keys
-and unique constraints for `hasOne` relationships so these invariants also hold
-for writes outside this API.
-
-Nested operations currently support create and update through direct relations
-using primary-key references. Each graph is limited to eight relation levels and
-100 records, including the root; the same record cannot appear twice. Connect,
-disconnect, reparenting, nested deletion, many-to-many, and polymorphic writes are
-not supported.
+All writes must use the configured transaction connection. Cross-database writes
+and external services are not made atomic by nesting them in a PHP callback.

@@ -5,7 +5,7 @@ packages:
 minimumReleaseAgeExclude:
   - '@formbraid/core@0.1.0'
   - '@formbraid/react@0.1.0'
-  - '@rocicorp/zero@1.10.0'
+  - '@rocicorp/zero@1.11.3'
   - '@nickwelsh/docs-base@1.0.1'
   - '@nickwelsh/refquill-darwin-arm64@0.1.0'
   - '@nickwelsh/refquill-fumadocs@0.1.0'

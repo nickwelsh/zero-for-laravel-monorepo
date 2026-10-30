@@ -8,7 +8,7 @@ use stdClass;
 use ZeroForLaravel\Definition\ZeroDefinition;
 
 /**
- * @phpstan-type Column array{type: 'string'|'number'|'boolean'|'json', nullable: bool, date: bool, enum: list<string|int>|null, hasDefault: bool, default: mixed, cast?: 'boolean'|'integer'|'float'|'string'|'array'|'object'}
+ * @phpstan-type Column array{type: 'string'|'number'|'boolean'|'json', nullable: bool, date: bool, enum: list<string|int>|null, hasDefault: bool, default: mixed, dateFormat?: string, cast?: 'boolean'|'integer'|'float'|'string'|'array'|'object'}
  */
 final class ModelMetadata
 {

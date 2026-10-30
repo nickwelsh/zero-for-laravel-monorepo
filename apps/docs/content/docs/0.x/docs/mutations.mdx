@@ -1,178 +1,79 @@
 ---
-title: Mutations and forms
-description: Authorize optimistic CRUD with policies, FormRequests, and field-aware forms.
+title: Controller mutations
+description: Compile typed controller actions into native optimistic and authoritative execution.
 ---
 
-Queries and mutations are individually opt-in. Writes require allowing Laravel
-policies or gates: `create`, `update`, `delete`, `restore`, and `forceDelete`.
-For example:
+Explicitly annotate an action on a registered Laravel route:
 
 ```php
-namespace App\Policies;
+use ZeroForLaravel\Attributes\ZeroMutation;
 
-use App\Models\{Task, User};
-
-class TaskPolicy
+/** @return array{id: string} */
+#[ZeroMutation]
+public function store(StoreTaskRequest $request): array
 {
-    public function create(User $user): bool { return true; }
-    public function update(User $user, Task $task): bool
-    {
-        return $task->user_id === $user->getAuthIdentifier();
-    }
-    public function delete(User $user, Task $task): bool { return $this->update($user, $task); }
-    public function restore(User $user, Task $task): bool { return $this->update($user, $task); }
-    public function forceDelete(User $user, Task $task): bool { return $this->update($user, $task); }
+    $task = Task::create($request->validated());
+
+    return ['id' => $task->id];
 }
 ```
 
-Use Laravel's policy discovery or explicitly register the policy with
-`Gate::policy(Task::class, TaskPolicy::class)`. Validate foreign keys and the user's
-permission to associate those records in your FormRequest; read visibility alone
-does not authorize writing relationship IDs.
+The FormRequest retains preparation, authorization, rules, and validation hooks.
+Annotated actions are native-only: ordinary HTTP requests to their route return
+405 instead of bypassing stable preparation or invoking a second write path.
+Real route middleware and binding run at the authoritative boundary. Call Gates
+and policies explicitly in the action or its request; an attribute is not a grant
+of permission. Reload and lock state-dependent bound records with
+`$mutation->reloadForUpdate($task)` before reauthorization and writes.
 
-Map FormRequests in the definition:
+One checked operation tree generates native client execution and authoritative
+Eloquent execution. Prepared IDs and timestamps are reused across replay and
+delivery. Metadata stays separate from mass-assignable input. Unsupported shared
+PHP fails generation rather than silently disappearing.
 
-```php
-->mutationRequests([
-    'create' => \App\Http\Requests\StoreTask::class,
-    'update' => \App\Http\Requests\UpdateTask::class,
-])
-```
+## Optimism strategies
 
-Rules must be extractable without runtime request data. Common portable rules
-(`required`, `nullable`, `sometimes`, scalar types, `min`, `max`, `in`, date casts,
-`uuid`, and `ulid`) become client validators; required rules also refine input
-types. Database rules, rule objects, and unsupported rules remain server-only,
-with generation diagnostics. Laravel runs the complete FormRequest lifecycle,
-including authorization, normalization, and validation hooks. The request sees
-the operation's fields and `id`, its authenticated user, and `route('model')` on
-the HTTP endpoint. Dates arrive as ISO strings for Laravel validation.
+- `#[ZeroMutation]`: generated prediction from supported PHP.
+- `#[ZeroMutation(optimism: 'custom')]`: an explicitly supplied native projection.
+- `#[ZeroMutation(optimism: 'disabled')]`: enqueue without speculative writes.
 
-Create inputs require nonnullable writable fields without literal database
-defaults. Updates are patches. `->fillFromContext()` declarations fill fields
-on create from trusted context and remove them from caller-writable inputs.
-Primary keys, server fills, and lifecycle timestamps cannot be patched.
-Writes use Eloquent events and authoritative server timestamps; cancelled events
-and validation/policy failures become durable application errors.
+All three use the same native protocol, validation, results, and lifecycle. Pass
+custom projections to the generated `createControllerMutationBindings` factory.
+When a custom action exists, the React module exports `createZeroBindings(projections)`
+instead of constructing a provider without the required projections. Call it once
+in an application-owned module and export its `ZeroProvider` and `actions`.
+Declare their client result independently when it differs from the server result.
+Missing required bound rows produce the declared pre-write no-op prediction;
+the valid intent still reaches Laravel.
 
-## Formbraid forms
-
-`useMutation` supplies Formbraid's public version-1 `FormDescriptor`. Register
-your application components with `createFormbraid` and pass the descriptor to
-its `Form`:
+## Client invocation
 
 ```tsx
-import { Form } from '@/forms';
-import { useMutation } from '@nickwelsh/zero-for-laravel/react';
+import { useControllerMutation } from '@nickwelsh/zero-for-laravel/react';
+import { actions } from '@/zero/generated.react';
 
-const { form } = useMutation(task.update());
-return <Form key={task.data.id} form={form} />;
+const create = useControllerMutation(actions['App\\Http\\Controllers\\TaskController@store']);
+const saved = await create({ title: 'A task' });
+console.log(saved.id);
 ```
 
-The descriptor pairs `definition`, writable `defaultValues`, and
-`submission.submit`. Formbraid owns editable values, validation, field errors,
-and submission state. Its callback prepares the existing mutation and reports
-success after Zero's server acknowledgement. Field validation errors return
-`invalid`; authorization and transport errors return `failure`. Cancelling
-stops observing the result; an already-enqueued durable mutation can still commit.
+Supply route arguments for bound actions. For direct native control, prepare once
+with `action.prepare(input, routeArguments)`, then call `zero.mutate(request)`.
+`.client` means local application; `.server` means authoritative outcome. Parse
+result data with the generated client/server result schemas. `void`, explicit
+null, and structured JSON remain distinct. Model and HTTP-response serialization
+are not implicit result contracts.
 
-Definitions infer labels, types, nullability, enum options, required fields,
-and portable size constraints from the generated model contracts. They exclude
-server fills, lifecycle fields, generated IDs, and derived relationship keys.
-The default registry component names are:
+The hook tracks pending state, field errors, local application, server acceptance,
+and committed-but-undecodable results separately. Navigate and show authoritative
+success only after server acceptance. Unmounting stops observation, not the queued
+write. Unmodified Inertia forms do not automatically submit through Zero.
 
-| Value                    | Component       |
-| ------------------------ | --------------- |
-| String                   | `TextField`     |
-| Number / integer         | `NumberField`   |
-| Boolean                  | `CheckboxField` |
-| Date                     | `DateField`     |
-| Enum                     | `SelectField`   |
-| Array / to-many relation | `ArrayField`    |
-| Object / untyped JSON    | `ObjectField`   |
+Business changes, native progress, and returned data commit atomically. Application
+rejections roll back business writes and persist an error outcome. Duplicate
+delivery does not rerun the action; a lost callback response can recover through
+native persisted results. These are not durable JavaScript promises across reloads.
 
-Register the components used by your model. JSON columns default to object
-fields unless cast as arrays; customize the returned definition when your
-application uses another JSON shape or component. Definitions are plain data,
-so application-specific labels, props, components, and layouts can be supplied
-with a new definition object.
-
-Date fields edit strings and initialize from stored dates as ISO strings; the
-callback restores native `Date` values before preparing the mutation. Direct
-mutation calls still accept `Date`. Nullable blank date strings submit as null.
-Bound update forms preserve patch semantics for parent and related records.
-Use Formbraid's `useForm(form)` to edit values or reset, and a React `key` when
-switching records. Formbraid defaults initialize a mount and do not reset edits
-on rerender. Install the published Formbraid 0.1 runtime packages:
-
-```sh
-pnpm add @formbraid/core@^0.1.0 @formbraid/react@^0.1.0
-```
-
-## Manual bound forms
-
-```tsx
-const { form, submit, defaultValues, state } = useMutation(task.update());
-
-return (
-    <form onSubmit={submit}>
-        <input value={form.values.title ?? ''} onChange={(event) => form.setValue('title', event.target.value)} />
-        <button disabled={state.status === 'pending'}>Save</button>
-    </form>
-);
-```
-
-The existing manual form API exposes values, field errors, and column/writable-field metadata. It does
-not prescribe a component library. Bound updates start with writable defaults
-and submit edited fields plus any fields explicitly required by the update rules. `useMutation(task.destroy()).submit()` needs no ID.
-The callable API remains available (`update({ title: 'Changed' })`), as do static
-operations with explicit IDs. Bound IDs cannot be overridden. Reset restores defaults;
-switching record or Zero identity clears manual form state and ignores old mutation outcomes.
-These controls remain available for existing applications. For Formbraid forms,
-edit and reset through Formbraid's session APIs.
-
-Policies decide whether a user may perform an operation on the original record.
-An update FormRequest can then restrict which fields they may submit:
-
-```php
-public function authorize(): bool
-{
-    $task = $this->route('model');
-    $user = $this->user();
-    if (! $task instanceof Task || $user === null) {
-        return false;
-    }
-    $allowed = $task->user_id === $user->getAuthIdentifier()
-        ? ['title', 'completed_at']
-        : ['completed_at'];
-
-    return array_diff(array_keys($this->except('id')), $allowed) === [];
-}
-```
-
-The policy must separately deny users without task access. A patch containing
-any forbidden field is rejected as a whole. Keep `rules()` extractable without
-runtime request data; request-specific permissions belong in `authorize()`.
-Normalization hooks are trusted server code: they must preserve these field
-restrictions if they introduce additional values after authorization.
-
-## Completion and errors
-
-```tsx
-const update = useMutation(task.update());
-const call = update({ completed_at: new Date() });
-const result = await call.server;
-// result.type is 'success' or 'error'; inspect result.error on failure.
-```
-
-Preparation can throw a synchronous `InputError`. Enqueued mutations return
-native `client` and `server` completion promises plus a stable record `id`.
-Use hook `state` and field errors to display pending, successful, and rejected
-writes. Optimistic values can reconcile when Laravel applies validation,
-normalization, defaults, timestamps, or model events.
-
-Outside React, call `zero.mutate(Task.create().prepare(input))`. Prepare IDs and
-optimistic timestamps once before enqueueing. External side effects from model
-events belong after commit.
-
-See [nested mutations](./nested-mutations.mdx) for parent/child writes in one transaction.
+Use `conceal: true` for actions that must normalize private-resource errors. Keep
+external effects server-only and use a transactional outbox plus idempotent workers
+when delivery must survive process failure. See [shared operations](./domain-mutations.mdx).

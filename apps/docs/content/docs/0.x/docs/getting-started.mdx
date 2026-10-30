@@ -1,43 +1,32 @@
 ---
 title: Getting started
-description: Install Zero for Laravel and connect your first model to Zero.
+description: Run the controller-first pre-alpha packages and example.
 ---
 
-- PHP 8.3+, Laravel 12 or 13, and the PDO PostgreSQL extension.
-- PostgreSQL 15+ with logical replication configured for Zero.
-- Zero cache 1.10.0, the matching npm client, and React 18 or 19 for React bindings.
+This is an **unreleased, breaking pre-alpha rewrite**. Published v0.4 packages
+do not contain this design. Use matching Composer path and pnpm workspace
+revisions from the monorepo, as configured in `examples/todos`.
 
-Install the PHP package from Packagist and the JavaScript client from npm in
-your Laravel application, then publish the configuration:
-
-```sh
-composer require nickwelsh/zero-for-laravel
-pnpm add @nickwelsh/zero-for-laravel
-pnpm add --save-exact @rocicorp/zero@1.10.0
-php artisan vendor:publish --tag=zero-config
-```
-
-These commands install the current stable Zero for Laravel release, **v0.4.0**,
-without development stability flags or an explicit version suffix. Keep the PHP
-and JavaScript packages on matching release versions. The Zero client and cache
-must both use **1.10.0**. React bindings require React 18 or 19 in your application;
-the core client can be used without React.
-
-Laravel discovers the service provider automatically. The default model discovery
-scans classes with Zero attributes or a `zero()` definition under `app/Models`. Alternatively, list every participating
-model in `config/zero.php`, including relationship targets:
-
-```php
-'models' => [App\Models\Task::class, App\Models\TaskList::class],
-```
-
-## Next steps
-
-1. [Define a model](./models.mdx) and create its PostgreSQL migration.
-2. Review its [column allowlist](./models.mdx#columns-and-privacy), then
-   [configure row visibility, policies, and validation](./authorization.mdx).
-3. [Generate contracts and restrict replication](./replication.mdx).
-4. [Connect React](./react.mdx) and subscribe to a live query.
+- PHP 8.3+, Laravel 12/13, PDO PostgreSQL, and PostgreSQL 15+ with logical replication.
+- Native Zero client and cache **1.11.3**, pinned together.
+- React 18/19 and Inertia for automatic live page props.
 
 The [shared todos example](https://github.com/nickwelsh/zero-for-laravel-monorepo/tree/main/examples/todos)
-contains a complete session-authenticated application with shared lists and live todos.
+contains installation commands, migrations, authentication, sharing, and the local
+Composer/pnpm wiring. Its application requires PHP 8.4.1+.
+
+In an application using these workspace packages:
+
+```sh
+php artisan vendor:publish --tag=zero-config
+php artisan zero:generate --react
+php artisan zero:sync-publication --dry-run
+```
+
+Review the publication before applying it. Never expose the private cache API key
+to the browser. Authenticate end users independently of the cache.
+
+Define [model visibility](./models.mdx), declare [controller queries](./queries.mdx),
+and register [controller mutations](./mutations.mdx). Install the
+[Inertia adapter](./react.mdx) in the page resolver. Deploy generated PHP and
+TypeScript together, and use `zero:generate --check` to detect stale output.

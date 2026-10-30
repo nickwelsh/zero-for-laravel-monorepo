@@ -1,15 +1,17 @@
 import { Task, TaskList, schema, definitions } from './generated';
 import { nestedRuntime, nestedDefinitions } from './nested';
-import { createZeroForLaravel, toPlain, createDomainMutations } from '@nickwelsh/zero-for-laravel';
-import type { SelectionData } from '@nickwelsh/zero-for-laravel';
+import { createZeroForLaravel } from '../../packages/client/src/runtime';
+import { toPlain } from '../../packages/client/src/record';
+import { createDomainMutations } from '../../packages/client/src/domain';
+import type { SelectionData } from '../../packages/client/src/query';
+import { useData } from '@nickwelsh/zero-for-laravel/react';
+import { useMutation } from '../../packages/client/src/react/mutation';
 import {
-    useData,
     useFilter,
-    useMutation,
     useFilters,
     type FilterControls,
     type FilterControlProps,
-} from '@nickwelsh/zero-for-laravel/react';
+} from '../../packages/client/src/react/filters';
 import type { ComponentType } from 'react';
 import { createFormbraid } from '@formbraid/react';
 

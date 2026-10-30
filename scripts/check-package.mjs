@@ -21,7 +21,10 @@ registerHooks({
     },
 });
 const core = await import(new URL('dist/index.js', root).href);
-if (typeof core.createZeroForLaravel !== 'function') throw new Error('Missing core runtime export.');
+if (typeof core.createControllerMutations !== 'function' || typeof core.liveQuery !== 'function')
+    throw new Error('Missing controller runtime exports.');
+if ('createZeroForLaravel' in core || 'createDomainMutations' in core || 'ModelSnapshot' in core)
+    throw new Error('Replaced model/domain APIs must not be public exports.');
 console.log('Built exports exist, and the core package loads without React.');
 
 // Optional integration peers must stay optional in both installation metadata and declarations.

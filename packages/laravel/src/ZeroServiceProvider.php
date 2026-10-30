@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace ZeroForLaravel;
 
+use Closure;
 use Illuminate\Database\Events\MigrationsEnded;
 use Illuminate\Database\Migrations\Migrator;
 use Illuminate\Foundation\Application;
@@ -11,6 +12,7 @@ use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\ServiceProvider;
 use LogicException;
+use ReflectionMethod;
 use ZeroForLaravel\Console\DevCommand;
 use ZeroForLaravel\Console\DoctorCommand;
 use ZeroForLaravel\Console\ExposureCommand;
@@ -29,7 +31,29 @@ final class ZeroServiceProvider extends ServiceProvider
 {
     public function register(): void
     {
+        $this->app->register(\Laravel\Surveyor\SurveyorServiceProvider::class);
+        $this->app->register(\Laravel\Ranger\RangerServiceProvider::class);
+        $this->app->singletonIf(Generation\SchemaDriver::class, Generation\ZodSchemaDriver::class);
         $this->mergeConfigFrom(__DIR__.'/../config/zero.php', 'zero');
+        $this->app->singleton(Query\RegisteredQueries::class, fn (): Query\RegisteredQueries => Query\RegisteredQueries::load(config()->string('zero.controller_output')));
+        $this->app->singleton(function (): Mutation\ControllerMutationRegistry {
+            $path = config()->string('zero.mutation_output');
+            if (! is_file($path)) {
+                throw new LogicException('Missing controller mutation registrations. Run zero:generate.');
+            }
+
+            $factory = require $path;
+            if (! $factory instanceof Closure) {
+                throw new LogicException('Invalid controller mutation registrations. Run zero:generate.');
+            }
+
+            $registry = $factory($this->app->make(ModelRegistry::class), $this->app->make(Http\ControllerRouteDispatcher::class));
+            if (! $registry instanceof Mutation\ControllerMutationRegistry) {
+                throw new LogicException('Invalid controller mutation registry. Run zero:generate.');
+            }
+
+            return $registry;
+        });
         if (class_exists(\Typesense\Client::class)) {
             $this->app->singletonIf(\Typesense\Client::class, fn (): \Typesense\Client => new \Typesense\Client(config()->array('scout.typesense.client-settings')));
         }
@@ -48,6 +72,21 @@ final class ZeroServiceProvider extends ServiceProvider
 
     public function boot(): void
     {
+        Event::listen(\Illuminate\Routing\Events\RouteMatched::class, static function (\Illuminate\Routing\Events\RouteMatched $event): void {
+            if ($event->request->attributes->get('zero.controller.dispatch') === true) {
+                return;
+            }
+
+            $class = $event->route->getControllerClass();
+            $method = $event->route->getActionMethod();
+            if ($class !== null && method_exists($class, $method) && (new ReflectionMethod($class, $method))->getAttributes(Attributes\ZeroMutation::class) !== []) {
+                abort(405, 'Submit this action through its generated Zero mutation binding.');
+            }
+        });
+        $this->callAfterResolving(\Illuminate\Contracts\Http\Kernel::class, static function (\Illuminate\Foundation\Http\Kernel $kernel): void {
+            // Capture original transport cookies before the web group decrypts them.
+            $kernel->prependToMiddlewarePriority(AuthenticateZeroCache::class);
+        });
         if ($this->app->runningInConsole()) {
             $this->publishes([__DIR__.'/../config/zero.php' => config_path('zero.php')], 'zero-config');
             $this->commands([GenerateCommand::class, SyncPublicationCommand::class, DevCommand::class, DoctorCommand::class, ResetCommand::class, ExposureCommand::class]);
@@ -86,11 +125,6 @@ final class ZeroServiceProvider extends ServiceProvider
 
                 $names[] = $name;
             }
-
-            Route::prefix(config()->string('zero.route_prefix'))->middleware($names)->group(function (): void {
-                Route::post('results/{operation}', [ZeroController::class, 'result'])
-                    ->where('operation', '[a-zA-Z][a-zA-Z0-9_]{0,63}')->name('zero.result');
-            });
 
             Route::prefix(config()->string('zero.route_prefix'))->middleware(array_merge([AuthenticateZeroCache::class], $names))->group(function (): void {
                 Route::post('query', [ZeroController::class, 'query'])->name('zero.query');

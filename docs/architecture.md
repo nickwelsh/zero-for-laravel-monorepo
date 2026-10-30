@@ -1,39 +1,62 @@
-# Architecture
+# Controller-first architecture
 
-The Composer package lives in `packages/laravel`. The npm package is
-`packages/client`, with independent core and React exports. Both target Zero
-1.10.0. No custom queries, custom mutations, Inertia integration, upsert, or
-mutable Eloquent-style frontend models are included. Reads hydrate independent
-readonly model snapshots; Zero retains ownership of the underlying row store.
+The Composer and npm packages target Zero **1.11.3**. Controllers are the query and
+mutation declarations; model metadata owns storage, casts, visibility, relationship
+paths, writable fields, and publication privacy. The design baselines are
+[queries](QUERY_DESIGN.md) and [mutations](MUTATION_DESIGN.md).
 
-## Invariants
+## Generation has one semantic source
 
-- One resolved model description drives generated contracts, server queries,
-  mutation inputs, and PostgreSQL publication columns.
-- Reads are explicitly public or constrained by definition authorization/server scopes.
-  Related rows and relationship filters retain the target's authorization.
-- `$hidden` and Zero exclusions are additive. Required excluded keys are an
-  error, never silently published.
-- Query arguments are validated and rebuilt into trusted ASTs. Client ASTs and
-  client-supplied context never establish server authority.
-- Zero owns replication, subscriptions, optimistic writes, and reconciliation.
-- Public dates are `Date`; Zero rows and JSON mutation arguments use epoch
-  milliseconds. Defaults are generated before enqueueing, once per operation.
-- CRUD is opt-in, policy-protected per operation, and executed through Eloquent.
-  Server-owned fields and lifecycle timestamps cannot be patched by callers.
-- Application writes, ordered progress, and durable rejection results commit
-  atomically. Duplicates do not execute again. Database failures remain retryable.
-- Mutation bookkeeping uses Zero's shard-owned upstream schema and table
-  shapes. Applications never create a competing replication bookkeeping table.
-- Callback filters compile portable predicate templates using a symbolic input;
-  request-dependent PHP runs in server scopes, never in generated client code.
-- Bound mutation IDs cannot be overridden. Update forms submit only changed fields.
-- React adapts Zero's native bindings. Query completeness, errors, and connection
-  state remain separate; results never carry over across query or identity changes.
+Ranger discovers registered routes. Surveyor supplies request analysis. The checked
+PHP AST compilers lower supported controller expressions into owned query/operation
+definitions; PHP and TypeScript emission consume those definitions. Unsupported
+dependencies fail generation. No controller executes to discover sample values.
 
-## Proof
+Generated identities include relevant source and model contracts. Deploy PHP
+registrations and client modules together. Unknown old names reject with a reload
+or unsupported-operation error rather than executing new code under stale identity.
+An application that needs offline-operation retention must retain old registrations
+deliberately; this pre-alpha does not transparently migrate queued intent.
 
-Behavior tests precede each implementation slice. Protocol and query tests use
-the pinned upstream package, including PHP/TypeScript AST comparison. PostgreSQL
-integration tests cover ordered processing, rollback, durable rejections, and publication
-changes. React tests cover states, pagination reset, controls, and mutation outcomes.
+## HTTP and Zero retain distinct jobs
+
+An ordinary page request runs Laravel's real controller. The Inertia adapter removes
+live props before serialization and emits serializable `__zero` metadata. The client
+wrapper owns subscriptions and decoded rows outside Inertia history. Partial metadata
+patches preserve omitted bindings and explicitly remove replaced bindings.
+
+A query transform validates arguments, reruns required route middleware/binding and
+FormRequests, resolves fresh trusted context, and executes its generated query
+registration. It does not rerun the page controller. Root, related, and existence
+queries receive visibility predicates. A browser cannot supply an authoritative AST.
+
+Mutations use the same native protocol for generated, custom, and disabled optimism.
+Laravel executes the registered action boundary within the upstream transaction.
+Prepared IDs/time stay outside business input. Writes, LMID, and durable JSON outcome
+commit consistently. Rejection rolls back writes before recording progress/error.
+Duplicates do not repeat writes. The native cleanup mutation removes consumed results.
+
+## Shared execution is bounded
+
+Generated operations use Eloquent on the server and native Zero transactions locally.
+Explicit shared helpers preserve statement order and read-your-writes. Unique-key
+insertion uses a savepoint and reloads a concurrent winner without overwriting an
+existing preference. State-dependent policies can follow `reloadForUpdate()`.
+
+Bounded keyed loops derive UUIDs from prepared per-site seeds and explicit item keys,
+never traversal positions. Missing bound cache rows produce a declared no-op before
+writes. Late failures are not swallowed to commit partial speculative effects.
+Server-only regions never run during browser replay. Durable external work belongs
+in application-owned transactional outbox rows and an idempotent worker.
+
+Public validation and date encoding occur before native request construction.
+Canonical JSON wire arguments define request identity. Decoding applies recursively
+after native reads; raw cursor values preserve sub-millisecond storage precision.
+
+## Verification follows the boundaries
+
+Tests use pinned native ZQL as the AST oracle, native mutators for optimistic behavior,
+Laravel HTTP tests for validation/binding/security, and PostgreSQL for atomicity and
+unique-key conflict recovery. A real zero-cache integration test discards a committed
+mutation response and verifies native delivery of the persisted result without a
+second creation. Browser checks exercise the actual shared todos application.

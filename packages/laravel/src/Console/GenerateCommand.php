@@ -6,6 +6,8 @@ namespace ZeroForLaravel\Console;
 
 use Illuminate\Console\Command;
 use Illuminate\Filesystem\Filesystem;
+use ZeroForLaravel\Generation\ControllerDiscovery;
+use ZeroForLaravel\Generation\ControllerQueryGenerator;
 use ZeroForLaravel\Generation\TypeScriptGenerator;
 use ZeroForLaravel\Metadata\ModelRegistry;
 
@@ -13,9 +15,9 @@ final class GenerateCommand extends Command
 {
     protected $signature = 'zero:generate {--output= : Generated TypeScript path} {--react : Generate a sibling React provider} {--check : Fail if output is missing or out of date}';
 
-    protected $description = 'Generate native Zero schemas, typed models, and automatic CRUD contracts';
+    protected $description = 'Generate coordinated Zero schemas, controller queries, page types, and mutations';
 
-    public function handle(ModelRegistry $registry, TypeScriptGenerator $generator, Filesystem $files): int
+    public function handle(ModelRegistry $registry, TypeScriptGenerator $generator, ControllerDiscovery $controllers, ControllerQueryGenerator $queries, Filesystem $files): int
     {
         $path = $this->option('output') ?: config()->string('zero.output');
         if (! is_string($path)) {
@@ -25,12 +27,22 @@ final class GenerateCommand extends Command
         }
 
         $source = $generator->generate($registry);
-        $outputs = [$path => $source];
+        $definitions = array_values(array_column($controllers->queries(), 'query'));
+        $mutations = $controllers->mutations();
+        $mutationGenerator = resolve(\ZeroForLaravel\Generation\Mutations\ControllerMutationGenerator::class);
+        $base = pathinfo($path, PATHINFO_FILENAME);
+        $outputs = [
+            $path => $source,
+            dirname($path).'/'.$base.'.queries.ts' => $queries->typescript($definitions, './'.$base),
+            config()->string('zero.controller_output') => $queries->php($definitions),
+            dirname($path).'/'.$base.'.mutations.ts' => $mutationGenerator->typescript($mutations),
+            config()->string('zero.mutation_output') => $mutationGenerator->php($mutations),
+        ];
         $react = $this->option('react') || config()->boolean('zero.react');
         $config = dirname($path).'/zero.config.ts';
         if ($react) {
-            $base = pathinfo($path, PATHINFO_FILENAME);
-            $outputs[dirname($path).'/'.$base.'.react.ts'] = $generator->generateReact('./'.$base, './zero.config');
+            $custom = array_filter($mutations, fn (\ZeroForLaravel\Generation\Mutations\MutationProgram $mutation): bool => $mutation->optimism === 'custom') !== [];
+            $outputs[dirname($path).'/'.$base.'.react.ts'] = $generator->generateReact('./'.$base, './zero.config', './'.$base.'.mutations', $custom);
         }
 
         foreach ($registry->all() as $model) {
@@ -61,8 +73,8 @@ final class GenerateCommand extends Command
             return self::SUCCESS;
         }
 
-        $files->ensureDirectoryExists(dirname($path));
         foreach ($outputs as $output => $content) {
+            $files->ensureDirectoryExists(dirname($output));
             $files->replace($output, $content);
             $this->info("Generated {$output}.");
         }

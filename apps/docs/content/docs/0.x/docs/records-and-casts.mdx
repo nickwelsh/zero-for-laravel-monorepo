@@ -1,80 +1,28 @@
 ---
-title: Records, casts, and types
-description: Work with readonly snapshots, lazy relations, dates, enums, and optional DTO typing.
+title: Rows, casts, and types
+description: Consume plain typed rows and explicit input/result codecs.
 ---
 
-```tsx
-const tasks = useData(Task.query.all().with('list'));
-const task = tasks.data[0];
-// task.data.title
-// task.data.list?.data.name
-// useData(task.list) in a component receiving a defined task
-```
+Live props contain plain decoded rows: `task.title`, `task.list?.name`, and
+`task.comments`. There are no model snapshot wrappers, lazy model methods, or
+bound CRUD methods. Generated `TaskRow` describes model columns; generated page
+types add the exact selected relationship shape.
 
-Columns never collide with instance mutation methods. Included relations are
-recursively hydrated snapshots. Lazy relations run through the parent's authorized
-`one` query. They do not bypass visibility by querying a target table directly.
+Only resolved database columns replicate. Accessors, encrypted casts, appended
+properties, and arbitrary DTO methods do not execute in JavaScript. Supported
+primitive, JSON, date, and backed-enum metadata determine public values.
 
-Record fields and generated row types contain only the
-[resolved database columns](./models.mdx#columns-and-privacy). Nonempty `$visible`
-restricts that set by default. Eloquent accessors and appended properties named in
-`$visible` do not become client fields.
+Date-cast fields expose `Date`. Native temporal storage uses epoch milliseconds;
+supported date-cast string columns retain their declared UTC storage format.
+Query/mutation arguments encode before native request construction. Raw ordering
+values, not decoded dates, remain the cursor authority.
 
-All supported database dates/timestamps, including implicit lifecycle fields,
-become `Date`. Backed enum casts become backing-value literal unions. Boolean,
-integer, float, string, array/JSON, and object casts hydrate their public values;
-mutation preparation converts them back to native storage values. PHP DTO methods,
-encrypted casts, and arbitrary custom cast transformations do not run in JavaScript.
-JSON remains generic when no shape is declared.
+Mutation outputs are explicit JSON contracts. No-return (`void`) differs from
+explicit null. Scalars, lists, and object-shaped results are validated before
+authoritative commit and narrowed again by generated client codecs. A model is
+not implicitly serialized, and a PHP HTTP response is not a mutation result.
+Client and server results may have deliberately different contracts.
 
-A project can reuse a generated Laravel Data type or any handwritten DTO shape
-through TypeScript's native module augmentation:
-
-```ts
-import type { PreferencesData } from './types';
-
-declare module '@nickwelsh/zero-for-laravel' {
-    interface ModelTypes {
-        Task: { preferences: PreferencesData };
-    }
-}
-```
-
-The mapping refines rows and mutation inputs. It supplies static JSON typing,
-not a runtime DTO constructor or validator. Authoritative nested validation still
-belongs in Laravel. This does not require Laravel Data or TypeScript Transformer.
-
-## Record identity
-
-Generated exports include `Task` as an instance type and model value, plus `TaskRow`
-as the column-only type. Instance methods such as `task.update()` and
-`task.destroy()` bind the record ID and remain callable when destructured. Bound
-IDs cannot be overridden. Lazy relations require the parent's `one` query and an
-allowed include; their targets need no top-level query.
-
-## Storage representation
-
-Public dates are `Date`; native Zero rows and mutation arguments use epoch
-milliseconds. `HasUuids` uses UUIDv7 and `HasUlids` uses ULID. Eloquent timestamp
-column constants are respected. For millisecond-preserving writes, use temporal
-columns with matching precision and an Eloquent `$dateFormat` such as
-`Y-m-d H:i:s.u`. JavaScript numeric precision applies to bigint and decimal values.
-
-## Plain readonly data
-
-Use `toPlain` when a consumer needs decoded data without snapshot wrappers:
-
-```ts
-import { toPlain } from '@nickwelsh/zero-for-laravel';
-const rows = toPlain(result.data);
-const name = rows[0]?.list?.name;
-const body = rows[0]?.comments[0]?.body;
-```
-
-The projection unwraps included to-one and to-many snapshots recursively and
-preserves readonly types, dates, enums, null values, and absent relationships.
-It does not JSON-serialize or reinterpret a scalar JSON object's `data` property.
-Rows and relationship arrays are frozen. As with the existing snapshot API,
-JavaScript Date internal state is not made immutable by readonly typing; do not
-mutate decoded dates. Snapshot and bound instance methods remain available on the
-original result.
+JavaScript numeric precision still applies to bigint and decimal data. Arbitrary
+custom model casts and object-valued mutation property reads require an explicit
+supported codec/projection; unsupported semantics fail generation.

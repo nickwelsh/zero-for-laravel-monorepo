@@ -1,146 +1,60 @@
 ---
 title: Model definitions
-description: Declare columns, queries, mutations, and relationships in Eloquent.
+description: Define replicated columns, casts, relationships, and mandatory visibility.
 ---
 
-Use a UUID or ULID primary key for optimistic creates. This example assumes a
-`tasks` table with a UUID `id`, `user_id`, nullable UUID `list_id`, `title`, a
-boolean `done` defaulting to false, nullable `completed_at`, timestamps, and soft
-deletes. Match `user_id` to the authenticated user's actual key type.
+Models own replication metadata and row visibility. Controllers own queries and
+mutation actions. The generated client exposes plain row types, not model instances
+with `query`, `update`, or `destroy` methods.
 
 ```php
-namespace App\Models;
-
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\Relations\BelongsTo;
-use Illuminate\Database\Eloquent\SoftDeletes;
-use ZeroForLaravel\Attributes\{ZeroMutate, ZeroQuery};
+use ZeroForLaravel\Concerns\HasZeroQueries;
 use ZeroForLaravel\ContextField;
-use ZeroForLaravel\Definition\{AllowedFilter, ZeroDefinition};
+use ZeroForLaravel\Definition\ZeroDefinition;
 
-#[ZeroQuery(['all', 'one'])]
-#[ZeroMutate(['create', 'update', 'destroy', 'restore', 'force_delete'])]
 class Task extends Model
 {
-    use HasUuids, SoftDeletes;
+    use HasUuids, HasZeroQueries;
 
-    protected $fillable = ['user_id', 'list_id', 'title', 'done', 'completed_at'];
-
-    protected $visible = [
-        'id', 'user_id', 'list_id', 'title', 'done', 'completed_at',
-        'created_at', 'updated_at', 'deleted_at',
-    ];
+    protected $fillable = ['title', 'done'];
+    protected $visible = ['id', 'user_id', 'title', 'done', 'created_at', 'updated_at'];
 
     protected function casts(): array
     {
-        return ['done' => 'boolean', 'completed_at' => 'immutable_datetime'];
+        return ['done' => 'boolean'];
     }
 
     public static function zero(): ZeroDefinition
     {
         return ZeroDefinition::make()
             ->authorize('user_id', '=', ContextField::UserId)
-            ->fillFromContext('user_id', ContextField::UserId)
-            ->allowedFilters([
-                'title', // String shorthand means escaped substring matching.
-                AllowedFilter::exact('done'),
-                AllowedFilter::exact('completed_at'),
-                AllowedFilter::belongsTo('list'),
-                AllowedFilter::trashed(),
-            ])
-            ->allowedIncludes(['list'])
-            ->allowedSorts(['title', 'created_at'])
-            ->defaultSort('-created_at')
-            ->limits(default: 50, max: 1000);
-    }
-
-    public function list(): BelongsTo
-    {
-        return $this->belongsTo(TaskList::class, 'list_id');
+            ->fillFromContext('user_id', ContextField::UserId);
     }
 }
 ```
 
-The related model declares its own read visibility. It can participate in an
-include without exposing top-level queries or mutations:
-
-```php
-namespace App\Models;
-
-use Illuminate\Database\Eloquent\Model;
-use ZeroForLaravel\Definition\ZeroDefinition;
-use ZeroForLaravel\ContextField;
-
-class TaskList extends Model
-{
-    protected $table = 'lists';
-    public $timestamps = false;
-
-    public static function zero(): ZeroDefinition
-    {
-        return ZeroDefinition::make()->authorize('user_id', '=', ContextField::UserId);
-    }
-}
-```
-
-Use `->publicReads()` to explicitly allow public reads. Multiple `->authorize()`
-constraints combine with AND. The former visibility/fill attributes remain supported for compatibility. Authorization applies to roots, included rows, nested
-includes, and relationship filters. Missing trusted context denies access.
-`ContextField::TenantId` is also supported; supply it from a custom server context
-resolver after verifying tenant membership. Configure that resolver with
-`zero.context_resolver`. The browser context supplies local query values and
-optimistic fills; Laravel independently resolves authoritative context.
+Register every participating relationship target. Use `relations(...)` to expose
+schema relationships, `authorizeRelation(...)` for mandatory related visibility,
+and `publicReads()` only for deliberately public rows. Missing required context
+denies access. Read visibility never grants write permission.
 
 ## Columns and privacy
 
-One resolved column plan controls the generated TypeScript schema, record fields,
-and dedicated PostgreSQL publication. In the `Task` example above, a stored
-`secret` column is omitted because it is outside `$visible`. New database columns
-also stay excluded until explicitly allowed.
+The same resolved column plan drives generated TypeScript and the dedicated
+PostgreSQL publication. Nonempty `$visible` is the default allowlist.
+`ZeroColumns` replaces it; `$hidden` and `ZeroExclude` subtract columns.
+`ZeroIncludeColumns` deliberately opts columns back in but cannot expand an
+explicit `ZeroColumns` allowlist. Accessors and appended properties are not stored
+columns and do not become replicated values.
 
-Column controls apply in this order:
+Primary keys, enabled timestamps, authorization/context fields, and relationship
+keys must remain available. Missing required columns fail generation instead of
+silently expanding exposure. `$fillable` separately controls write fields; it does
+not hide replicated data. Ownership, primary keys, and lifecycle timestamps are
+not patchable business input.
 
-| Control                                        | Effect                                                                                                                                                   |
-| ---------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Nonempty Eloquent `$visible`                   | Supplies the default database-column allowlist. An empty list allows all database columns before exclusions.                                             |
-| `#[ZeroColumns([...])]`                        | Replaces the `$visible` default with an explicit replication allowlist, even when `$visible` is nonempty. An empty `ZeroColumns` list allows no columns. |
-| Eloquent `$hidden` and `#[ZeroExclude([...])]` | Add exclusions within either allowlist. A column listed in both `$visible` and `$hidden` is excluded.                                                    |
-| `#[ZeroIncludeColumns([...])]`                 | Opts a non-visible, hidden, or excluded database column back in. It cannot expand an explicit `ZeroColumns` allowlist.                                   |
-
-For example, `#[ZeroIncludeColumns(['secret'])]` deliberately exposes `secret`
-despite its absence from `$visible`. If `ZeroColumns` is present, `secret` must
-also appear in that list. Listing a column in `ZeroColumns` alone does not
-override `$hidden` or `ZeroExclude`.
-
-Names in `$visible` that are not database columns, such as accessors or relations,
-are ignored. They do not generate computed fields or enable relationship includes.
-`ZeroColumns`, `ZeroExclude`, and `ZeroIncludeColumns` must name existing database
-columns; unknown names fail generation.
-
-### Required columns
-
-Allowlists must include the primary key, enabled timestamps and soft-delete
-timestamp, authorization and context-fill fields, and keys used by registered
-relationships. Fields used by declared filters and sorts must also be available.
-Zero for Laravel fails generation when a required column is missing or excluded;
-it never silently adds that column to the replicated data.
-
-For the `Task` example, omitting `user_id` produces
-`Task: required column user_id is missing or excluded.` Keep it in the allowlist
-because both authorization and the context fill depend on it. Include
-`created_at`, `updated_at`, and `deleted_at` while timestamps and soft deletes
-are enabled, and `list_id` for the registered `list` relationship.
-
-`$fillable` controls mutation inputs independently of column exposure. A fillable
-column outside the resolved column plan is not caller-writable through Zero;
-allowing a column to replicate does not by itself make it writable.
-
-After changing these rules, [regenerate contracts and synchronize the publication](./replication.mdx#updating-column-visibility).
-
-`ZeroQuery` opts into `all` and `one`; `ZeroMutate` opts into individual CRUD
-operations. Related models may participate without top-level queries or mutations,
-but every relationship target must be registered and declare its read visibility.
-
-See [authorization](./authorization.mdx) and [replication](./replication.mdx)
-before exposing application data.
+UUID/ULID identities support generated optimistic creation. Numeric identities
+can use explicitly disabled optimism for authoritative creation. See
+[records and casts](./records-and-casts.mdx) and [authorization](./authorization.mdx).

@@ -5,16 +5,16 @@ description: Laravel model contracts, live queries, and optimistic mutations for
 
 Zero for Laravel brings [Rocicorp Zero](https://zero.rocicorp.dev) to Laravel,
 with model contracts, authentication, policies, validation, and replication controls.
-Declare your public interface in PHP, generate a native Zero schema and typed
-TypeScript models, and subscribe to live data from React.
+Declare queries and mutations in controllers, generate coordinated PHP and native
+TypeScript contracts, and receive typed live props in Inertia pages.
 
 Laravel authenticates reads and authorizes writes. Zero owns replication, local
 subscriptions, optimistic replay, and reconciliation. One resolved model contract
 controls queries, mutation inputs, and the PostgreSQL publication's columns.
 
-These docs cover **v0.x**, currently **v0.4.0** of the Composer and JavaScript
-packages, with **Zero 1.10.0**, **Laravel 12 or 13**, and **PHP 8.3+**.
-[Install the packages from Packagist and npm](./docs/getting-started.mdx) to get started.
+These docs cover the **unreleased pre-alpha rewrite**, with **Zero 1.11.3**,
+**Laravel 12 or 13**, and **PHP 8.3+**. Published v0.4 packages are not this rewrite.
+[Use the matching workspace packages](./docs/getting-started.mdx) to get started.
 
 ## Start building
 
@@ -26,9 +26,9 @@ packages, with **Zero 1.10.0**, **Laravel 12 or 13**, and **PHP 8.3+**.
 
 ## How data moves
 
-1. Eloquent models declare query, mutation, visibility, and column rules.
-2. `zero:generate` reads the migrated database and emits schema, contracts, models,
-   queries, and mutators.
+1. Eloquent models declare visibility and column rules; controllers declare operations.
+2. `zero:generate` analyzes registered actions and emits schema, row/page types,
+   native queries/mutators, and matching PHP registrations.
 3. `zero:sync-publication` limits replication to approved tables and columns.
 4. The browser subscribes through Zero; Laravel rebuilds queries using trusted
    authentication context.

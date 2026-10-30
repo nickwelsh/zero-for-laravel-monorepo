@@ -13,6 +13,7 @@
         "types": ["node", "vite-plus/test/globals"],
         "paths": {
             "@nickwelsh/zero-for-laravel": ["./packages/client/src/index.ts"],
+            "@nickwelsh/zero-for-laravel/inertia": ["./packages/client/src/react/inertia.tsx"],
             "@nickwelsh/zero-for-laravel/react": ["./packages/client/src/react/index.ts"]
         }
     },

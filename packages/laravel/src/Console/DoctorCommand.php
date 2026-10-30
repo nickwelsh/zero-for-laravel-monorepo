@@ -27,9 +27,9 @@ final class DoctorCommand extends Command
         };
         try {
             $local->binary();
-            $check('Zero binary', 'OK', '1.10.0 installed');
+            $check('Zero binary', 'OK', '1.11.3 installed');
         } catch (Throwable) {
-            $check('Zero binary', 'FAIL', 'Install Node.js and @rocicorp/zero 1.10.0 in the application.');
+            $check('Zero binary', 'FAIL', 'Install Node.js and @rocicorp/zero 1.11.3 in the application.');
         }
 
         try {
@@ -130,7 +130,7 @@ final class DoctorCommand extends Command
             $check('Replica identity', 'UNKNOWN', 'Cannot inspect replica path or ownership manifest.');
         }
 
-        $check('Synchronization/backfill', 'UNSUPPORTED', 'Zero 1.10.0 exposes no general readiness endpoint here. Verify a subscribed query completes and observes an upstream update.');
+        $check('Synchronization/backfill', 'UNSUPPORTED', 'No general synchronization readiness check is implemented here. Verify a subscribed query completes and observes an upstream update.');
 
         return $failed ? self::FAILURE : self::SUCCESS;
     }

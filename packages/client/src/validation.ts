@@ -36,7 +36,7 @@ export function columnValue(value: unknown, column: Column, path: string, public
     if (value === null && column.nullable) return null;
     if (column.date && publicDate) {
         if (!(value instanceof Date) || !Number.isFinite(value.getTime())) fail(path, 'Expected a valid Date.');
-        return value.getTime();
+        return encodeDate(value, column.dateFormat);
     }
     if (publicDate && column.cast) {
         const expected =
@@ -69,9 +69,18 @@ export function columnValue(value: unknown, column: Column, path: string, public
             : typeof value === column.type && (column.type !== 'number' || Number.isFinite(value));
     if (!valid || value === null || (column.enum && !column.enum.includes(value as string | number)))
         fail(path, 'Invalid field value.');
-    if (column.date && (!Number.isInteger(value) || Math.abs(value as number) > 8640000000000000))
+    if (column.date && column.type === 'number' && Math.abs(value as number) > 8640000000000000)
         fail(path, 'Expected epoch milliseconds.');
     return value as ReadonlyJSONValue;
+}
+
+export function encodeDate(value: Date, format?: Column['dateFormat']): string | number {
+    if (!Number.isFinite(value.getTime())) fail('date', 'Expected a valid Date.');
+    if (format === undefined) return value.getTime();
+    const iso = value.toISOString();
+    if (format === 'Y-m-d') return iso.slice(0, 10);
+    const seconds = iso.slice(0, 19).replace('T', ' ');
+    return format === 'Y-m-d H:i:s.u' ? `${seconds}.${iso.slice(20, 23)}000` : seconds;
 }
 
 function isJson(value: unknown, ancestors = new Set<unknown>()): value is ReadonlyJSONValue {
@@ -260,8 +269,12 @@ export function filterComparison(
 export function decodeColumn(value: unknown, column: Column, field: string): unknown {
     if (value === null || value === undefined) return value;
     if (column.enum && !column.enum.includes(value as string | number)) fail(field, 'Invalid stored enum value.');
-    if (column.date && typeof value === 'number') {
-        const date = new Date(value);
+    if (column.date && (typeof value === 'number' || typeof value === 'string')) {
+        const date = new Date(
+            typeof value === 'string' && column.dateFormat
+                ? `${value.replace(' ', 'T')}${value.length > 10 ? 'Z' : ''}`
+                : value,
+        );
         if (!Number.isFinite(date.getTime())) fail(field, 'Invalid stored date.');
         return date;
     }

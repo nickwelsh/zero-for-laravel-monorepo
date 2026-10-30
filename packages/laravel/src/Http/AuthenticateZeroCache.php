@@ -18,6 +18,9 @@ final class AuthenticateZeroCache
         abort_unless(hash_equals($key, (string) $request->header('X-Api-Key')), 403);
         abort_if(strlen($request->getContent()) > 1048576, 413);
         $request->headers->set('Accept', 'application/json');
+        // Preserve encrypted transport cookies before the endpoint's web group
+        // decrypts them. Controller replay enters that same group independently.
+        $request->attributes->set('zero.transport.cookies', $request->cookies->all());
 
         return $next($request);
     }

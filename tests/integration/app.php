@@ -26,6 +26,17 @@ class FixtureIdentity
     }
 }
 
+class FixtureMutations
+{
+    /** @return array{id: string} */
+    #[\ZeroForLaravel\Attributes\ZeroMutation]
+    public function store(\ZeroForLaravel\Tests\Fixtures\ControllerMutationRequest $request): array
+    {
+        $task = Task::create($request->validated());
+        return ['id' => $task->id];
+    }
+}
+
 $root = getenv('ZERO_INTEGRATION_ROOT');
 if (! is_string($root) || ! is_dir($root) || ! str_starts_with(basename($root), 'zero-live-')) { throw new RuntimeException('Missing isolated fixture root.'); }
 $app = Application::configure(basePath: $root)->withProviders([ZeroServiceProvider::class])->withExceptions()->create();
@@ -49,8 +60,9 @@ $app->afterBootstrapping(LoadConfiguration::class, function ($app) use ($root) {
     ]);
 });
 ini_set('error_log', $root.'/php.log');
-$kernel = $app->make(Kernel::class);
+$kernel = $app->make(PHP_SAPI === 'cli' ? \Illuminate\Contracts\Console\Kernel::class : Kernel::class);
 $kernel->bootstrap();
+\Illuminate\Support\Facades\Route::post('/fixture/tasks', [FixtureMutations::class, 'store'])->middleware(FixtureIdentity::class);
 foreach (['create', 'update', 'delete', 'restore', 'forceDelete'] as $ability) {
     Gate::define($ability, fn ($user, $model) => $ability === 'create' || ($model->user_id === $user->getAuthIdentifier() && $model->title !== 'Locked'));
 }
@@ -58,9 +70,17 @@ if (PHP_SAPI === 'cli') {
     if (($argv[1] ?? null) === 'reset') { exit(Artisan::call('zero:reset', [($argv[2] ?? null) === 'force' ? '--force' : '--dry-run' => true], new \Symfony\Component\Console\Output\ConsoleOutput)); }
     if (($argv[1] ?? null) === 'dev') { exit(Artisan::call('zero:dev', [], new \Symfony\Component\Console\Output\ConsoleOutput)); }
     if (Artisan::call('migrate', ['--path' => __DIR__.'/migrations', '--realpath' => true, '--force' => true]) !== 0 || Artisan::call('zero:generate') !== 0 || Artisan::call('zero:generate', ['--check' => true]) !== 0) { throw new RuntimeException('Fixture setup failed.'); }
+    $program = app(\ZeroForLaravel\Generation\Mutations\ControllerMutationCompiler::class)->compile(FixtureMutations::class, 'store');
+    file_put_contents($root.'/controller-contracts.json', json_encode([$program->name() => $program->contract()], JSON_THROW_ON_ERROR));
     exit(0);
 }
 $request = Request::capture();
 $response = $kernel->handle($request);
+// Lose the first successful callback response after commit. Native replication
+// must recover its data; retries must not execute the action a second time.
+if ($request->is('callbacks/zero/mutate') && str_contains($request->getContent(), 'Recovered result') && $response->isSuccessful() && ! is_file($root.'/lost-response.json')) {
+    file_put_contents($root.'/lost-response.json', $response->getContent());
+    $response = new \Symfony\Component\HttpFoundation\Response('Simulated lost response', 503);
+}
 $response->send();
 $kernel->terminate($request, $response);

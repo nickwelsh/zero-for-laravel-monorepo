@@ -1,160 +1,50 @@
 ---
-title: React integration
-description: Connect a generated provider, live data, filter controls, and mutation hooks.
+title: React and Inertia
+description: Inject controller-declared live props into plain React page components.
 ---
 
-Generate the optional React wrapper:
+Run `php artisan zero:generate --react`. It writes the bound provider and creates
+an application-owned `zero.config.ts` once. Set the public cache URL there; never
+put the cache API key in browser configuration.
 
-```sh
-php artisan zero:generate --react
-```
-
-This writes `generated.react.ts` beside the contracts and creates an editable
-`zero.config.ts` once. Set its public `cacheURL` and optional query/mutation URLs;
-regeneration never overwrites that configuration. Set `zero.react` to `true`
-to include the wrapper in ordinary generation and `--check`.
+Install the query bindings in Inertia's page resolver:
 
 ```tsx
-import { ZeroProvider } from './zero/generated.react';
+import { createInertiaAdapter } from '@nickwelsh/zero-for-laravel/inertia';
+import { bindings } from '@/zero/generated.queries';
 
-<ZeroProvider userID={String(user.id)} context={{ user_id: user.id }}>
-    <App />
-</ZeroProvider>;
+const livePages = createInertiaAdapter(bindings);
+// After loading the requested component in createInertiaApp.resolve:
+return livePages.wrap(module.default, page);
 ```
 
-The wrapper binds schema/mutators, stabilizes equivalent scalar context objects,
-and replaces the native provider when user/context identity changes. Context
-also partitions local storage, including when switching tenants. An optional
-`auth` prop supports token renewal. The native provider owns construction and cleanup.
-The generic native `ZeroProvider` remains available from the React package for
-applications that manage Zero themselves.
+Put the generated `ZeroProvider` in the authenticated persistent layout, outside
+the wrapped page. Supply user identity and the context counterpart used for local
+prediction. Laravel independently resolves trusted context. Identity or tenant
+changes isolate subscriptions and local storage; native Zero owns construction
+and cleanup.
 
 ```tsx
-import { useData, useFilter, useMutation } from '@nickwelsh/zero-for-laravel/react';
-import { Task } from './zero/generated';
+import type { Pages } from '@/zero/generated.queries';
 
-function Tasks() {
-    const [title, TitleFilter] = useFilter(Task, 'title', { debounceMs: 150 });
-    const tasks = useData(Task.query().all().with('list').filter(title).infinite(50));
-    const create = useMutation(Task.create());
-
-    return (
-        <>
-            <TitleFilter label="Search tasks" />
-            <button disabled={create.state.status === 'pending'} onClick={() => create({ title: 'Hello' })}>
-                Add task
-            </button>
-            {tasks.data.map((task) => (
-                <p key={task.data.id}>{task.data.title}</p>
-            ))}
-            <button disabled={tasks.infinite?.hasMore !== true} onClick={() => tasks.infinite?.loadMore()}>
-                Load more
-            </button>
-        </>
-    );
+export default function Tasks({ tasks }: Pages['App\\Http\\Controllers\\TaskController@index']) {
+    if (tasks.status === 'loading') return <p role="status">Loading tasks…</p>;
+    if (tasks.status === 'failure') return <p role="alert">Unable to load tasks.</p>;
+    return tasks.data.map((task) => <p key={task.id}>{task.title}</p>);
 }
 ```
 
-`useData` exposes `data`, `complete`, native `details`, `connection`, `error`,
-`retry()`, and a `status` of `idle`, `loading`, `refreshing`, `failure`, `stale`, or
-`success`. Disabled queries are idle; incomplete empty results are loading;
-incomplete current-query rows are refreshing; complete empty results succeed.
-Previously completed empty results remain usable during background synchronization and become stale on error. Query errors with usable data are stale; errors without usable data are failures.
-Connection state remains separate. `render()` accepts the six matching handlers:
-`onIdle`, `onLoading`, `onRefreshing(rows)`, `onFailure(error)`,
-`onStale([rows, error])`, and `onSuccess(rows)`.
+No per-prop `useQuery` is necessary. Rows and related rows are plain decoded data,
+without a `.data` wrapper or mutation methods. Live objects distinguish loading,
+refreshing, success, stale data, failure, and idle/disabled state. Connection status
+does not imply query completeness.
 
-Other query examples:
+Infinite props expose `loadMore`, `hasMore`, and loading state; cursor-page props
+expose navigation. Completion determines whether more data is known to exist.
+Partial reloads and history use reserved page metadata; query descriptors never
+replace the omitted live prop in serialized page props. Initial SSR and hydration
+render a deterministic loading shell before native client initialization.
 
-```ts
-Task.query().one(id).with('list'); // Row | undefined, including visibility-filtered relations.
-Task.query().all().orderBy('title').limit(25);
-Task.query().all().withTrashed();
-Task.query().all().onlyTrashed();
-// If a declared direct to-many relation is named comments:
-Task.query().all().with('comments', 5);
-// If list declares a tasks include:
-Task.query()
-    .all()
-    .with('list', (list) => list.with('tasks', 5));
-```
-
-Builders are immutable and track included result shapes. Singular queries allow
-includes but not filters or pagination. Infinite loading expands one live ordered
-query, uses a lookahead row, resets on query/client changes, and respects `maxLimit`.
-`hasMore` is unknown until synchronization completes and false when the window cannot grow. `capped` reports the maximum; `exhausted` proves no further rows exist, and `stopReason` is `maximum`, `exhausted`, or undefined. An exact-cap result is capped without proving exhaustion. This grows a bounded live result window; it does not guarantee unrestricted dataset traversal.
-
-`useFilters(Task, ['done', 'title'])` returns `[filters, Controls]` for
-`.filters(filters)`. `useFilter` also returns a third setter. Undefined unsets a
-filter; null, false, and empty strings remain distinct. Substring filters accept
-strings only. Custom per-filter controls use `FilterControlProps<Value>`;
-`FilterProvider` can supply shared control defaults. Controls retain their identity
-while editing. Initial values/options belong to the mounted filter binding.
-The basic date control edits UTC; use a custom control for local-calendar semantics.
-
-Mutations return native `client` and `server` completion promises plus the stable
-record `id`. `state` reports pending/success/failure and field errors. `form` is
-also a Formbraid descriptor: pass it to your registered `<Form form={form} />`.
-It includes writable field definitions, defaults, and a callback that waits for
-server acceptance and maps field errors. Selecting `.with('person')` adds fields
-such as `person.first_name`. Formbraid owns editing and submission, and date
-fields edit strings that the callback converts to native Dates.
-
-The existing manual controls (`form.values`, `form.setValue()`, `form.errors`,
-`submit()`, and `reset()`) remain available. Bound update forms submit changed
-fields plus fields explicitly required by update rules. Handle both synchronous
-`InputError` from direct preparation and asynchronous mutation outcomes.
-
-```ts
-const update = useMutation(task.update());
-const call = update({ completed_at: new Date() });
-const result = await call.server;
-// result.type is 'success' or 'error'; inspect result.error on failure.
-```
-
-Outside React, use `zero.mutate(Task.create().prepare(input))`, or
-`Task.query().all().decode(await zero.run(Task.query().all().request()))`.
-Public dates are `Date`; native Zero rows/requests use epoch milliseconds.
-`HasUuids` uses UUIDv7 and `HasUlids` uses ULID. IDs and the optimistic clock are
-captured once before enqueueing. Eloquent timestamp column constants are respected.
-For millisecond-preserving writes, use temporal columns with matching precision
-and an Eloquent `$dateFormat` such as `Y-m-d H:i:s.u`.
-
-To customize the client clock or generated-ID provider, call
-`createZeroForLaravel(schema, definitions, {now: () => new Date(), id: (kind, model) => ...})`
-and use its returned models/queries/mutators together. Custom IDs must still match
-the declared UUID/ULID strategy. Native Zero options configure storage and transport.
-
-Records are model snapshots: columns and loaded relations live under `task.data`.
-Included relations contain snapshots too (`task.data.list?.data.name`). Instance
-methods such as `task.update()` and `task.destroy()` bind the record ID and remain
-callable when destructured. For lazy relations, `useData(task.list)` projects the
-relation through an authorized parent `one` query; targets need no top-level query.
-Lazy access requires the parent to opt into `one` and the relation to be an allowed include.
-Generated exports include both `Task` (instance type and model value) and `TaskRow`
-(the column-only type). Both `Task.query.all()` and `Task.query().all()` work.
-
-Continue with [mutations](./mutations.mdx) for forms and field permissions,
-[queries](./queries.mdx) for richer filters, or
-[records and casts](./records-and-casts.mdx) for DTO typing.
-
-## Sort transitions and stable data
-
-For a root sort-only change, `useData` keeps the last completed ordering subscribed
-and live until the replacement completes. Rapid sorts and retry keep using that
-committed subscription; superseded completions cannot replace the current query.
-A replacement error exposes stale rows plus the replacement error and retry.
-Completed empty results are valid committed results too.
-
-Filters, included relationships (including their ordering), pagination scope,
-contracts, and Zero identity/context changes immediately isolate prior rows.
-Unmounting releases native subscriptions; Zero's `ttl` option independently owns
-retention and continued synchronization after subscriptions are removed.
-
-Inline selections such as `useData(Task.query.all())` reuse decoded data when their
-semantics, contracts, authorization identity, and native result are unchanged.
-Decoding is local to the hook; there is no global snapshot cache. Dates and nested
-snapshots keep their references across an unrelated rerender.
-
-Query-only applications do not need FormBraid. Its optional peer is used only by
-consumers that opt into forms; the package's producer declarations are structural.
+Use [controller mutation bindings](./mutations.mdx) for forms. Pages do not receive
+model objects with bound write methods. See the shared todos example for the full
+resolver, layout, connection options, forms, and sharing workflow.

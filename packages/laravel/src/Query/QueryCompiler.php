@@ -15,13 +15,21 @@ use ZeroForLaravel\ZeroContext;
  * @phpstan-type Simple array{type: 'simple', op: string, left: array{type: 'column', name: string}, right: array{type: 'literal', value: mixed}}
  * @phpstan-type Correlated array{type: 'correlatedSubquery', related: array<string, mixed>, op: 'EXISTS'}
  * @phpstan-type Atom Simple|Correlated
- * @phpstan-type Condition array<string, mixed>
- * @phpstan-type Ast array{table: string, where?: Condition, orderBy?: list<array{string, 'asc'|'desc'}>, limit?: int, alias?: string, related?: list<array<string, mixed>>}
+ * @phpstan-type WireCondition array<string, mixed>
+ * @phpstan-type Ast array{table: string, where?: WireCondition, orderBy?: list<array{string, 'asc'|'desc'}>, limit?: int, alias?: string, related?: list<array<string, mixed>>}
  * @phpstan-type Related array{correlation: array{parentField: list<string>, childField: list<string>}, subquery: Ast, system: 'client', hidden?: true}
  */
 final readonly class QueryCompiler
 {
     public function __construct(private ModelRegistry $registry) {}
+
+    /** Compile an application-owned declaration, never an AST supplied over HTTP.
+     * @return array<string, mixed>
+     */
+    public function compileDeclaration(Query $query, ZeroContext $context): array
+    {
+        return $this->authorizeDeclaration($query->ast(), $context, 0);
+    }
 
     /**
      * @return Ast
@@ -55,6 +63,73 @@ final readonly class QueryCompiler
         }
 
         return $this->build($model, $args, $context, $operation, 0);
+    }
+
+    /** @param array<string, mixed> $ast
+     * @return array<string, mixed>
+     */
+    private function authorizeDeclaration(array $ast, ZeroContext $context, int $depth): array
+    {
+        if ($depth > 8) {
+            Input::fail('query', 'Query relationships exceed the maximum depth.');
+        }
+
+        if (isset($ast['where'])) {
+            $ast['where'] = $this->authorizeCondition(Input::object($ast['where'], 'condition'), $context, $depth);
+        }
+
+        if (isset($ast['related']) && is_array($ast['related'])) {
+            foreach ($ast['related'] as $index => $related) {
+                $related = Input::object($related, 'relationship');
+                $related['subquery'] = $this->authorizeDeclaration(Input::object($related['subquery'], 'subquery'), $context, $depth + 1);
+                $ast['related'][$index] = $related;
+            }
+        }
+
+        foreach ($this->registry->all() as $model) {
+            if ($model->table !== $ast['table']) {
+                continue;
+            }
+
+            $conditions = $this->visibility($model, $context, $depth);
+            if ($model->deletedAt !== null) {
+                $conditions[] = $this->comparison($model->deletedAt, 'IS', null);
+            }
+
+            if (isset($ast['where'])) {
+                $conditions[] = Input::object($ast['where'], 'condition');
+            }
+
+            if ($conditions !== []) {
+                $ast['where'] = $this->conjunction($conditions);
+            }
+
+            return $ast;
+        }
+
+        if (! is_string($ast['table']) || ! isset($this->registry->pivots()[$ast['table']])) {
+            throw new LogicException('Query references a table outside the registered model schema.');
+        }
+
+        return $ast;
+    }
+
+    /** @param array<string, mixed> $condition
+     * @return array<string, mixed>
+     */
+    private function authorizeCondition(array $condition, ZeroContext $context, int $depth): array
+    {
+        if ($condition['type'] === 'correlatedSubquery') {
+            $related = Input::object($condition['related'], 'relationship');
+            $related['subquery'] = $this->authorizeDeclaration(Input::object($related['subquery'], 'subquery'), $context, $depth + 1);
+            $condition['related'] = $related;
+        } elseif (isset($condition['conditions']) && is_array($condition['conditions'])) {
+            foreach ($condition['conditions'] as $index => $child) {
+                $condition['conditions'][$index] = $this->authorizeCondition(Input::object($child, 'condition'), $context, $depth);
+            }
+        }
+
+        return $condition;
     }
 
     /**
@@ -117,7 +192,7 @@ final readonly class QueryCompiler
     }
 
     /** @param array<string, mixed> $filter
-     * @return Condition
+     * @return WireCondition
      */
     private function filterCondition(ModelMetadata $model, array $filter, mixed $value, string $name, ZeroContext $context, int $depth): array
     {
@@ -244,7 +319,7 @@ final readonly class QueryCompiler
     }
 
     /** @param array<string, mixed> $expression
-     * @return Condition
+     * @return WireCondition
      */
     private function callbackCondition(ModelMetadata $model, array $expression, mixed $value): array
     {
@@ -323,7 +398,7 @@ final readonly class QueryCompiler
     }
 
     /**
-     * @return list<Condition>
+     * @return list<WireCondition>
      */
     private function visibility(ModelMetadata $model, ZeroContext $context, int $depth): array
     {
@@ -361,8 +436,8 @@ final readonly class QueryCompiler
     }
 
     /**
-     * @param  list<Condition>  $conditions
-     * @return Condition
+     * @param  list<WireCondition>  $conditions
+     * @return WireCondition
      */
     private function conjunction(array $conditions): array
     {

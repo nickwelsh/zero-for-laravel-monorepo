@@ -9,6 +9,9 @@ use RectorLaravel\Set\LaravelSetList;
 return RectorConfig::configure()
     ->withPaths([__DIR__.'/src', __DIR__.'/config', __DIR__.'/tests'])
     ->withSkip([
+        // These are compiler inputs: their syntax, attributes and unused request
+        // parameters are intentional test data, not dead application code.
+        __DIR__.'/tests/Fixtures',
         // Preserve exception codes and framework property initialization checks.
         Rector\CodeQuality\Rector\Catch_\ThrowWithPreviousExceptionRector::class,
         Rector\CodeQuality\Rector\Isset_\IssetOnPropertyObjectToPropertyExistsRector::class,

@@ -1,7 +1,7 @@
 # Shared todos
 
 A Laravel 13 React starter application with session authentication and native Zero
-live queries/optimistic CRUD. It consumes the local Composer package in
+controller-declared live queries and controller mutations. It consumes the local Composer package in
 `../../packages/laravel` and the `@nickwelsh/zero-for-laravel` pnpm workspace package.
 
 - Application: <https://todos.test>
@@ -9,7 +9,8 @@ live queries/optimistic CRUD. It consumes the local Composer package in
 - Owners create, rename, delete, and share lists with registered users.
 - Every member can add, edit, complete, and delete todos.
 - Private lists and todos are hidden from other users. User/auth tables are never
-  published to Zero. Sharing uses a normal authenticated Laravel endpoint.
+  published to Zero. Sharing uses a registered controller mutation with explicitly
+  disabled optimism, preserving Laravel validation, binding, and policies.
 
 ## Requirements
 
@@ -72,8 +73,9 @@ No separate frontend or cache terminal is needed. After changing model contracts
 regenerate; the migration hook synchronizes the publication automatically.
 `pnpm zero:dev` remains available for running the cache on its own.
 
-The cache script trusts Herd's local CA with `NODE_EXTRA_CA_CERTS`. Override
-`ZERO_HERD_CA` if your CA lives elsewhere. It never disables TLS verification.
+The cache script trusts Herd's local CA with `NODE_EXTRA_CA_CERTS` when it exists.
+Override `ZERO_CA_CERT` or `ZERO_HERD_CA` if your CA lives elsewhere. HTTP development
+does not require Herd or a certificate. It never disables TLS verification.
 The upstream, CVR, and change databases use the same local PostgreSQL database,
 with separate internal Zero schemas keyed by `todos`; `ZERO_UPSTREAM_SCHEMA=todos_0`
 matches the cache. The replica is stored in ignored `storage/app/zero`.
@@ -132,11 +134,15 @@ and FormRequests validate destination-list access, preventing a member from movi
 a todo into someone else's private list. Deleting a list cascades its todos and
 memberships. Sharing adds membership by registered email; duplicate shares are safe.
 
+`DashboardController` declares the list query, its related todos, ordering, and live
+window. The Inertia adapter injects plain typed live rows. `TodoController`,
+`TodoListController`, and `ShareListController` explicitly opt into Zero mutations;
+the frontend calls generated action bindings, not model-level automatic CRUD.
+
 List creation inserts its owner membership on the server. The new list becomes
-visible once that membership replicates; the example waits for server completion
-before selecting it. Membership mutations and custom Zero queries/mutations are
-not exposed. Revocation/invitations and richer sharing management are outside this
-initial example.
+visible once that membership replicates; the example waits for native server
+completion before selecting it. Direct membership mutations are not exposed.
+Revocation/invitations and richer sharing management are outside this example.
 
 ## Checks
 

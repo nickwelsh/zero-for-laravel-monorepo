@@ -1,37 +1,27 @@
 # Zero for Laravel
 
-Laravel-owned model contracts, queries and automatic CRUD for Rocicorp Zero.
+Controller-first live queries and mutations for Rocicorp Zero **1.11.3**.
 
-Install the current stable release, **v0.4.0**, in your Laravel application:
+This is an unreleased pre-alpha rewrite. Use the matching Composer path and pnpm
+workspace revisions; registry releases do not contain this code. PHP 8.3+, Laravel
+12/13, and PostgreSQL with logical replication are required targets.
+
+Controllers declare immutable `Model::zeroQuery()` live props and explicitly opt
+actions into `#[ZeroMutation]`. Ranger/Surveyor-backed generation emits coordinated
+PHP registrations, native ZQL/mutators, validation schemas, result codecs, and page
+types. Laravel retains real binding, middleware, FormRequests, Gates, and Eloquent.
+Zero retains replication, optimistic replay, ordering, and durable mutation results.
 
 ```sh
-composer require nickwelsh/zero-for-laravel
-pnpm add @nickwelsh/zero-for-laravel
-pnpm add --save-exact @rocicorp/zero@1.10.0
 php artisan vendor:publish --tag=zero-config
+php artisan zero:generate --react
+php artisan zero:sync-publication --dry-run
 ```
 
-Keep the Composer and JavaScript packages on matching release versions. Use Zero
-cache **1.10.0**; React bindings additionally require React 18 or 19.
+Review and apply publication changes to the application's configured PostgreSQL
+database. Deploy generated PHP and TypeScript together; use `zero:generate --check`
+in CI. Keep the cache API key server-side and independently authenticate end users.
 
-Development takes place in the [source monorepo](https://github.com/nickwelsh/zero-for-laravel-monorepo).
-`nickwelsh/zero-for-laravel` is the generated PHP distribution mirror. Send issues and
-pull requests to the monorepo; changes made directly to the mirror are not supported.
-
-See the [monorepo documentation](https://github.com/nickwelsh/zero-for-laravel-monorepo#readme) for installation, authorization, configuration and React usage.
-
-Requires PHP 8.3+ and Laravel 12 or 13.
-
-## v0.3.0 additions
-
-`zero:dev` owns local contract generation, publication synchronization, and cache
-startup. `zero:doctor` separates prerequisites and process health from unknown
-callback/backfill readiness. `zero:exposure` reports model permissions and columns.
-`zero:reset --dry-run` inventories an owned local replica; `--force` removes only
-its exact local files after process/slot checks, preserving PostgreSQL data.
-
-Domain mutations are explicitly registered `DomainMutation` classes backed by
-Laravel FormRequests and the existing mutation processor. Publication-sensitive
-migrations can call `PublicationManager::releaseTable()` before destructive DDL;
-final metadata is restored after the successful batch. See the source documentation
-for configuration, ownership, failure recovery, and deployment ordering.
+See the [monorepo guide](https://github.com/nickwelsh/zero-for-laravel-monorepo#readme)
+and [shared todos example](https://github.com/nickwelsh/zero-for-laravel-monorepo/tree/main/examples/todos).
+Development and issues belong in the source monorepo, not the distribution mirror.

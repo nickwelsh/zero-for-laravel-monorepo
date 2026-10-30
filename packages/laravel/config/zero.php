@@ -12,6 +12,9 @@ return [
     // When models is empty, only explicitly opted-in models in these PSR-4 roots are discovered.
     'discovery' => [], // Empty retains app/Models and the application's namespace.
     'output' => resource_path('js/zero/generated.ts'),
+    // Deploy this registration together with the sibling generated.queries.ts module.
+    'controller_output' => base_path('bootstrap/zero-queries.php'),
+    'mutation_output' => base_path('bootstrap/zero-mutations.php'),
     // Optional React wrapper. Its editable sibling config holds public connection options.
     'react' => false,
     // Synchronize after successful, non-pretend PostgreSQL migration batches.

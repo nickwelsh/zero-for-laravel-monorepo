@@ -6,6 +6,7 @@ namespace ZeroForLaravel\Domain;
 
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\ValidationException;
 use LogicException;
 use ZeroForLaravel\Support\Input;
 use ZeroForLaravel\ZeroContext;
@@ -65,22 +66,8 @@ final class DomainRegistry
         return array_filter(array_map(fn (string $class): array => $class::output(), $this->operations));
     }
 
-    /** @return array<string, mixed> */
-    public function resolveResult(string $name, mixed $arguments, ZeroContext $context, ?Authenticatable $user): array
-    {
-        [$class, $input] = $this->authorizedInput($name, $arguments, $context, $user);
-        abort_if($class::output() === [], 404);
-        $action = resolve($class);
-        if (! $action instanceof DomainMutation) {
-            throw new LogicException('Invalid domain action binding.');
-        }
-
-        $result = $action->result($input, $context);
-
-        return $this->validate($class::output(), $result);
-    }
-
-    public function execute(string $name, mixed $arguments, ZeroContext $context, ?Authenticatable $user): void
+    /** @return array{data?: array<string, mixed>} */
+    public function execute(string $name, mixed $arguments, ZeroContext $context, ?Authenticatable $user): array
     {
         [$class, $input] = $this->authorizedInput($name, $arguments, $context, $user);
         $action = resolve($class);
@@ -88,7 +75,21 @@ final class DomainRegistry
             throw new LogicException('Invalid domain action binding.');
         }
 
-        $action->handle($input, $context);
+        $result = $action->handle($input, $context);
+
+        if ($class::output() === []) {
+            if ($result !== null) {
+                throw new OperationException('invalid_result', 'This mutation does not declare returned data.');
+            }
+
+            return [];
+        }
+
+        try {
+            return ['data' => $this->validate($class::output(), $result)];
+        } catch (ValidationException) {
+            throw new OperationException('invalid_result', 'The mutation result does not match its contract.');
+        }
     }
 
     /** @param array<string, array{type: 'string'|'number'|'boolean', optional?: bool, nullable?: bool, array?: bool, maxItems?: int}> $fields */

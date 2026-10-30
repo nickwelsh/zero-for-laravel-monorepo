@@ -50,7 +50,7 @@ final class DevCommand extends Command
             }
 
             $files->replace($local->replica().'.owner.json', json_encode([
-                'version' => '1.10.0', 'workspace' => realpath(base_path()),
+                'version' => '1.11.3', 'workspace' => realpath(base_path()),
                 'app' => config()->string('zero.app_id'), 'database' => $connection->getDatabaseName(),
                 'host' => $connection->getConfig('host'), 'port' => $connection->getConfig('port'),
                 'replica' => $local->replica(),

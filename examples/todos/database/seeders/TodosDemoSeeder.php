@@ -24,10 +24,12 @@ class TodosDemoSeeder extends Seeder
             'name' => 'Bob', 'password' => Hash::make('todos-demo-password'), 'email_verified_at' => now(),
         ]);
         $shared = TodoList::firstOrCreate(['user_id' => $alice->id, 'name' => 'Household']);
+        $shared->memberships()->firstOrCreate(['user_id' => $alice->id]);
         $shared->memberships()->firstOrCreate(['user_id' => $bob->id]);
         Todo::firstOrCreate(['list_id' => $shared->id, 'title' => 'Pick up groceries']);
         Todo::firstOrCreate(['list_id' => $shared->id, 'title' => 'Water the plants']);
         $private = TodoList::firstOrCreate(['user_id' => $alice->id, 'name' => 'Personal']);
+        $private->memberships()->firstOrCreate(['user_id' => $alice->id]);
         Todo::firstOrCreate(['list_id' => $private->id, 'title' => 'Plan the weekend']);
     }
 }

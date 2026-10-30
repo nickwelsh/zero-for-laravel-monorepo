@@ -1,61 +1,68 @@
 # @nickwelsh/zero-for-laravel
 
-Typed model queries, automatic optimistic CRUD, and React bindings for Zero for Laravel.
-Requires the matching `nickwelsh/zero-for-laravel` Composer package and
-`@rocicorp/zero` **1.10.0**. React 18/19 and FormBraid are optional peers. Query-only consumers do not need FormBraid.
+Controller-first Laravel queries and mutations on native Rocicorp Zero **1.11.3**.
+This is an unreleased pre-alpha rewrite. Use matching workspace/path revisions of
+this package and `nickwelsh/zero-for-laravel`; backwards compatibility is not a goal.
 
-Install the current stable release, **v0.4.0**, in your Laravel application:
+Laravel owns controller discovery, FormRequests, binding, authorization, and
+authoritative writes. Zero owns replication, subscriptions, optimistic transactions,
+replay, and persisted mutation outcomes. There is no separate client queue or
+mutation-result endpoint.
 
-```sh
-composer require nickwelsh/zero-for-laravel
-pnpm add @nickwelsh/zero-for-laravel
-pnpm add --save-exact @rocicorp/zero@1.10.0
-php artisan vendor:publish --tag=zero-config
-```
+## Inertia pages
 
-Keep the Composer and JavaScript packages on matching release versions, and use
-Zero cache **1.10.0** with the pinned Zero client.
-
-```ts
-import { Task } from './zero/generated';
-import { useData, useMutation } from '@nickwelsh/zero-for-laravel/react';
-
-const data = useData(Task.query().all());
-const create = useMutation(Task.create());
-create({ title: 'Hello' });
-```
-
-Use these hooks inside Zero's `ZeroProvider`. The root export is framework
-independent; `/react` adds React hooks, filter controls, and the native provider.
-Laravel generates the schema and allowed operations from your model definitions.
-
-`useMutation` also returns a Formbraid descriptor. Pass it to your application's
-registered `Form`; selected relations add prefixed fields and share one mutation:
+Run `php artisan zero:generate --react` in the application. Install the generated
+query bindings in the page resolver:
 
 ```tsx
-const { form } = useMutation(Party.create().with('person'));
-return <Form form={form} />;
+import { createInertiaAdapter } from '@nickwelsh/zero-for-laravel/inertia';
+import { bindings } from '@/zero/generated.queries';
+
+const livePages = createInertiaAdapter(bindings);
+// Inside createInertiaApp's resolver, after loading the page component:
+return livePages.wrap(module.default, page);
 ```
 
-Formbraid owns edits and submission. The callback restores date strings to Dates,
-waits for server acceptance, and maps field errors. The client uses structural producer declarations and an optional
-`@formbraid/core` peer. For forms, install `@formbraid/core@^0.1.0` and `@formbraid/react@^0.1.0` for the form runtime.
-Collections require an application array component; see the mutations guide for
-component names and defaults.
+Put the generated `ZeroProvider` in the authenticated persistent layout, outside
+the wrapped page. Supply the authenticated user ID and trusted-context counterpart.
+The adapter injects declared live props; pages do not call `useQuery` for them.
+Rows are plain decoded data, not model snapshots:
 
-See the [installation guide and API examples](https://github.com/nickwelsh/zero-for-laravel-monorepo#readme)
-for model attributes, policies, publication setup, authenticated endpoints,
-client lifetime, and supported constraints.
+```tsx
+import type { Pages } from '@/zero/generated.queries';
 
-## v0.3.0 additions
+export default function Dashboard({ lists }: Pages['App\\Http\\Controllers\\DashboardController@index']) {
+    return lists.data.map((list) => <p key={list.id}>{list.name}</p>);
+}
+```
 
-Selections accept typed `.filter(name, value)` as well as filter objects.
-`toPlain(result.data)` recursively unwraps snapshots into readonly decoded data.
-`useData` preserves completed empty results, live committed sort ordering, and
-stable decoding across equivalent inline selections. Infinite results distinguish
-`exhausted` from `capped` and expose `stopReason`; the API grows a bounded live
-window rather than traversing an entire dataset.
+Live props distinguish loading, success, refreshing, stale, failure, and disabled
+states. Connection status is separate from query completion. Infinite queries grow
+one live window; cursor pages keep raw ordering values to avoid rounding timestamps.
 
-Explicit Laravel domain actions generate typed native Zero mutations, server-only
-by default, with optional deterministic optimistic callbacks. See the
-[domain mutation guide](https://github.com/nickwelsh/zero-for-laravel-monorepo/blob/main/apps/docs/content/docs/0.x/docs/domain-mutations.mdx).
+## Controller mutations
+
+```tsx
+import { useControllerMutation } from '@nickwelsh/zero-for-laravel/react';
+import { actions } from '@/zero/generated.react';
+
+const create = useControllerMutation(actions['App\\Http\\Controllers\\TodoController@store']);
+const saved = await create({ list_id: list.id, title: 'A new task' });
+console.log(saved.id); // Validated authoritative result, not just local prediction.
+```
+
+Use a bound route argument map for update/delete actions. The hook exposes pending,
+local application, server acceptance, field errors, and committed-result decoding
+errors separately. Unmounting does not cancel or undo an enqueued native mutation.
+
+For native lifecycle control, call `action.prepare(input, routeArguments)`, then
+`zero.mutate(request)`. Await `.client` for local prediction and `.server` for the
+authoritative outcome. Parse data with `clientResultSchema` or `serverResultSchema`;
+the two contracts can intentionally differ. Preparation captures IDs and time once.
+
+Custom optimism is passed to the generated binding factory; disabled optimism is
+an explicit no-op client recipe using the same native protocol. Unsupported code
+in generated mode fails generation rather than silently disabling optimism.
+
+See the [repository guide](../../README.md), [query design](../../docs/QUERY_DESIGN.md),
+[mutation design](../../docs/MUTATION_DESIGN.md), and [running example](../../examples/todos/README.md).

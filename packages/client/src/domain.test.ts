@@ -2,6 +2,7 @@
 import { Zero, createBuilder } from '@rocicorp/zero';
 import { expect, it } from 'vite-plus/test';
 import { createDomainMutations } from './domain';
+import { completeMutation } from './operation';
 import { Task, schema, mutators } from '../../../tests/interop/generated';
 import type { ClientContext } from './contract';
 
@@ -41,6 +42,11 @@ it('uses native atomic optimistic mutations with owned stable input and bounded 
         expect(await zero.mutate(request).client).toEqual({ type: 'success' });
         await zero.mutate(Task.update().prepare({ id: created.args.id, done: false })).client;
         expect(() => domain.actions.completeTasks().prepare({ ids: ['1', '2', '3', '4'] })).toThrow('bounded');
+        // The supported native version resolves .server on local rejection too.
+        // A failed second write must not leave the first speculative write behind.
+        const rejected = domain.actions.completeTasks().prepare({ ids: [created.args.id, 'unavailable'] });
+        await expect(completeMutation(zero.mutate(rejected))).rejects.toThrow('Unavailable');
+        expect((await zero.run(Task.query.one(created.args.id).request()))?.done).toBe(false);
     } finally {
         await zero.close();
     }

@@ -1,36 +1,31 @@
 ---
 title: Supported constraints
-description: Understand the current v0.x database, relationship, and runtime limits.
+description: The checked pre-alpha subset and native integration boundaries.
 ---
 
-- Automatic `all`/`one` and create/update/destroy/restore/force_delete only.
-  Custom queries/mutations, upsert, and Inertia adapters are deferred.
-- One upstream connection, unprefixed tables in `public`, one model per table,
-  and unique model short names. Creates require standard `HasUuids` or `HasUlids`;
-  existing numeric-key models can read/update/delete without optimistic creates.
-- Plain belongs-to, has-one, has-many, and belongs-to-many relations. Pivots need
-  real primary keys and cannot also be registered as models. Constrained or
-  polymorphic Eloquent relations fail generation.
-- Direct to-many includes can be limited. Native Zero junction includes cannot
-  be ordered or limited. Includes nest to a maximum depth of eight.
-- Portable SQL scalar/JSON columns and date/timestamp columns. JSON filtering and
-  sorting, SQL time-only fields, custom database types, and arrays are unsupported.
-  JavaScript numeric precision applies to bigint/decimal data.
-- Eloquent scopes, accessors, encrypted casts, appended properties, and arbitrary
-  PHP logic do not execute on replicated reads. Keep sensitive stored columns
-  outside the [resolved column allowlist](./models.mdx#columns-and-privacy) and
-  express row visibility using the Zero definition. Nonempty `$visible` restricts
-  database columns; it does not run accessors or export appended properties.
-  Required excluded columns fail generation. Supported primitive casts are
-  hydrated, backed enums use literal unions, and DTO JSON shapes can use optional
-  TypeScript module augmentation without requiring Laravel Data.
-- Server-only validation, normalization, defaults, timestamps, and model events
-  can reconcile optimistic values. Keep external event side effects after commit.
+- Pin Zero client and cache to **1.11.3**. This rewrite has no compatibility promise
+  with earlier package releases or queued operations from incompatible contracts.
+- One upstream connection, unprefixed public tables, one model per table, unique
+  model short names, and explicitly registered relationship targets.
+- Query construction follows native ZQL; arbitrary Eloquent SQL and arbitrary
+  PHP-to-TypeScript translation are not supported. Unsupported controller code
+  fails generation rather than running during analysis.
+- Generated mutations support checked expressions, branching, bounded keyed loops,
+  shared helpers, transaction reads/writes, authorization guards, and JSON results.
+  Use custom or disabled optimism deliberately for unsupported PHP.
+- Generated creates require UUID/ULID keys. Keyed repeated creation uses UUIDs.
+  Numeric-key authoritative creation can use disabled optimism. No temporary-ID
+  remapping is inferred.
+- Portable soft deletes, arbitrary custom casts, nullable/partial unique keys,
+  dynamic helper dispatch, and cross-connection atomicity are unsupported.
+- A missing required cached row can decline prediction before writes. Cache
+  absence is not proof of authoritative nonexistence, and there are no implicit
+  browser transaction savepoints for late fallback.
+- Gates, policies, middleware, FormRequest hooks, and full validation remain
+  authoritative PHP. Local prediction is not an access-control boundary.
+- External work needs application-owned after-commit/outbox and idempotency
+  discipline. Native outcome recovery is not a user-facing persistent inbox or
+  restoration of JavaScript promises after a browser reload.
 
-## Nested write limits
-
-Nested writes support create/update through direct belongs-to, has-one, and
-has-many relations using primary-key references. Each graph is limited to eight
-relation levels and 100 records including the root. The same record cannot occur
-twice. Connect, disconnect, reparenting, nested deletion, many-to-many, and
-polymorphic writes are unsupported. See [nested mutations](./nested-mutations.mdx).
+Generated names include contract fingerprints. Deploy matching PHP and TypeScript
+artifacts; unknown/stale operation contracts reject instead of acquiring new semantics.

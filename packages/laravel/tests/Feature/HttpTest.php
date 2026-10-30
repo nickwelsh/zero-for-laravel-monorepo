@@ -13,6 +13,14 @@ use ZeroForLaravel\Tests\HttpTestCase;
 
 uses(HttpTestCase::class);
 
+test('annotated mutations cannot bypass native preparation through ordinary HTTP', function (): void {
+    \Illuminate\Support\Facades\Route::post('/controller-write', [\ZeroForLaravel\Tests\Fixtures\ControllerMutationController::class, 'store']);
+    $request = Request::create('/controller-write', 'POST', ['title' => 'Bypass', 'zero.controller.dispatch' => true]);
+    $response = resolve(\Illuminate\Contracts\Http\Kernel::class)->handle($request);
+    expect($response->getStatusCode())->toBe(405);
+    expect(\ZeroForLaravel\Tests\Fixtures\Task::count())->toBe(0);
+});
+
 test('context preserves numeric identifiers while protocol user id is a string', function (): void {
     /** @var HttpTestCase $this */
     $user = (new User)->forceFill(['id' => 42]);
@@ -81,7 +89,7 @@ test('generation command writes verified contracts and can detect drift', functi
         $command->assertSuccessful()->run();
         $source = file_get_contents($path);
         $this->assertIsString($source);
-        $this->assertStringContainsString('export const Task =', $source);
+        $this->assertStringContainsString('export type TaskRow =', $source);
         $command = $this->artisan('zero:generate', ['--output' => $path, '--check' => true]);
         $this->assertInstanceOf(\Illuminate\Testing\PendingCommand::class, $command);
         $command->assertSuccessful()->run();
@@ -131,7 +139,7 @@ test('react generation binds the contracts and preserves editable connection con
         $command = $this->artisan('zero:generate', ['--output' => $path, '--react' => true]);
         $this->assertInstanceOf(\Illuminate\Testing\PendingCommand::class, $command);
         $command->assertSuccessful()->run();
-        expect(file_get_contents($directory.'/generated.react.ts'))->toContain('createZeroProvider(schema, mutators, options)', '"./generated"');
+        expect(file_get_contents($directory.'/generated.react.ts'))->toContain('createZeroProvider(schema, mutators, options, true)', '"./generated"');
         file_put_contents($directory.'/zero.config.ts', '// Application-owned options');
         $command = $this->artisan('zero:generate', ['--output' => $path, '--react' => true]);
         $this->assertInstanceOf(\Illuminate\Testing\PendingCommand::class, $command);
@@ -169,26 +177,8 @@ test('exposure reports reflect the same private column and authorization metadat
     $command->expectsOutputToContain('Published:')->expectsOutputToContain('Owner rules:')->assertSuccessful()->run();
 });
 
-test('optional action results require authentication, reapply authorization and expose only the declared read result', function (): void {
+test('mutation results are not exposed through a second read endpoint', function (): void {
     /** @var HttpTestCase $this */
-    $registry = new \ZeroForLaravel\Domain\DomainRegistry(['completeTasks' => \ZeroForLaravel\Tests\Fixtures\CompleteTasks::class]);
-    app()->instance(\ZeroForLaravel\Domain\DomainRegistry::class, $registry);
-    $task = \ZeroForLaravel\Tests\Fixtures\Task::create(['user_id' => 'alice', 'title' => 'Result']);
-    $payload = ['ids' => [$task->getKey()]];
-    $this->postJson('/zero/results/completeTasks', $payload)->assertUnauthorized();
     $alice = (new User)->setKeyType('string')->forceFill(['id' => 'alice']);
-    $this->actingAs($alice)->postJson('/zero/results/completeTasks', $payload)->assertOk()->assertExactJson($payload);
-    expect($task->fresh()?->done)->toBeFalse();
-    $bob = (new User)->setKeyType('string')->forceFill(['id' => 'bob']);
-    $this->actingAs($bob)->postJson('/zero/results/completeTasks', $payload)->assertForbidden();
-});
-
-test('result reads reject invalid input and cross-owner records', function (): void {
-    /** @var HttpTestCase $this */
-    app()->instance(\ZeroForLaravel\Domain\DomainRegistry::class, new \ZeroForLaravel\Domain\DomainRegistry(['completeTasks' => \ZeroForLaravel\Tests\Fixtures\CompleteTasks::class]));
-    $alice = (new User)->setKeyType('string')->forceFill(['id' => 'alice']);
-    $task = \ZeroForLaravel\Tests\Fixtures\Task::create(['user_id' => 'bob', 'title' => 'Private']);
-    $this->actingAs($alice)->postJson('/zero/results/completeTasks', ['ids' => [$task->getKey()]])->assertNotFound();
-    $this->postJson('/zero/results/completeTasks', ['ids' => ['invalid']])->assertUnprocessable()->assertJsonValidationErrors('ids.0');
-    $this->postJson('/zero/results/completeTasks', ['ids' => [$task->getKey()], 'user_id' => 'bob'])->assertUnprocessable();
+    $this->actingAs($alice)->postJson('/zero/results/completeTasks', ['ids' => []])->assertNotFound();
 });

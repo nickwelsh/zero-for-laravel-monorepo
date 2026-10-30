@@ -5,15 +5,18 @@ namespace App\Http\Controllers;
 use App\Http\Requests\ShareListRequest;
 use App\Models\TodoList;
 use App\Models\User;
-use Illuminate\Http\RedirectResponse;
+use Illuminate\Support\Facades\Gate;
+use ZeroForLaravel\Attributes\ZeroMutation;
+use ZeroForLaravel\Mutation\Mutation;
 
 class ShareListController extends Controller
 {
-    public function __invoke(ShareListRequest $request, TodoList $list): RedirectResponse
+    #[ZeroMutation(optimism: 'disabled', conceal: true)]
+    public function __invoke(ShareListRequest $request, TodoList $list, Mutation $mutation): void
     {
+        $list = $mutation->reloadForUpdate($list);
+        Gate::authorize('share', $list);
         $user = User::where('email', $request->string('email')->toString())->firstOrFail();
         $list->memberships()->firstOrCreate(['user_id' => $user->id]);
-
-        return back()->with('success', "List shared with {$user->name}.");
     }
 }

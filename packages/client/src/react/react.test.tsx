@@ -4,7 +4,9 @@ import { act, cleanup, fireEvent, render, renderHook, screen } from '@testing-li
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 import { createZeroForLaravel } from '../runtime';
 import { Task, schema, mutators, definitions } from '../../../../tests/interop/generated';
-import { useData, useFilter, useFilters, useMutation, createZeroProvider } from './index';
+import { useData, createZeroProvider } from './index';
+import { useFilter, useFilters } from './filters';
+import { useMutation } from './mutation';
 
 const native = vi.hoisted(() => ({
     raw: [] as unknown,

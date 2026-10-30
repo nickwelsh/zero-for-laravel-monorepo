@@ -6,12 +6,17 @@ import { join } from 'node:path';
 import { createServer } from 'node:net';
 import { randomBytes } from 'node:crypto';
 import { Zero } from '@rocicorp/zero';
+import { z } from 'zod';
+import {
+    createControllerMutations,
+    type ControllerMutationContract,
+} from '../../packages/client/src/controller-mutation';
 import { ZeroProvider } from '@rocicorp/zero/react';
 import { render, waitFor } from '@testing-library/react';
 import { useData, type Data } from '../../packages/client/src/react/data';
 import type { SelectionData } from '../../packages/client/src/query';
 import { expect, it } from 'vite-plus/test';
-import { Task, schema, mutators } from '../interop/generated';
+import { Task, schema, mutators, definitions } from '../interop/generated';
 import type { ClientContext } from '../../packages/client/src/contract';
 
 const enabled = process.env.ZERO_LIVE_TESTS === '1';
@@ -55,6 +60,8 @@ it.skipIf(!enabled)(
             PGPASSWORD: process.env.ZERO_TEST_PG_PASSWORD ?? '',
             ZERO_INTEGRATION_ROOT: root,
             ZERO_PORT: String(zeroPort),
+            ZERO_CHANGE_STREAMER_PORT: String(await port()),
+            ZERO_LITESTREAM_PORT: String(await port()),
             APP_ENV: 'local',
             ZERO_LIVE_DATABASE: database,
             APP_URL: base,
@@ -97,6 +104,20 @@ it.skipIf(!enabled)(
             ])
                 mkdirSync(join(root, directory), { recursive: true });
             execFileSync('php', ['tests/integration/app.php'], { env, stdio: 'pipe' });
+            const contracts = JSON.parse(readFileSync(join(root, 'controller-contracts.json'), 'utf8')) as Record<
+                string,
+                ControllerMutationContract
+            >;
+            const name = Object.keys(contracts)[0]!;
+            const codec = {
+                input: z.object({ title: z.string() }),
+                encode: (input: { title: string }) => input,
+                serverResult: z.object({ id: z.string() }),
+                clientResult: z.object({ id: z.string() }),
+            };
+            const controllers = createControllerMutations(schema, definitions, contracts, { [name]: codec });
+            const store = controllers.bind(name, codec);
+            const allMutators = { ...mutators, ...controllers.mutators };
             expect(
                 psql(
                     `SELECT attnames::text FROM pg_publication_tables WHERE pubname='${publication}' AND tablename='tasks'`,
@@ -169,7 +190,7 @@ it.skipIf(!enabled)(
             );
             zero = new Zero<typeof schema, undefined, ClientContext>({
                 schema,
-                mutators,
+                mutators: allMutators,
                 userID: 'alice',
                 auth: 'alice',
                 context: { user_id: 'alice' },
@@ -243,6 +264,18 @@ it.skipIf(!enabled)(
                 expect((await optimistic.client).type).toBe('success');
                 expect((await optimistic.server).type).toBe('error');
                 await until(() => result[0]?.title === 'Locked', 'Rejected optimistic edit did not roll back');
+                const request = store.prepare({ title: 'Recovered result' });
+                const recovered = zero.mutate(request);
+                expect(await recovered.client).toEqual({ type: 'success', data: { id: request.args.prepared.ids.s0 } });
+                expect(await recovered.server).toEqual({ type: 'success', data: { id: request.args.prepared.ids.s0 } });
+                await until(
+                    () => existsSync(join(root, 'lost-response.json')),
+                    'The successful callback response was not discarded',
+                );
+                expect(
+                    JSON.parse(readFileSync(join(root, 'lost-response.json'), 'utf8')).mutations[0].result.data,
+                ).toEqual({ id: request.args.prepared.ids.s0 });
+                expect(psql("SELECT count(*) FROM tasks WHERE title='Recovered result' AND user_id='alice'")).toBe('1');
             } finally {
                 unsubscribe();
                 view.destroy();
@@ -280,7 +313,7 @@ it.skipIf(!enabled)(
             });
             expect(reset).toContain('Local replica files reset');
             expect(existsSync(join(root, 'replica.db'))).toBe(false);
-            expect(psql('SELECT count(*) FROM tasks')).toBe('3');
+            expect(psql('SELECT count(*) FROM tasks')).toBe('4');
             cache = spawn('php', ['tests/integration/app.php', 'dev'], { env, stdio: ['ignore', 'pipe', 'pipe'] });
             cache.stderr?.on('data', (chunk) => {
                 logs += String(chunk);

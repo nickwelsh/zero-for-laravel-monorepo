@@ -38,7 +38,7 @@ abstract class PostgresTestCase extends TestCase
         parent::tearDown();
     }
 
-    protected function createTables(): void
+    public function createTables(): void
     {
         $name = DB::scalar('SELECT current_database()');
         if (! is_string($name) || ! preg_match('/^laravel_zero_test(?:_[a-z0-9_]+)?$/D', $name)) {

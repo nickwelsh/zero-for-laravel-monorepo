@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vite-plus/test';
 import { Task, definitions, schema } from '../../../tests/interop/generated';
-import { createZeroForLaravel } from './index';
+import { createZeroForLaravel } from './runtime';
 
 describe('generated models', () => {
     it('accepts numeric record IDs for reads and updates on existing integer-key tables', () => {
@@ -217,7 +217,7 @@ describe('cast hydration', () => {
             ...definitions,
             Task: {
                 ...definitions.Task,
-                writable: ['title', 'preferences', 'count', 'flag', 'status'],
+                writable: ['title', 'preferences', 'count', 'flag', 'status', 'scheduled_at'],
                 validation: { update: { flag: ['boolean'], preferences: ['max:2'] } },
                 columns: {
                     ...definitions.Task.columns,
@@ -225,6 +225,7 @@ describe('cast hydration', () => {
                     count: { ...text, cast: 'integer' },
                     flag: { ...text, cast: 'boolean' },
                     status: { ...text, enum: ['draft', 'published'] },
+                    scheduled_at: { ...text, date: true, dateFormat: 'Y-m-d H:i:s.u' },
                 },
             },
         } as const);
@@ -235,19 +236,26 @@ describe('cast hydration', () => {
             count: '42',
             flag: '0',
             status: 'draft',
+            scheduled_at: '2026-10-30 18:31:45.123456',
         };
         const row = runtime.models.Task.query().all().decode([raw])[0]!;
         expect(row.data.preferences).toEqual({ theme: 'dark' });
         expect(row.data.count).toBe(42);
         expect(row.data.flag).toBe(false);
-        const request = row
-            .update()
-            .prepare({ preferences: { theme: 'light' }, count: 12, flag: true, status: 'published' });
+        expect(row.data.scheduled_at).toEqual(new Date('2026-10-30T18:31:45.123Z'));
+        const request = row.update().prepare({
+            preferences: { theme: 'light' },
+            count: 12,
+            flag: true,
+            status: 'published',
+            scheduled_at: new Date('2026-10-30T20:31:45.123+02:00'),
+        });
         expect(request.args.data).toEqual({
             preferences: '{"theme":"light"}',
             count: '12',
             flag: '1',
             status: 'published',
+            scheduled_at: '2026-10-30 18:31:45.123000',
         });
         expect(() => row.update().prepare({ status: 'invalid' } as never)).toThrow(/value/);
         expect(() => row.update().prepare({ count: 1.5 })).toThrow(/cast/);

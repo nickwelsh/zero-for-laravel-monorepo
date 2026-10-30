@@ -8,10 +8,10 @@ process.loadEnvFile('.env');
 const require = createRequire(import.meta.url);
 const replica = join(process.cwd(), 'storage/app/zero/replica.db');
 const certificate =
+    process.env.ZERO_CA_CERT ??
     process.env.ZERO_HERD_CA ??
     join(homedir(), 'Library/Application Support/Herd/config/valet/CA/LaravelValetCASelfSigned.pem');
 if (!process.env.ZERO_API_KEY) throw new Error('Set ZERO_API_KEY in .env before starting Zero.');
-if (!existsSync(certificate)) throw new Error('Herd CA not found. Set ZERO_HERD_CA to your local Herd CA certificate.');
 mkdirSync(dirname(replica), { recursive: true });
 
 const database = new URL('postgresql://127.0.0.1');
@@ -26,7 +26,7 @@ const child = spawn(process.execPath, [join(dirname(require.resolve('@rocicorp/z
     env: {
         ...process.env,
         NODE_ENV: 'development',
-        NODE_EXTRA_CA_CERTS: certificate,
+        ...(existsSync(certificate) ? { NODE_EXTRA_CA_CERTS: certificate } : {}),
         ZERO_UPSTREAM_DB: database.href,
         ZERO_CVR_DB: database.href,
         ZERO_CHANGE_DB: database.href,

@@ -15,6 +15,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Database\Eloquent\SoftDeletes;
+use Illuminate\Database\Query\JoinClause;
 use LogicException;
 use ReflectionClass;
 use ReflectionMethod;
@@ -22,6 +23,10 @@ use ZeroForLaravel\Attributes;
 use ZeroForLaravel\ContextField;
 use ZeroForLaravel\Definition\ZeroDefinition;
 use ZeroForLaravel\Generation\RuleExtractor;
+use ZeroForLaravel\Query\FilterParameter;
+use ZeroForLaravel\Query\ZeroOperator;
+use ZeroForLaravel\Query\ZQLBuilder;
+use ZeroForLaravel\Support\Input;
 
 /** @phpstan-import-type Column from \ZeroForLaravel\Metadata\ModelMetadata */
 final class ModelRegistry
@@ -288,14 +293,16 @@ final class ModelRegistry
                 'array', 'json' => 'array', 'object' => 'object', default => null,
             };
             $date = in_array($type, ['date', 'datetime', 'timestamp', 'timestamptz'], true) || in_array(explode(':', $cast)[0], ['date', 'datetime', 'immutable_date', 'immutable_datetime'], true);
-            if ($date && ! preg_match('/^(date|datetime|timestamp|timestamptz)$/D', $type)) {
-                throw new LogicException("{$name}.{$field}: Date casts require a date or timestamp column (Zero epoch milliseconds).");
+            $dateFormat = $date && $zeroType === 'string' ? $model->getDateFormat() : null;
+            if ($dateFormat !== null && ! in_array($dateFormat, ['Y-m-d', 'Y-m-d H:i:s', 'Y-m-d H:i:s.u'], true)) {
+                throw new LogicException("{$name}.{$field}: String date storage requires Y-m-d, Y-m-d H:i:s, or Y-m-d H:i:s.u in UTC.");
             }
 
             $enum = enum_exists($cast) && is_subclass_of($cast, BackedEnum::class) ? array_map(fn (BackedEnum $case): int|string => $case->value, $cast::cases()) : null;
             $default = $this->literalDefault($column['default'], $zeroType);
             $columns[$field] = ['type' => $zeroType, 'nullable' => $column['nullable'], 'date' => $date, 'enum' => $enum,
                 'hasDefault' => $column['default'] !== null && $default['known'], 'default' => $default['value'],
+                ...($dateFormat !== null ? ['dateFormat' => $dateFormat] : []),
                 ...($castType !== null && ! $date && $enum === null ? ['cast' => $castType] : [])];
         }
 
@@ -337,7 +344,7 @@ final class ModelRegistry
         $filterDefinitions = [];
         $pendingFilters = array_values($definition->filters);
         while ($pendingFilters !== []) {
-            $filter = \ZeroForLaravel\Support\Input::object(array_pop($pendingFilters), 'filter');
+            $filter = Input::object(array_pop($pendingFilters), 'filter');
             $filterDefinitions[] = $filter;
             $members = $filter['members'] ?? [];
             $conditions = $filter['conditions'] ?? [];
@@ -346,7 +353,7 @@ final class ModelRegistry
             }
 
             foreach ([...$members, ...array_values($conditions)] as $member) {
-                $pendingFilters[] = \ZeroForLaravel\Support\Input::object($member, 'filter');
+                $pendingFilters[] = Input::object($member, 'filter');
             }
 
             if ($filter['kind'] === 'callback' && is_string($filter['field']) && $filter['field'] !== '') {
@@ -385,8 +392,8 @@ final class ModelRegistry
         $metadata = new ModelMetadata($class, $name, $model->getTable(), $model->getKeyName(), $columns, $queries, $mutations, $authorization, $fills, $writable, $generator, $created, $updated, $deleted, $definition, authorizationRelations: $authorizationRelations);
         foreach ($definition->filters as $filterName => $filter) {
             if (isset($filter['callback'])) {
-                $query = new \ZeroForLaravel\Query\ZQLBuilder(new \ZeroForLaravel\Query\ZeroOperator($metadata, fn () => throw new LogicException('Callback relationship predicates belong in an explicit server scope.')));
-                ($filter['callback'])($query, new \ZeroForLaravel\Query\FilterParameter());
+                $query = new ZQLBuilder(new ZeroOperator($metadata, fn () => throw new LogicException('Callback relationship predicates belong in an explicit server scope.')));
+                ($filter['callback'])($query, new FilterParameter);
                 unset($definition->filters[$filterName]['callback']);
                 $definition->filters[$filterName]['expression'] = $query->condition();
             }
@@ -470,7 +477,7 @@ final class ModelRegistry
             $base = $query->getQuery();
             $joins = $base->joins ?? [];
             $join = $joins[0] ?? null;
-            $standardJoin = $relation instanceof BelongsToMany && count($joins) === 1 && $join instanceof \Illuminate\Database\Query\JoinClause && is_array($join->wheres) && $join->table === $relation->getTable() && $join->type === 'inner' && count($join->wheres) === 1 && $join->wheres[0] === ['type' => 'Column', 'first' => $relation->getQualifiedRelatedKeyName(), 'operator' => '=', 'second' => $relation->getQualifiedRelatedPivotKeyName(), 'boolean' => 'and'];
+            $standardJoin = $relation instanceof BelongsToMany && count($joins) === 1 && $join instanceof JoinClause && is_array($join->wheres) && $join->table === $relation->getTable() && $join->type === 'inner' && count($join->wheres) === 1 && $join->wheres[0] === ['type' => 'Column', 'first' => $relation->getQualifiedRelatedKeyName(), 'operator' => '=', 'second' => $relation->getQualifiedRelatedPivotKeyName(), 'boolean' => 'and'];
             if ($base->wheres || $base->orders || $base->limit || $base->offset || $base->groups || $base->havings || $base->unions || $base->distinct || ($base->columns !== null && $base->columns !== ['*']) || ($joins !== [] && ! $standardJoin)) {
                 throw new LogicException("{$metadata->name}.{$name}: constrained Eloquent relations require a custom query, which is not supported yet.");
             }

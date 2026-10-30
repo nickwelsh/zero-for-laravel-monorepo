@@ -4,6 +4,7 @@ export interface Column {
     readonly type: 'string' | 'number' | 'boolean' | 'json';
     readonly nullable: boolean;
     readonly date: boolean;
+    readonly dateFormat?: 'Y-m-d' | 'Y-m-d H:i:s' | 'Y-m-d H:i:s.u';
     readonly enum: readonly (string | number)[] | null;
     readonly hasDefault: boolean;
     readonly default: ReadonlyJSONValue;

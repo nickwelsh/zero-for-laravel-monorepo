@@ -13,16 +13,15 @@ describe('native named-action forms', () => {
         expect(forms.save.fields.tags.constraints.maxItems).toBe(10);
         expect(forms.save.defaultValues).toEqual({ url: '' });
     });
-    it('surfaces client rejection even when a server response never arrives', async () => {
-        await expect(
-            completeMutation({
-                client: Promise.resolve({
-                    type: 'error',
-                    error: { type: 'app', message: 'Denied', details: undefined },
+    it('preserves native no-data, null, scalar, list and object returns', async () => {
+        for (const data of [undefined, null, false, 0, '0', [], { id: 'saved' }]) {
+            expect(
+                await completeMutation({
+                    client: Promise.resolve(success),
+                    server: Promise.resolve({ type: 'success', data }),
                 }),
-                server: new Promise(() => {}),
-            }),
-        ).rejects.toThrow('Denied');
+            ).toEqual(data);
+        }
     });
     it('maps authoritative validation errors and stops observing cancellation without undoing durable work', async () => {
         const definition = { id: 'save', fields: {}, defaultValues: { url: '' }, groups: {} };

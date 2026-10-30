@@ -66,7 +66,7 @@ final class Input
             self::fail($path, 'Invalid field value.');
         }
 
-        if ($column['date']) {
+        if ($column['date'] && $column['type'] === 'number') {
             self::timestamp($value, $path);
         }
 
@@ -75,7 +75,7 @@ final class Input
 
     public static function timestamp(mixed $value, string $path): int|float
     {
-        if ((! is_int($value) && ! is_float($value)) || ! is_finite((float) $value) || abs($value) > 8640000000000000 || floor($value) !== (float) $value) {
+        if ((! is_int($value) && ! is_float($value)) || ! is_finite((float) $value) || abs($value) > 8640000000000000) {
             self::fail($path, 'Must be a valid epoch millisecond timestamp.');
         }
 

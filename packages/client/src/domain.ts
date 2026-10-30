@@ -52,7 +52,6 @@ export interface DomainOptions<S extends Schema, D extends DomainContracts, R ex
     readonly optimistic?: DomainOptimistic<S, D>;
     readonly formRules?: Readonly<Record<string, Readonly<Record<string, readonly string[]>>>>;
     readonly results?: R;
-    readonly resultURL?: string;
 }
 
 function validateDomain(fields: DomainContracts[string], raw: unknown): Record<string, unknown> {
@@ -86,34 +85,6 @@ function validateDomain(fields: DomainContracts[string], raw: unknown): Record<s
     return input;
 }
 
-async function readResult<Result>(
-    url: string,
-    input: unknown,
-    fields: DomainContracts[string],
-    signal?: AbortSignal,
-): Promise<Result> {
-    const endpoint = new URL(url, globalThis.location?.href ?? 'http://localhost');
-    if (globalThis.location && endpoint.origin !== globalThis.location.origin)
-        throw new Error('Mutation results require a same-origin endpoint.');
-    const token = globalThis.document?.cookie
-        .split('; ')
-        .find((cookie) => cookie.startsWith('XSRF-TOKEN='))
-        ?.slice(11);
-    const response = await fetch(endpoint, {
-        method: 'POST',
-        credentials: 'same-origin',
-        headers: {
-            'Content-Type': 'application/json',
-            Accept: 'application/json',
-            ...(token ? { 'X-XSRF-TOKEN': decodeURIComponent(token) } : {}),
-        },
-        body: JSON.stringify(input),
-        ...(signal ? { signal } : {}),
-    });
-    if (!response.ok) throw new Error('The mutation result is unavailable.');
-    return validateDomain(fields, await response.json()) as Result;
-}
-
 export class DomainOperation<
     S extends Schema,
     D extends DomainContracts,
@@ -134,12 +105,6 @@ export class DomainOperation<
         validateDomain(this.contracts[this.name]!, args);
         return this.mutator(args) as unknown as MutateRequest<DomainInput<D[N]>, S, ClientContext>;
     }
-    async resolveResult(input: DomainInput<D[N]>, options: { signal?: AbortSignal } = {}): Promise<DomainResult<R, N>> {
-        const fields = this.options.results?.[this.name];
-        if (!fields) return undefined as DomainResult<R, N>;
-        if (!this.options.resultURL) throw new Error('The mutation result endpoint is missing.');
-        return readResult(`${this.options.resultURL}/${encodeURIComponent(this.name)}`, input, fields, options.signal);
-    }
     async execute(
         client: MutationClient<S>,
         input: DomainInput<D[N]>,
@@ -147,9 +112,10 @@ export class DomainOperation<
     ): Promise<DomainResult<R, N>> {
         options.signal?.throwIfAborted();
         const request = this.prepare(input);
-        await completeMutation(client.mutate(request), options.signal);
+        const data = await completeMutation(client.mutate(request), options.signal);
         try {
-            return await this.resolveResult(request.args, options);
+            const fields = this.options.results?.[this.name];
+            return (fields ? validateDomain(fields, data) : undefined) as DomainResult<R, N>;
         } catch (error) {
             if (options.signal?.aborted) throw error;
             throw new MutationResultError(error);

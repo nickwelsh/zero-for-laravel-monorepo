@@ -29,15 +29,7 @@ abstract class TestCase extends Orchestra
         return $classes ?: [Task::class, TaskList::class, Tag::class, Comment::class];
     }
 
-    protected function defineEnvironment($app): void
-    {
-        $app['config']->set('database.default', 'testing');
-        $app['config']->set('database.connections.testing', [
-            'driver' => 'sqlite', 'database' => ':memory:', 'prefix' => '',
-        ]);
-    }
-
-    protected function createTables(): void
+    public function createTables(): void
     {
         Schema::create('tasks', function (Blueprint $table): void {
             $table->uuid('id')->primary();
@@ -71,5 +63,13 @@ abstract class TestCase extends Orchestra
             $table->string('user_id');
             $table->string('body');
         });
+    }
+
+    protected function defineEnvironment($app): void
+    {
+        $app['config']->set('database.default', 'testing');
+        $app['config']->set('database.connections.testing', [
+            'driver' => 'sqlite', 'database' => ':memory:', 'prefix' => '',
+        ]);
     }
 }

@@ -17,7 +17,9 @@ The source defaults live in
 | Key                           | Default                                      | Purpose                                                                                                                                |
 | ----------------------------- | -------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
 | `models`                      | `[]`                                         | Discover models under `app/Models` with Zero attributes or a `zero()` definition; otherwise list every participating model explicitly. |
-| `output`                      | `resources/js/zero/generated.ts`             | Generated schema, contracts, queries, mutators, and model exports.                                                                     |
+| `output`                      | `resources/js/zero/generated.ts`             | Generated schema, metadata, and plain row types; query/mutation modules are written alongside it.                                      |
+| `controller_output`           | `bootstrap/zero-queries.php`                 | Authoritative controller query registrations.                                                                                          |
+| `mutation_output`             | `bootstrap/zero-mutations.php`               | Authoritative controller mutation registrations.                                                                                       |
 | `react`                       | `false`                                      | Also generate the React wrapper and check it for drift.                                                                                |
 | `sync_publication_on_migrate` | `false`                                      | Synchronize the dedicated publication after successful PostgreSQL `up` migration batches.                                              |
 | `publication`                 | `ZERO_PUBLICATION` or `laravel_zero`         | Dedicated PostgreSQL publication managed by the package.                                                                               |
@@ -63,19 +65,10 @@ The generated provider accepts the native user identity, trusted-context values
 for local behavior, and optional token `auth`. Laravel independently resolves the
 authoritative context. See [React integration](./react.mdx).
 
-To override the client clock or ID provider, use the exported factory and keep
-its returned models, queries, and mutators together:
-
-```ts
-const client = createZeroForLaravel(schema, definitions, {
-    now: () => new Date(),
-    id: (kind, model) => generateId(kind, model),
-});
-```
-
-Here `generateId` is application code. IDs must still match the model's UUID or
-ULID strategy. Native Zero options control transport and local storage. The
-[generated API reference](/docs/0.x/api) lists the factory and provider types.
+Mutation bindings capture IDs and timestamps once during preparation. Native Zero
+options control transport and local storage. Custom optimistic implementations
+belong in the generated controller binding factory's projection map, not in a
+separate client queue. The [API reference](/docs/0.x/api) lists the binding types.
 
 ## Modular model registration
 

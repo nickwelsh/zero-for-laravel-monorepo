@@ -12,7 +12,7 @@ use ZeroForLaravel\ZeroContext;
 /**
  * @phpstan-import-type Ast from QueryCompiler
  *
- * @phpstan-type QueryResult array{id: string, name: string, ast?: Ast, error?: 'parse'|'app', message?: string, details?: array{fields: array<array-key, mixed>}}
+ * @phpstan-type QueryResult array{id: string, name: string, ast?: array<string, mixed>, error?: 'parse'|'app', message?: string, details?: array{fields: array<array-key, mixed>}}
  * @phpstan-type TransformFailed array{kind: 'TransformFailed', origin: 'server', reason: 'parse', message: string, queryIDs: list<string>}
  * @phpstan-type QueryResponse array{kind: 'QueryResponse', queries: list<QueryResult>, userID: string|null}
  */
@@ -55,10 +55,19 @@ final readonly class QueryProcessor
                     Input::fail('args', 'Expected one argument object.');
                 }
 
-                $result['ast'] = $this->compiler->compile($request['name'], $request['args'][0], $context);
+                if (str_starts_with($request['name'], 'q_')) {
+                    $registered = resolve(RegisteredQueries::class)->all()[$request['name']] ?? null;
+                    if ($registered === null) {
+                        Input::fail('name', 'Unknown controller query. Reload the application.');
+                    }
+
+                    $result['ast'] = $registered->invoke($request['args'][0], $context, $this->compiler);
+                } else {
+                    $result['ast'] = $this->compiler->compile($request['name'], $request['args'][0], $context);
+                }
             } catch (ValidationException $error) {
                 $result += ['error' => 'parse', 'message' => 'Invalid query arguments.', 'details' => ['fields' => $error->errors()]];
-            } catch (AuthorizationException) {
+            } catch (AuthorizationException|\Illuminate\Database\Eloquent\ModelNotFoundException|\Symfony\Component\HttpKernel\Exception\HttpExceptionInterface) {
                 $result += ['error' => 'app', 'message' => 'This query is not authorized.'];
             }
 

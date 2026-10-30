@@ -23,6 +23,7 @@ use ZeroForLaravel\Query\ZQLBuilder;
 /**
  * @property string $id
  * @property string $user_id
+ * @property string|null $list_id
  * @property string $title
  * @property bool $done
  * @property \Carbon\CarbonImmutable|null $completed_at
@@ -35,6 +36,7 @@ use ZeroForLaravel\Query\ZQLBuilder;
 class Task extends Model
 {
     use HasUuids, SoftDeletes;
+    use \ZeroForLaravel\Concerns\HasZeroQueries;
 
     protected $table = 'tasks';
 

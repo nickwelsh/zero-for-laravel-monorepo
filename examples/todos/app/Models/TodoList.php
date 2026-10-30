@@ -4,12 +4,10 @@ declare(strict_types=1);
 
 namespace App\Models;
 
-use App\Http\Requests\SaveTodoListRequest;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
-use ZeroForLaravel\Attributes\ZeroMutate;
-use ZeroForLaravel\Attributes\ZeroQuery;
+use ZeroForLaravel\Concerns\HasZeroQueries;
 use ZeroForLaravel\ContextField;
 use ZeroForLaravel\Definition\ZeroDefinition;
 
@@ -18,21 +16,17 @@ use ZeroForLaravel\Definition\ZeroDefinition;
  * @property int $user_id
  * @property string $name
  */
-#[ZeroQuery(['all', 'one'])]
-#[ZeroMutate('create', 'update', 'destroy')]
 class TodoList extends Model
 {
     use HasUuids;
+    use HasZeroQueries;
 
     protected $fillable = ['name', 'user_id'];
 
     public static function zero(): ZeroDefinition
     {
         return ZeroDefinition::make()->authorizeRelation('memberships')->fillFromContext('user_id', ContextField::UserId)
-            ->allowedIncludes(['todos'])
-            ->allowedSorts(['name', 'created_at'])
-            ->defaultSort('name')
-            ->mutationRequests(['create' => SaveTodoListRequest::class, 'update' => SaveTodoListRequest::class]);
+            ->allowedIncludes(['todos']);
     }
 
     /** @return HasMany<ListMembership, $this> */

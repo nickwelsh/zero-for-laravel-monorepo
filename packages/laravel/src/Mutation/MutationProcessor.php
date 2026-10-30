@@ -17,7 +17,7 @@ use ZeroForLaravel\Metadata\ModelRegistry;
 use ZeroForLaravel\Support\Input;
 use ZeroForLaravel\ZeroContext;
 
-/** @phpstan-type Mutation array{clientID: non-empty-string, name: non-empty-string, type: 'custom', id: int, timestamp: numeric-string|int|float, args: list<mixed>} */
+/** @phpstan-type Invocation array{clientID: non-empty-string, name: non-empty-string, type: 'custom', id: int, timestamp: numeric-string|int|float, args: list<mixed>} */
 final readonly class MutationProcessor
 {
     public function __construct(private ModelRegistry $registry, private CrudExecutor $executor, private string $appId, private string $upstreamSchema) {}
@@ -87,7 +87,7 @@ final readonly class MutationProcessor
     }
 
     /**
-     * @param  Mutation  $mutation
+     * @param  Invocation  $mutation
      * @return array<string, mixed>
      */
     private function apply(string $group, array $mutation, ZeroContext $context, ?Authenticatable $user): array
@@ -102,13 +102,23 @@ final readonly class MutationProcessor
                         Input::fail('args', 'Expected one argument object.');
                     }
 
-                    if (str_starts_with($mutation['name'], 'actions.')) {
-                        resolve(DomainRegistry::class)->execute($mutation['name'], $mutation['args'][0], $context, $user);
+                    $result = [];
+                    if (str_starts_with($mutation['name'], 'm_')) {
+                        $result = resolve(ControllerMutationRegistry::class)->execute($mutation['name'], $mutation['args'][0], $context);
+                    } elseif (str_starts_with($mutation['name'], 'actions.')) {
+                        $result = resolve(DomainRegistry::class)->execute($mutation['name'], $mutation['args'][0], $context, $user);
                     } else {
                         $this->executor->execute($mutation['name'], $mutation['args'][0], $context, $user);
                     }
 
-                    return ['id' => $id, 'result' => (object) []];
+                    if (array_key_exists('data', $result)) {
+                        $this->registry->connection()->table($this->upstreamSchema.'.mutations')->insert([
+                            'clientGroupID' => $group, 'clientID' => $mutation['clientID'],
+                            'mutationID' => $mutation['id'], 'result' => json_encode($result, JSON_THROW_ON_ERROR),
+                        ]);
+                    }
+
+                    return ['id' => $id, 'result' => (object) $result];
                 });
             } catch (ValidationException $error) {
                 $failure = ['error' => 'app', 'message' => 'Validation failed.', 'details' => ['code' => 'validation', 'fields' => $error->errors()]];
@@ -143,7 +153,7 @@ final readonly class MutationProcessor
     }
 
     /**
-     * @param  Mutation  $mutation
+     * @param  Invocation  $mutation
      */
     private function advance(string $group, array $mutation): void
     {
@@ -165,7 +175,7 @@ final readonly class MutationProcessor
     }
 
     /**
-     * @param  Mutation  $mutation
+     * @param  Invocation  $mutation
      */
     private function cleanup(string $group, array $mutation): void
     {
@@ -215,7 +225,7 @@ final readonly class MutationProcessor
     }
 
     /**
-     * @param  list<Mutation>  $mutations
+     * @param  list<Invocation>  $mutations
      * @return array<string, mixed>
      */
     private function failure(string $reason, array $mutations, string $message): array

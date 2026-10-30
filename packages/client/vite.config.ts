@@ -5,6 +5,7 @@ export default defineConfig({
         entry: {
             index: 'src/index.ts',
             'react/index': 'src/react/index.ts',
+            inertia: 'src/react/inertia.tsx',
             'search/index': 'src/search/index.ts',
             'react/search': 'src/react/search.tsx',
         },
@@ -13,6 +14,7 @@ export default defineConfig({
         clean: true,
         deps: {
             neverBundle: [
+                '@inertiajs/react',
                 '@rocicorp/zero',
                 '@rocicorp/zero/react',
                 'react',

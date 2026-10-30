@@ -6,6 +6,8 @@ namespace ZeroForLaravel\Tests\Feature;
 
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Validation\ValidationException;
+use InvalidArgumentException;
+use LogicException;
 use ZeroForLaravel\Definition\AllowedFilter;
 use ZeroForLaravel\Definition\ZeroDefinition;
 use ZeroForLaravel\Metadata\ModelRegistry;
@@ -16,6 +18,59 @@ use ZeroForLaravel\Tests\TestCase;
 use ZeroForLaravel\ZeroContext;
 
 uses(TestCase::class);
+
+test('declarations are immutable, do not execute SQL, and cannot become snapshot props', function (): void {
+    /** @var TestCase $this */
+    $registry = new ModelRegistry($this->models());
+    app()->instance(ModelRegistry::class, $registry);
+    $connection = $registry->connection();
+    $connection->enableQueryLog();
+    $connection->flushQueryLog();
+
+    $base = Task::zeroQuery();
+    $ascending = $base->where('title', '0')->orderBy('id', 'asc')->limit(0);
+    $descending = $base->orderBy('id', 'desc')->one();
+    expect($base->ast())->toBe(['table' => 'tasks']);
+    expect($ascending->ast()['limit'])->toBe(0);
+    expect($descending->format()['singular'])->toBeTrue();
+    expect($connection->getQueryLog())->toBe([]);
+    expect(fn (): string => json_encode($base, JSON_THROW_ON_ERROR))->toThrow(LogicException::class, 'extracted');
+
+    $cursor = $base->start(['id' => 'original'])->related('comments', fn ($query) => $query->start(['id' => 'child']));
+    $export = $cursor->ast();
+    data_set($export, 'start.row.id', 'changed');
+    data_set($export, 'related.0.subquery.start.row.id', 'changed child');
+    expect(data_get($cursor->ast(), 'start.row.id'))->toBe('original');
+    expect(data_get($cursor->ast(), 'related.0.subquery.start.row.id'))->toBe('child');
+});
+
+test('declaration compilation enforces visibility on results and negative existence predicates', function (): void {
+    /** @var TestCase $this */
+    $registry = new ModelRegistry($this->models());
+    app()->instance(ModelRegistry::class, $registry);
+    $query = Task::zeroQuery()
+        ->related('comments')
+        ->where(fn ($expression) => $expression->not($expression->exists('tags')));
+    $ast = (new QueryCompiler($registry))->compileDeclaration($query, new ZeroContext(['user_id' => 'alice']));
+    $this->assertArrayNotHasKey('limit', $ast);
+    $this->assertArrayNotHasKey('orderBy', $ast);
+    expect(data_get($ast, 'where.conditions.0.right.value'))->toBe('alice');
+    expect(data_get($ast, 'related.0.subquery.where.right.value'))->toBe('alice');
+    expect(data_get($ast, 'where.conditions.2.op'))->toBe('NOT EXISTS');
+    expect(data_get($ast, 'where.conditions.2.related.subquery.where.related.subquery.where.right.value'))->toBe('alice');
+    expect(fn (): array => (new QueryCompiler($registry))->compileDeclaration($query, new ZeroContext([])))
+        ->toThrow(AuthorizationException::class);
+});
+
+test('declarations reject unsupported columns and native junction bounds', function (): void {
+    /** @var TestCase $this */
+    app()->instance(ModelRegistry::class, new ModelRegistry($this->models()));
+    expect(fn (): \ZeroForLaravel\Query\Query => Task::zeroQuery()->where('secret', 'value'))->toThrow(InvalidArgumentException::class);
+    expect(fn (): \ZeroForLaravel\Query\Query => Task::zeroQuery()->where('id', 'IN', [null]))->toThrow(ValidationException::class);
+    expect(fn (): \ZeroForLaravel\Query\Query => Task::zeroQuery()->limit(-1))->toThrow(InvalidArgumentException::class);
+    expect(fn (): \ZeroForLaravel\Query\Query => Task::zeroQuery()->related('tags', fn ($query) => $query->limit(2)))->toThrow(LogicException::class);
+    expect(fn (): \ZeroForLaravel\Query\Query => Task::zeroQuery()->whereExists('tags', ['scalar' => true]))->toThrow(InvalidArgumentException::class);
+});
 
 test('nullable substring filters reject null', function (): void {
     $compiler = new QueryCompiler(new ModelRegistry([NullablePartialTask::class]));

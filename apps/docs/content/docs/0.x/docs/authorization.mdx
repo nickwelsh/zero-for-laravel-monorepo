@@ -25,9 +25,7 @@ PostgreSQL, and Herd HTTPS setup.
 return ZeroDefinition::make()
     ->authorize('user_id', '=', ContextField::UserId)
     ->fillFromContext('user_id', ContextField::UserId)
-    ->allowedFilters('title', AllowedFilter::exact('id'))
-    ->allowedIncludes('list')
-    ->allowedSorts('title', 'created_at');
+    ->relations('list');
 ```
 
 Use `publicReads()` for explicitly public models, or `authorizeRelation('list')`
@@ -69,8 +67,8 @@ predicates with `authorize`/`authorizeRelation` when exact local behavior matter
 
 ## Write authorization
 
-Read visibility does not grant write permission. Each enabled mutation needs a
-Laravel policy or gate for its operation; missing policies deny the write.
+Read visibility does not grant write permission. Controller mutations must call
+the appropriate Laravel policy or gate, in the action or its FormRequest.
 FormRequests authorize and validate the payload separately, including foreign key
 association permissions. See [mutations](./mutations.mdx) for complete examples.
 

@@ -3,14 +3,14 @@ title: Local startup and recovery
 description: Run, inspect, and recover a local Zero cache without application-specific startup scripts.
 ---
 
-These commands are available since v0.3.0. Use matching Composer and
-JavaScript package releases with Zero client and cache **1.10.0**. The PHP package
+Use matching pre-alpha Composer and JavaScript workspace revisions with
+Zero client and cache **1.11.3**. The PHP package
 supports PHP 8.3+, Laravel 12/13, and PostgreSQL 15+. Do not upgrade the Zero cache
 independently of the pinned client and tested callback protocol.
 
 ## Start locally
 
-Install Node.js and `@rocicorp/zero@1.10.0` in the application. Serve Laravel at
+Install Node.js and `@rocicorp/zero@1.11.3` in the application. Serve Laravel at
 `APP_URL`, configure its PostgreSQL connection, set a private `ZERO_API_KEY`, and
 use `APP_ENV=local`:
 
@@ -56,7 +56,7 @@ slots/senders, role privileges, exact publication membership, contract freshness
 callback configuration, local port conflicts, and cache health. Missing permissions
 or unavailable checks are reported as unknown. A cache root health response proves
 process reachability; it does not prove callback authentication, query completion,
-or replica backfill. Zero 1.10.0 has no general readiness endpoint used here. Verify
+or replica backfill. No general readiness endpoint is assumed here. Verify
 that an authenticated subscription completes and observes an upstream change.
 
 ## Reset an owned local replica

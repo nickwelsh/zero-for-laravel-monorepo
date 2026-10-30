@@ -20,7 +20,7 @@ export interface InfiniteData {
     /** True only when synchronization proves there are no further rows. */
     readonly exhausted: boolean;
     readonly stopReason: 'maximum' | 'exhausted' | undefined;
-    loadMore(): void;
+    loadMore(this: void): void;
 }
 export interface Data<T> {
     readonly data: T;
@@ -31,15 +31,27 @@ export interface Data<T> {
     readonly connection: ConnectionState;
     readonly details: QueryResultDetails;
     readonly infinite: InfiniteData | undefined;
-    retry(): void;
+    readonly hasMore: boolean | undefined;
+    readonly isLoadingMore: boolean;
+    readonly capped: boolean;
+    readonly exhausted: boolean;
+    readonly stopReason: 'maximum' | 'exhausted' | undefined;
+    loadMore(this: void): void;
+    readonly hasNextPage: boolean | undefined;
+    readonly hasPreviousPage: boolean;
+    readonly isChangingPage: boolean;
+    nextPage(this: void): void;
+    previousPage(this: void): void;
+    retry(this: void): void;
     render<R>(handlers: RenderHandlers<T, R>): R;
 }
 
 export interface ReadSelection {
     readonly key: string;
-    readonly contract: ModelContract;
-    readonly args: Readonly<QueryArgs>;
+    readonly contract?: ModelContract;
+    readonly args?: Readonly<QueryArgs>;
     readonly pageSize?: number | undefined;
+    readonly cursorFields?: readonly string[] | undefined;
     readonly one: boolean;
     readonly schema?: unknown;
     readonly definitions?: unknown;
@@ -49,6 +61,8 @@ export interface ReadSelection {
     request(): unknown;
     decode(raw: unknown): unknown;
     limit?(limit: number): ReadSelection;
+    page?(cursor: Readonly<Record<string, unknown>> | undefined): ReadSelection;
+    cursor?(raw: unknown): Readonly<Record<string, unknown>>;
 }
 
 // Stable semantics keep decoding local to this hook and its authorization identity.
@@ -86,12 +100,20 @@ export function useData<Q extends ReadSelection>(input: Q, options: UseQueryOpti
     const connection = useConnectionState();
     const context = selectionKey(zero.context);
     const selection = useSelection(input, zero, context);
-    const max = selection.contract.maxLimit;
-    const initial = Math.min(selection.args.limit ?? selection.contract.defaultLimit, max);
+    const max = selection.contract?.maxLimit ?? 2147483647;
+    const initial = Math.min(
+        selection.pageSize ?? selection.args?.limit ?? selection.contract?.defaultLimit ?? max,
+        max,
+    );
     // Only root ordering may change within a retained scope. Includes and their
     // ordering, filters, limits, contracts, and authorization remain part of it.
-    const { order: _order, ...scopeArgs } = selection.args;
-    const scopeKey = selectionKey([selection.contract.name, selection.one, scopeArgs, selection.pageSize]);
+    const { order: _order, ...scopeArgs } = selection.args ?? {};
+    const scopeKey = selectionKey([
+        selection.contract?.name ?? selection.key,
+        selection.one,
+        scopeArgs,
+        selection.pageSize,
+    ]);
     const window = useMemo(
         () => ({
             scopeKey,
@@ -116,20 +138,27 @@ export function useData<Q extends ReadSelection>(input: Q, options: UseQueryOpti
             selection.defaults,
         ],
     );
-    const [page, setPage] = useState({ window, limit: initial });
-    if (page.window !== window) setPage({ window, limit: initial });
+    const [page, setPage] = useState({
+        window,
+        limit: initial,
+        cursors: [] as readonly Readonly<Record<string, unknown>>[],
+    });
+    if (page.window !== window) setPage({ window, limit: initial, cursors: [] });
     const limit = Math.min(page.window === window ? page.limit : initial, max);
-    const scope = useMemo(() => ({ window, limit }), [window, limit]);
-    const requested = selection.pageSize === undefined ? selection.args.limit : Math.min(limit + 1, max);
+    const cursor = page.window === window ? page.cursors.at(-1) : undefined;
+    const scope = useMemo(() => ({ window, limit, cursor }), [window, limit, cursor]);
+    const requested = selection.pageSize === undefined ? selection.args?.limit : Math.min(limit + 1, max);
     const request = useMemo(
         () =>
-            (selection.pageSize === undefined || selection.one
-                ? selection.request()
-                : selection.limit!(requested!).request()) as NativeRequest,
+            (selection.cursorFields !== undefined
+                ? selection.page!(cursor).request()
+                : selection.pageSize === undefined || selection.one
+                  ? selection.request()
+                  : selection.limit!(requested!).request()) as NativeRequest,
         // The selection object may be recreated by a consumer or compiler while
         // its query remains identical. Native resource identity follows semantics.
         // oxlint-disable-next-line react-hooks-plugin/exhaustive-deps
-        [selection.key, window, requested],
+        [selection.key, window, requested, cursor],
     );
     const [raw, details] = useQuery(request, options);
     const enabled = options.enabled ?? true;
@@ -223,6 +252,7 @@ export function useData<Q extends ReadSelection>(input: Q, options: UseQueryOpti
                   loadMore: () => {
                       if (
                           !enabled ||
+                          selection.cursorFields !== undefined ||
                           error ||
                           !complete ||
                           !Array.isArray(decoded) ||
@@ -230,13 +260,14 @@ export function useData<Q extends ReadSelection>(input: Q, options: UseQueryOpti
                           capped
                       )
                           return;
-                      setPage((current) => ({
-                          window,
-                          limit: Math.min(
-                              (current.window === window ? current.limit : initial) + selection.pageSize!,
-                              max,
-                          ),
-                      }));
+                      setPage((current) =>
+                          current.window !== window || current.limit !== limit
+                              ? current
+                              : {
+                                    ...current,
+                                    limit: Math.min(limit + selection.pageSize!, max),
+                                },
+                      );
                   },
               };
     return {
@@ -248,6 +279,32 @@ export function useData<Q extends ReadSelection>(input: Q, options: UseQueryOpti
         connection,
         details,
         infinite,
+        hasMore: infinite?.hasMore,
+        capped: infinite?.capped ?? false,
+        exhausted: infinite?.exhausted ?? false,
+        stopReason: infinite?.stopReason,
+        isLoadingMore: selection.pageSize !== undefined && limit > initial && !complete,
+        loadMore: () => infinite?.loadMore(),
+        hasNextPage: selection.cursorFields === undefined ? undefined : infinite?.hasMore,
+        hasPreviousPage: selection.cursorFields !== undefined && page.window === window && page.cursors.length > 0,
+        isChangingPage: selection.cursorFields !== undefined && !complete,
+        nextPage: () => {
+            if (selection.cursorFields === undefined || infinite?.hasMore !== true || !Array.isArray(raw)) return;
+            const next = selection.cursor!(raw[limit - 1]);
+            setPage((current) =>
+                current !== page || current.window !== window
+                    ? current
+                    : { ...current, cursors: [...current.cursors, next] },
+            );
+        },
+        previousPage: () => {
+            if (selection.cursorFields === undefined || !enabled || !complete || error) return;
+            setPage((current) =>
+                current !== page || current.window !== window
+                    ? current
+                    : { ...current, cursors: current.cursors.slice(0, -1) },
+            );
+        },
         retry: () => {
             if (details.type === 'error') details.retry();
         },

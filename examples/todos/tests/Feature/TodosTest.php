@@ -1,59 +1,72 @@
 <?php
 
+use App\Http\Controllers\ShareListController;
+use App\Http\Controllers\TodoController;
+use App\Http\Controllers\TodoListController;
 use App\Models\ListMembership;
 use App\Models\Todo;
 use App\Models\TodoList;
 use App\Models\User;
 use Illuminate\Auth\Access\AuthorizationException;
-use Illuminate\Support\Facades\Gate;
+use Illuminate\Contracts\Http\Kernel;
+use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
+use ZeroForLaravel\Domain\OperationException;
+use ZeroForLaravel\Generation\Mutations\ControllerMutationCompiler;
+use ZeroForLaravel\Generation\Mutations\ControllerMutationGenerator;
+use ZeroForLaravel\Http\ControllerRouteDispatcher;
 use ZeroForLaravel\Metadata\ModelRegistry;
-use ZeroForLaravel\Mutation\CrudExecutor;
+use ZeroForLaravel\Mutation\ControllerMutationRegistry;
 use ZeroForLaravel\Query\QueryCompiler;
 use ZeroForLaravel\ZeroContext;
 
-function todosExecutor(): CrudExecutor
+function runTodoMutation(User $user, string $controller, string $method, array $input = [], array $route = []): array
 {
-    return new CrudExecutor(new ModelRegistry([TodoList::class, Todo::class, ListMembership::class]));
+    app(Kernel::class)->bootstrap();
+    Auth::login($user);
+    $models = app(ModelRegistry::class);
+    $program = app(ControllerMutationCompiler::class)->compile($controller, $method);
+    $source = (new ControllerMutationGenerator)->php([$program]);
+    $factory = eval(substr($source, 5));
+    $registry = $factory($models, app(ControllerRouteDispatcher::class));
+    if (! $registry instanceof ControllerMutationRegistry) {
+        throw new LogicException('Invalid generated mutation registry.');
+    }
+    $args = ['version' => $program->fingerprint, 'input' => $input, 'route' => $route,
+        'prepared' => ['timestamp' => 1700000000123, 'ids' => array_map(fn () => (string) Str::uuid(), $program->sites)]];
+
+    return $models->connection()->transaction(fn () => $registry->execute($program->name(), $args, new ZeroContext(['user_id' => $user->id])));
 }
 
-function todosContext(User $user): ZeroContext
-{
-    return new ZeroContext(['user_id' => $user->id]);
-}
-
-test('creating a list adds its owner as a member', function () {
+test('creating a list returns its stable identity and adds its owner as a member', function () {
     $owner = User::factory()->create();
-    todosExecutor()->execute('TodoList.create', [
-        'id' => '019a0000-0000-7000-8000-000000000001', 'data' => ['name' => 'Home'], 'now' => 1,
-    ], todosContext($owner), $owner);
-    $list = TodoList::firstOrFail();
+    $result = runTodoMutation($owner, TodoListController::class, 'store', ['name' => 'Home']);
+    $list = TodoList::findOrFail($result['data']['id']);
     expect($list->user_id)->toBe($owner->id);
     $this->assertDatabaseHas('list_memberships', ['list_id' => $list->id, 'user_id' => $owner->id]);
 });
 
-test('only the owner may delete or share a list', function () {
+test('only the owner may delete a list and rejection preserves its rows', function () {
     $owner = User::factory()->create();
     $member = User::factory()->create();
     $list = TodoList::create(['name' => 'Home', 'user_id' => $owner->id]);
     $list->memberships()->create(['user_id' => $member->id]);
-    expect(Gate::forUser($owner)->allows('delete', $list))->toBeTrue();
-    expect(Gate::forUser($member)->allows('delete', $list))->toBeFalse();
-    expect(Gate::forUser($member)->allows('share', $list))->toBeFalse();
-    todosExecutor()->execute('TodoList.destroy', ['id' => $list->id, 'data' => [], 'now' => 1], todosContext($member), $member);
-})->throws(AuthorizationException::class);
+    expect(fn () => runTodoMutation($member, TodoListController::class, 'destroy', route: ['list' => $list->id]))
+        ->toThrow(OperationException::class, 'unavailable');
+    $this->assertDatabaseHas('todo_lists', ['id' => $list->id]);
+});
 
-test('a shared member can add edit and delete todos', function () {
+test('a shared member can add edit and delete todos through registered controller actions', function () {
     $owner = User::factory()->create();
     $member = User::factory()->create();
     $list = TodoList::create(['name' => 'Shared', 'user_id' => $owner->id]);
     $list->memberships()->create(['user_id' => $member->id]);
-    $executor = todosExecutor();
-    $id = '019a0000-0000-7000-8000-000000000002';
-    $executor->execute('Todo.create', ['id' => $id, 'data' => ['list_id' => $list->id, 'title' => 'Milk'], 'now' => 1], todosContext($member), $member);
-    $executor->execute('Todo.update', ['id' => $id, 'data' => ['title' => 'Oat milk', 'completed' => true], 'now' => 1], todosContext($member), $member);
+    $result = runTodoMutation($member, TodoController::class, 'store', ['list_id' => $list->id, 'title' => 'Milk']);
+    $id = $result['data']['id'];
+    runTodoMutation($member, TodoController::class, 'update', ['title' => 'Oat milk', 'completed' => true], ['todo' => $id]);
     $this->assertDatabaseHas('todos', ['id' => $id, 'title' => 'Oat milk', 'completed' => true]);
-    $executor->execute('Todo.destroy', ['id' => $id, 'data' => [], 'now' => 1], todosContext($member), $member);
+    runTodoMutation($member, TodoController::class, 'destroy', route: ['todo' => $id]);
     $this->assertDatabaseMissing('todos', ['id' => $id]);
 });
 
@@ -61,60 +74,60 @@ test('outsiders cannot add todos to a private list', function () {
     $owner = User::factory()->create();
     $outsider = User::factory()->create();
     $list = TodoList::create(['name' => 'Private', 'user_id' => $owner->id]);
-    todosExecutor()->execute('Todo.create', [
-        'id' => '019a0000-0000-7000-8000-000000000003', 'data' => ['list_id' => $list->id, 'title' => 'Attack'], 'now' => 1,
-    ], todosContext($outsider), $outsider);
-})->throws(AuthorizationException::class);
+    expect(fn () => runTodoMutation($outsider, TodoController::class, 'store', ['list_id' => $list->id, 'title' => 'Attack']))
+        ->toThrow(AuthorizationException::class);
+    $this->assertDatabaseCount('todos', 0);
+});
 
-test('members cannot move a todo to a list they cannot access', function () {
+test('members cannot move a todo to a private list', function () {
     $owner = User::factory()->create();
     $member = User::factory()->create();
     $shared = TodoList::create(['name' => 'Shared', 'user_id' => $owner->id]);
     $private = TodoList::create(['name' => 'Private', 'user_id' => $owner->id]);
     $shared->memberships()->create(['user_id' => $member->id]);
     $todo = Todo::create(['list_id' => $shared->id, 'title' => 'Milk']);
-    todosExecutor()->execute('Todo.update', ['id' => $todo->id, 'data' => ['list_id' => $private->id], 'now' => 1], todosContext($member), $member);
-})->throws(AuthorizationException::class);
+    expect(fn () => runTodoMutation($member, TodoController::class, 'update', ['list_id' => $private->id], ['todo' => $todo->id]))
+        ->toThrow(OperationException::class, 'unavailable');
+    $this->assertDatabaseHas('todos', ['id' => $todo->id, 'list_id' => $shared->id]);
+});
 
-test('todo titles are validated for automatic CRUD', function () {
+test('controller FormRequests reject empty titles without a write', function () {
     $owner = User::factory()->create();
     $list = TodoList::create(['name' => 'Home', 'user_id' => $owner->id]);
-    todosExecutor()->execute('Todo.create', [
-        'id' => '019a0000-0000-7000-8000-000000000004', 'data' => ['list_id' => $list->id, 'title' => ''], 'now' => 1,
-    ], todosContext($owner), $owner);
-})->throws(ValidationException::class);
+    expect(fn () => runTodoMutation($owner, TodoController::class, 'store', ['list_id' => $list->id, 'title' => '']))
+        ->toThrow(ValidationException::class);
+    $this->assertDatabaseCount('todos', 0);
+});
 
-test('an owner can share with a registered email and repeated sharing is safe', function () {
+test('authoritative sharing is idempotent and conceals private resources and accounts', function () {
     $owner = User::factory()->create();
     $member = User::factory()->create();
     $list = TodoList::create(['name' => 'Home', 'user_id' => $owner->id]);
-    $this->actingAs($owner)->post(route('lists.share', $list), ['email' => $member->email])->assertRedirect();
-    $this->actingAs($owner)->post(route('lists.share', $list), ['email' => $member->email])->assertRedirect();
+    for ($i = 0; $i < 2; $i++) {
+        runTodoMutation($owner, ShareListController::class, '__invoke', ['email' => $member->email], ['list' => $list->id]);
+    }
     expect($list->memberships()->where('user_id', $member->id)->count())->toBe(1);
-});
-
-test('sharing rejects nonmembers and unknown accounts', function () {
-    $owner = User::factory()->create();
-    $outsider = User::factory()->create();
-    $list = TodoList::create(['name' => 'Home', 'user_id' => $owner->id]);
-    $this->actingAs($outsider)->post(route('lists.share', $list), ['email' => $owner->email])->assertForbidden();
-    $this->actingAs($owner)->post(route('lists.share', $list), ['email' => 'missing@example.com'])->assertSessionHasErrors('email');
+    expect(fn () => runTodoMutation($member, ShareListController::class, '__invoke', ['email' => $owner->email], ['list' => $list->id]))
+        ->toThrow(OperationException::class, 'unavailable');
+    expect(fn () => runTodoMutation($owner, ShareListController::class, '__invoke', ['email' => 'missing@example.com'], ['list' => $list->id]))
+        ->toThrow(OperationException::class, 'unavailable');
 });
 
 test('deleting a list cascades its todos and memberships', function () {
     $owner = User::factory()->create();
     $list = TodoList::create(['name' => 'Home', 'user_id' => $owner->id]);
     Todo::create(['list_id' => $list->id, 'title' => 'Milk']);
-    todosExecutor()->execute('TodoList.destroy', ['id' => $list->id, 'data' => [], 'now' => 1], todosContext($owner), $owner);
+    runTodoMutation($owner, TodoListController::class, 'destroy', route: ['list' => $list->id]);
     $this->assertDatabaseCount('todos', 0);
     $this->assertDatabaseCount('list_memberships', 0);
 });
 
-test('generated queries enforce membership at both list and todo roots', function () {
+test('query declarations enforce membership at list and todo roots', function () {
     $owner = User::factory()->create();
     $compiler = new QueryCompiler(new ModelRegistry([TodoList::class, Todo::class, ListMembership::class]));
-    $list = $compiler->compile('TodoList.all', [], todosContext($owner));
-    $todo = $compiler->compile('Todo.all', [], todosContext($owner));
+    $context = new ZeroContext(['user_id' => $owner->id]);
+    $list = $compiler->compileDeclaration(TodoList::zeroQuery(), $context);
+    $todo = $compiler->compileDeclaration(Todo::zeroQuery(), $context);
     expect(data_get($list, 'where.related.subquery.where.right.value'))->toBe($owner->id);
     expect(data_get($todo, 'where.related.subquery.where.related.subquery.where.right.value'))->toBe($owner->id);
 });

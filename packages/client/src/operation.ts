@@ -1,4 +1,4 @@
-import type { Schema, Zero, MutatorResult } from '@rocicorp/zero';
+import type { Schema, Zero, MutatorResult, ReadonlyJSONValue } from '@rocicorp/zero';
 import type { ClientContext } from './contract';
 import type { FieldDefinition, FormDefinition, FormDescriptor, SubmissionResult } from './form-contract';
 import { InputError } from './validation';
@@ -36,11 +36,11 @@ export interface FormOperation<S extends Schema, Values extends object, Result> 
     createForm(client: MutationClient<S>, options?: MutationFormOptions<Values>): MutationForm<Values, Result>;
 }
 
-/** The write committed, but its optional result read failed. Retrying must not repeat the write. */
+/** The write committed, but its native result failed its declared contract. */
 export class MutationResultError extends Error {
     readonly committed = true;
     constructor(cause: unknown) {
-        super('Saved successfully, but the result could not be loaded.', { cause });
+        super('Saved successfully, but the result did not match its contract.', { cause });
         this.name = 'MutationResultError';
     }
 }
@@ -60,14 +60,17 @@ export async function observeMutation<T>(promise: Promise<T>, signal?: AbortSign
     }
 }
 
-export async function completeMutation(call: MutatorResult, signal?: AbortSignal): Promise<void> {
-    const failed = call.client.then((result) => (result.type === 'error' ? result : new Promise<never>(() => {})));
-    const result = await observeMutation(Promise.race([call.server, failed]), signal);
+export async function completeMutation(
+    call: MutatorResult,
+    signal?: AbortSignal,
+): Promise<ReadonlyJSONValue | undefined> {
+    const result = await observeMutation(call.server, signal);
     if (result.type === 'error') {
         const error = new Error(result.error.message);
         if (result.error.type === 'app') Object.assign(error, { details: result.error.details });
         throw error;
     }
+    return result.data;
 }
 
 function submissionFailure(error: unknown): Exclude<SubmissionResult, { status: 'success' }> {

@@ -14,6 +14,7 @@ use ZeroForLaravel\Attributes\ZeroPublic;
 use ZeroForLaravel\Definition\AllowedFilter;
 use ZeroForLaravel\Definition\ZeroDefinition;
 use ZeroForLaravel\Metadata\ModelRegistry;
+use ZeroForLaravel\Query\Query;
 use ZeroForLaravel\Tests\Fixtures\Comment;
 use ZeroForLaravel\Tests\Fixtures\Tag;
 use ZeroForLaravel\Tests\Fixtures\Task;
@@ -170,7 +171,7 @@ class CastTask extends Task
     /** @return array<string, string> */
     protected function casts(): array
     {
-        return ['done' => 'boolean', 'completed_at' => 'immutable_datetime', 'options' => 'array', 'status' => CastStatus::class];
+        return ['done' => 'boolean', 'completed_at' => 'immutable_datetime', 'options' => 'array', 'status' => CastStatus::class, 'scheduled_at' => 'immutable_datetime'];
     }
 }
 
@@ -178,6 +179,7 @@ test('exports native cast metadata including implicit timestamps and backed enum
     Schema::table('tasks', function (Blueprint $table): void {
         $table->text('options')->nullable();
         $table->string('status')->default('draft');
+        $table->string('scheduled_at')->nullable();
     });
     $model = (new ModelRegistry([CastTask::class]))->get('CastTask');
     expect($model->columns['created_at']['date'])->toBeTrue();
@@ -186,4 +188,8 @@ test('exports native cast metadata including implicit timestamps and backed enum
     expect($model->columns['options']['cast'] ?? null)->toBe('array');
     expect($model->columns['status']['enum'])->toBe(['draft', 'published']);
     expect($model->columns['done']['cast'] ?? null)->toBe('boolean');
+    expect($model->columns['scheduled_at']['dateFormat'] ?? null)->toBe('Y-m-d H:i:s');
+
+    $query = new Query($model, new ModelRegistry([CastTask::class]));
+    expect(data_get($query->where('scheduled_at', '2026-10-30T20:31:45+02:00')->ast(), 'where.right.value'))->toBe('2026-10-30 18:31:45');
 });

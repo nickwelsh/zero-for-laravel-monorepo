@@ -36,7 +36,7 @@ final class ResetCommand extends Command
             $connection = $local->connection();
             $id = config()->string('zero.app_id');
             if (! preg_match('/^[a-z][a-z0-9_]{0,39}$/D', $id) || ! is_array($owner) ||
-                ($owner['version'] ?? null) !== '1.10.0' || ($owner['workspace'] ?? null) !== realpath(base_path()) ||
+                ($owner['version'] ?? null) !== '1.11.3' || ($owner['workspace'] ?? null) !== realpath(base_path()) ||
                 ($owner['app'] ?? null) !== $id || ($owner['replica'] ?? null) !== $replica ||
                 ($owner['database'] ?? null) !== $connection->getDatabaseName() ||
                 ($owner['host'] ?? null) !== $connection->getConfig('host') ||
