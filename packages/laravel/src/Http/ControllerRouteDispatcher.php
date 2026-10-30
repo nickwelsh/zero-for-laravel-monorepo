@@ -119,7 +119,7 @@ final class ControllerRouteDispatcher
                 // The enclosing native endpoint authenticates zero-cache separately.
                 // Browser CSRF tokens are not carried by queued/replayed Zero pushes.
                 return ! is_a($class, VerifyCsrfToken::class, true)
-                    && ! is_a($class, PreventRequestForgery::class, true);
+                    && (! class_exists(PreventRequestForgery::class) || ! is_a($class, PreventRequestForgery::class, true));
             }));
             $results = [];
             $response = (new Pipeline(app()))->send($request)->through($middleware)->then(function (Request $request) use ($route, $terminal, &$results): Response {
