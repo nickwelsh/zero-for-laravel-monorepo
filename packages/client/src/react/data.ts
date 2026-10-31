@@ -1,8 +1,10 @@
 import { useQuery, useZero, useConnectionState, type UseQueryOptions } from '@rocicorp/zero/react';
-import type { Schema, QueryResultDetails, ConnectionState, QueryRequest } from '@rocicorp/zero';
+import type { Schema, QueryResultDetails, ConnectionState, QueryRequest, ReadonlyJSONValue } from '@rocicorp/zero';
 import { useMemo, useState } from 'react';
-import type { ClientContext, ModelContract, QueryArgs } from '../contract';
-import { selectionKey, type SelectionData } from '../query';
+import type { ClientContext } from '../contract';
+import { selectionKey } from '../validation';
+
+type SelectionData<Q> = Q extends { decode(raw: unknown): infer Result } ? Result : never;
 
 export type DataStatus = 'idle' | 'loading' | 'refreshing' | 'failure' | 'stale' | 'success';
 export type RenderHandlers<T, R> = {
@@ -48,16 +50,11 @@ export interface Data<T> {
 
 export interface ReadSelection {
     readonly key: string;
-    readonly contract?: ModelContract;
-    readonly args?: Readonly<QueryArgs>;
     readonly pageSize?: number | undefined;
     readonly cursorFields?: readonly string[] | undefined;
     readonly one: boolean;
-    readonly schema?: unknown;
     readonly definitions?: unknown;
     readonly queries?: unknown;
-    readonly mutators?: unknown;
-    readonly defaults?: unknown;
     readonly input?: {
         readonly values: object;
         readonly options: Readonly<Record<string, readonly (string | number)[]>>;
@@ -85,28 +82,17 @@ export type QueryData<
 
 // Stable semantics keep decoding local to this hook and its authorization identity.
 function useSelection<Q extends ReadSelection>(selection: Q, identity: unknown, context: string): Q {
-    // Selection identity is defined by its immutable contract and semantic key.
     return useMemo(
         () => selection,
         // oxlint-disable-next-line react-hooks-plugin/exhaustive-deps
-        [
-            selection.key,
-            selection.contract,
-            selection.schema,
-            selection.definitions,
-            selection.queries,
-            selection.mutators,
-            selection.defaults,
-            identity,
-            context,
-        ],
+        [selection.key, selection.definitions, selection.queries, identity, context],
     );
 }
 
 type NativeRequest = QueryRequest<
     string,
-    QueryArgs,
-    QueryArgs,
+    ReadonlyJSONValue,
+    ReadonlyJSONValue,
     Schema,
     Record<string, unknown> | undefined,
     ClientContext
@@ -118,44 +104,10 @@ export function useData<Q extends ReadSelection>(input: Q, options: UseQueryOpti
     const connection = useConnectionState();
     const context = selectionKey(zero.context);
     const selection = useSelection(input, zero, context);
-    const max = selection.contract?.maxLimit ?? 2147483647;
-    const initial = Math.min(
-        selection.pageSize ?? selection.args?.limit ?? selection.contract?.defaultLimit ?? max,
-        max,
-    );
-    // Only root ordering may change within a retained scope. Includes and their
-    // ordering, filters, limits, contracts, and authorization remain part of it.
-    const { order: _order, ...scopeArgs } = selection.args ?? {};
-    const scopeKey = selectionKey([
-        selection.contract?.name ?? selection.key,
-        selection.one,
-        scopeArgs,
-        selection.pageSize,
-    ]);
-    const window = useMemo(
-        () => ({
-            scopeKey,
-            zero,
-            context,
-            contract: selection.contract,
-            schema: selection.schema,
-            definitions: selection.definitions,
-            queries: selection.queries,
-            mutators: selection.mutators,
-            defaults: selection.defaults,
-        }),
-        [
-            scopeKey,
-            zero,
-            context,
-            selection.contract,
-            selection.schema,
-            selection.definitions,
-            selection.queries,
-            selection.mutators,
-            selection.defaults,
-        ],
-    );
+    const max = 2147483647;
+    const initial = Math.min(selection.pageSize ?? max, max);
+    // All arguments belong to the controller query identity, including sort input.
+    const window = useMemo(() => ({ selection, zero, context }), [selection, zero, context]);
     const [page, setPage] = useState({
         window,
         limit: initial,
@@ -165,7 +117,7 @@ export function useData<Q extends ReadSelection>(input: Q, options: UseQueryOpti
     const limit = Math.min(page.window === window ? page.limit : initial, max);
     const cursor = page.window === window ? page.cursors.at(-1) : undefined;
     const scope = useMemo(() => ({ window, limit, cursor }), [window, limit, cursor]);
-    const requested = selection.pageSize === undefined ? selection.args?.limit : Math.min(limit + 1, max);
+    const requested = selection.pageSize === undefined ? undefined : Math.min(limit + 1, max);
     const request = useMemo(
         () =>
             (selection.cursorFields !== undefined
@@ -180,34 +132,20 @@ export function useData<Q extends ReadSelection>(input: Q, options: UseQueryOpti
     );
     const [raw, details] = useQuery(request, options);
     const enabled = options.enabled ?? true;
-    const [committed, setCommitted] = useState({ scope, selection, request, complete: false });
-    const retain =
-        enabled &&
-        committed.complete &&
-        committed.scope === scope &&
-        committed.request !== request &&
-        details.type !== 'complete';
-    // A second native subscription keeps the committed ordering live. Zero owns
-    // materialization, deduplication, TTL, retries, and subscription cleanup.
-    const [previousRaw] = useQuery(retain ? committed.request : undefined, options);
-    if (
-        committed.scope !== scope ||
-        (enabled && details.type === 'complete' && (committed.request !== request || !committed.complete))
-    ) {
-        setCommitted({ scope, selection, request, complete: enabled && details.type === 'complete' });
+    const [committed, setCommitted] = useState({ scope, complete: false });
+    if (committed.scope !== scope || (enabled && details.type === 'complete' && !committed.complete)) {
+        setCommitted({ scope, complete: enabled && details.type === 'complete' });
     }
-    const visibleSelection = retain ? committed.selection : selection;
-    const visibleRaw = retain ? previousRaw : raw;
     const decodedResult = useMemo(() => {
         try {
-            return { value: visibleSelection.decode(visibleRaw), error: undefined };
+            return { value: selection.decode(raw), error: undefined };
         } catch (error) {
             return {
-                value: visibleSelection.one ? undefined : [],
+                value: selection.one ? undefined : [],
                 error: error instanceof Error ? error : new Error(String(error)),
             };
         }
-    }, [visibleRaw, visibleSelection]);
+    }, [raw, selection]);
     const decoded = decodedResult.value;
     const data = useMemo(
         () =>
@@ -217,8 +155,7 @@ export function useData<Q extends ReadSelection>(input: Q, options: UseQueryOpti
     const complete = details.type === 'complete';
     const hasData =
         !decodedResult.error &&
-        (retain ||
-            (committed.scope === scope && committed.request === request && committed.complete) ||
+        ((committed.scope === scope && committed.complete) ||
             complete ||
             (Array.isArray(data) ? data.length > 0 : data !== undefined));
     const error = decodedResult.error ?? (details.type === 'error' ? new Error(details.error.message) : undefined);

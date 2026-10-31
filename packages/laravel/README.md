@@ -2,9 +2,8 @@
 
 Controller-first live queries and mutations for Rocicorp Zero **1.11.3**.
 
-Use **v0.5.0** with the matching npm package. This is a breaking replacement for
-the v0.4 model-centric API; migrate controllers and regenerate all contracts before
-deploying. PHP 8.3+, Laravel 12/13, and PostgreSQL 15+ with logical replication are
+Use **v0.5.0** with the matching npm package. Generate and deploy PHP registrations
+and TypeScript contracts together. PHP 8.3+, Laravel 12/13, and PostgreSQL 15+ with logical replication are
 required targets. Automatic live page props require Inertia Laravel 3 and the
 optional JavaScript Inertia adapter.
 

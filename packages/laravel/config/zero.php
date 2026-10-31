@@ -5,10 +5,8 @@ declare(strict_types=1);
 use ZeroForLaravel\Http\ContextResolver;
 
 return [
-    // Empty discovers models with Zero attributes or a zero() definition under app/Models.
+    // Empty discovers models with a zero() definition under app/Models.
     'models' => [],
-    // Explicit named business actions. Values extend Domain\DomainMutation.
-    'domain_mutations' => [],
     // When models is empty, only explicitly opted-in models in these PSR-4 roots are discovered.
     'discovery' => [], // Empty retains app/Models and the application's namespace.
     'output' => resource_path('js/zero/generated.ts'),

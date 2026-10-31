@@ -28,8 +28,8 @@ const table2Relations = relationships(table2, ({one}) => ({
   "list": one({sourceField: ["list_id"], destField: ["id"], destSchema: table1}),
 }));
 const table1Relations = relationships(table1, ({many}) => ({
-  "todos": many({sourceField: ["id"], destField: ["list_id"], destSchema: table2}),
   "memberships": many({sourceField: ["id"], destField: ["list_id"], destSchema: table0}),
+  "todos": many({sourceField: ["id"], destField: ["list_id"], destSchema: table2}),
 }));
 export const schema = createSchema({tables: [table0, table1, table2], relationships: [table2Relations, table1Relations], enableLegacyQueries: false, enableLegacyMutators: false});
 export const definitions = {
@@ -79,8 +79,6 @@ export const definitions = {
                 "default": null
             }
         },
-        "queries": [],
-        "mutations": [],
         "authorization": [
             {
                 "field": "user_id",
@@ -90,7 +88,6 @@ export const definitions = {
                 }
             }
         ],
-        "validation": {},
         "serverFill": {},
         "writable": [
             "list_id",
@@ -102,12 +99,6 @@ export const definitions = {
             "updated": "updated_at",
             "deleted": null
         },
-        "filters": {},
-        "includes": [],
-        "sorts": [],
-        "defaultOrder": [],
-        "defaultLimit": 50,
-        "maxLimit": 1000,
         "relations": {}
     },
     "Todo": {
@@ -165,13 +156,10 @@ export const definitions = {
                 "default": null
             }
         },
-        "queries": [],
-        "mutations": [],
         "authorization": [],
         "authorizationRelations": [
             "list"
         ],
-        "validation": {},
         "serverFill": {},
         "writable": [
             "list_id",
@@ -184,14 +172,6 @@ export const definitions = {
             "updated": "updated_at",
             "deleted": null
         },
-        "filters": {},
-        "includes": [
-            "list"
-        ],
-        "sorts": [],
-        "defaultOrder": [],
-        "defaultLimit": 50,
-        "maxLimit": 1000,
         "relations": {
             "list": {
                 "model": "TodoList",
@@ -256,13 +236,10 @@ export const definitions = {
                 "default": null
             }
         },
-        "queries": [],
-        "mutations": [],
         "authorization": [],
         "authorizationRelations": [
             "memberships"
         ],
-        "validation": {},
         "serverFill": {
             "user_id": "user_id"
         },
@@ -275,30 +252,7 @@ export const definitions = {
             "updated": "updated_at",
             "deleted": null
         },
-        "filters": {},
-        "includes": [
-            "todos"
-        ],
-        "sorts": [],
-        "defaultOrder": [],
-        "defaultLimit": 50,
-        "maxLimit": 1000,
         "relations": {
-            "todos": {
-                "model": "Todo",
-                "cardinality": "many",
-                "path": [
-                    {
-                        "source": [
-                            "id"
-                        ],
-                        "dest": [
-                            "list_id"
-                        ],
-                        "table": "todos"
-                    }
-                ]
-            },
             "memberships": {
                 "model": "ListMembership",
                 "cardinality": "many",
@@ -311,6 +265,21 @@ export const definitions = {
                             "list_id"
                         ],
                         "table": "list_memberships"
+                    }
+                ]
+            },
+            "todos": {
+                "model": "Todo",
+                "cardinality": "many",
+                "path": [
+                    {
+                        "source": [
+                            "id"
+                        ],
+                        "dest": [
+                            "list_id"
+                        ],
+                        "table": "todos"
                     }
                 ]
             }

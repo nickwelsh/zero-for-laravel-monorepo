@@ -8,11 +8,11 @@ use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Validation\ValidationException;
 use InvalidArgumentException;
 use LogicException;
-use ZeroForLaravel\Definition\AllowedFilter;
-use ZeroForLaravel\Definition\ZeroDefinition;
 use ZeroForLaravel\Metadata\ModelRegistry;
+use ZeroForLaravel\Query\Query;
 use ZeroForLaravel\Query\QueryCompiler;
 use ZeroForLaravel\Query\QueryProcessor;
+use ZeroForLaravel\Query\RegisteredQueries;
 use ZeroForLaravel\Tests\Fixtures\Task;
 use ZeroForLaravel\Tests\TestCase;
 use ZeroForLaravel\ZeroContext;
@@ -48,13 +48,13 @@ test('declaration compilation enforces visibility on results and negative existe
     /** @var TestCase $this */
     $registry = new ModelRegistry($this->models());
     app()->instance(ModelRegistry::class, $registry);
-    $query = Task::zeroQuery()
-        ->related('comments')
+    $query = Task::zeroQuery()->related('comments')
         ->where(fn ($expression) => $expression->not($expression->exists('tags')));
     $ast = (new QueryCompiler($registry))->compileDeclaration($query, new ZeroContext(['user_id' => 'alice']));
-    $this->assertArrayNotHasKey('limit', $ast);
-    $this->assertArrayNotHasKey('orderBy', $ast);
+    expect($ast)->not->toHaveKey('limit');
+    expect($ast)->not->toHaveKey('orderBy');
     expect(data_get($ast, 'where.conditions.0.right.value'))->toBe('alice');
+    expect(data_get($ast, 'where.conditions.1.op'))->toBe('IS');
     expect(data_get($ast, 'related.0.subquery.where.right.value'))->toBe('alice');
     expect(data_get($ast, 'where.conditions.2.op'))->toBe('NOT EXISTS');
     expect(data_get($ast, 'where.conditions.2.related.subquery.where.related.subquery.where.right.value'))->toBe('alice');
@@ -65,101 +65,21 @@ test('declaration compilation enforces visibility on results and negative existe
 test('declarations reject unsupported columns and native junction bounds', function (): void {
     /** @var TestCase $this */
     app()->instance(ModelRegistry::class, new ModelRegistry($this->models()));
-    expect(fn (): \ZeroForLaravel\Query\Query => Task::zeroQuery()->where('secret', 'value'))->toThrow(InvalidArgumentException::class);
-    expect(fn (): \ZeroForLaravel\Query\Query => Task::zeroQuery()->where('id', 'IN', [null]))->toThrow(ValidationException::class);
-    expect(fn (): \ZeroForLaravel\Query\Query => Task::zeroQuery()->limit(-1))->toThrow(InvalidArgumentException::class);
-    expect(fn (): \ZeroForLaravel\Query\Query => Task::zeroQuery()->related('tags', fn ($query) => $query->limit(2)))->toThrow(LogicException::class);
-    expect(fn (): \ZeroForLaravel\Query\Query => Task::zeroQuery()->whereExists('tags', ['scalar' => true]))->toThrow(InvalidArgumentException::class);
+    expect(fn (): Query => Task::zeroQuery()->where('secret', 'value'))->toThrow(InvalidArgumentException::class);
+    expect(fn (): Query => Task::zeroQuery()->where('id', 'IN', [null]))->toThrow(ValidationException::class);
+    expect(fn (): Query => Task::zeroQuery()->limit(-1))->toThrow(InvalidArgumentException::class);
+    expect(fn (): Query => Task::zeroQuery()->related('tags', fn ($query) => $query->limit(2)))->toThrow(LogicException::class);
+    expect(fn (): Query => Task::zeroQuery()->whereExists('tags', ['scalar' => true]))->toThrow(InvalidArgumentException::class);
 });
 
-test('nullable substring filters reject null', function (): void {
-    $compiler = new QueryCompiler(new ModelRegistry([NullablePartialTask::class]));
-    $compiler->compile('NullablePartialTask.all', ['filters' => ['list_id' => null]], new ZeroContext(['user_id' => 'alice']));
-})->throws(ValidationException::class);
-
-function queryCompiler(TestCase $test): QueryCompiler
-{
-    return new QueryCompiler(new ModelRegistry($test->models()));
-}
-
-test('root and related authorization cannot be overridden by filters', function (): void {
+test('unregistered controller queries are rejected', function (): void {
     /** @var TestCase $this */
-    $ast = queryCompiler($this)->compile('Task.all', ['include' => ['list' => []], 'filters' => ['done' => false]], new ZeroContext(['user_id' => 'alice']));
-    $this->assertSame('tasks', $ast['table']);
-    $this->assertSame(50, data_get($ast, 'limit'));
-    $this->assertSame([['created_at', 'desc'], ['id', 'asc']], data_get($ast, 'orderBy'));
-    $this->assertSame('alice', data_get($ast, 'where.conditions.0.right.value'));
-    $this->assertSame(false, data_get($ast, 'where.conditions.2.right.value'));
-    $this->assertSame('alice', data_get($ast, 'related.0.subquery.where.right.value'));
-});
-
-test('one supports includes and null filter is distinct from unset', function (): void {
-    /** @var TestCase $this */
-    $ast = queryCompiler($this)->compile('Task.one', ['id' => 'a', 'include' => ['list' => []]], new ZeroContext(['user_id' => 'alice']));
-    $this->assertSame(1, data_get($ast, 'limit'));
-    $ast = queryCompiler($this)->compile('Task.all', ['filters' => ['completed_at' => null]], new ZeroContext(['user_id' => 'alice']));
-    $this->assertSame('IS', data_get($ast, 'where.conditions.2.op'));
-});
-
-test('relationship filters use target visibility', function (): void {
-    /** @var TestCase $this */
-    $ast = queryCompiler($this)->compile('Task.all', ['filters' => ['list' => 'list-a']], new ZeroContext(['user_id' => 'alice']));
-    $predicate = data_get($ast, 'where.conditions.2');
-    $this->assertSame('correlatedSubquery', data_get($predicate, 'type'));
-    $this->assertSame('alice', data_get($predicate, 'related.subquery.where.conditions.0.right.value'));
-});
-
-test('partial filter escapes sql wildcards', function (): void {
-    /** @var TestCase $this */
-    $ast = queryCompiler($this)->compile('Task.all', ['filters' => ['title' => 'a%_\\b']], new ZeroContext(['user_id' => 'alice']));
-    $this->assertSame('%a\\%\\_\\\\b%', data_get($ast, 'where.conditions.2.right.value'));
-});
-
-/** @param array<string, mixed> $arguments */
-test('rejects invalid or unapproved arguments', function (array $arguments): void {
-    /** @var TestCase $this */
-    queryCompiler($this)->compile('Task.all', $arguments, new ZeroContext(['user_id' => 'alice']));
-})->throws(ValidationException::class)->with('invalid query arguments');
-
-dataset('invalid query arguments', [
-    [['filters' => ['secret' => 'x']]], [['filters' => ['done' => 'false']]],
-    [['user_id' => 'bob']], [['limit' => 1001]], [['limit' => 1.5]],
-    [['order' => [['secret', 'asc']]]], [['include' => ['user' => []]]],
-    [['include' => ['list' => ['limit' => 2]]]], [['filters' => ['trashed' => 'unknown']]],
-]);
-
-test('missing context fails closed', function (): void {
-    /** @var TestCase $this */
-    queryCompiler($this)->compile('Task.all', [], new ZeroContext([]));
-})->throws(AuthorizationException::class);
-
-test('protocol keeps per query errors separate from authentication', function (): void {
-    /** @var TestCase $this */
-    $result = (new QueryProcessor(queryCompiler($this)))->process(['transform', [
-        ['id' => 'q1', 'name' => 'Task.all', 'args' => [(object) []]],
-        ['id' => 'q2', 'name' => 'Task.all', 'args' => [['ast' => ['table' => 'users']]]],
+    app()->instance(RegisteredQueries::class, new RegisteredQueries([]));
+    $result = (new QueryProcessor(new QueryCompiler(new ModelRegistry($this->models()))))->process(['transform', [
+        ['id' => 'missing', 'name' => 'q_unknown', 'args' => [(object) []]],
     ]], new ZeroContext(['user_id' => 'alice']));
-    $this->assertSame('QueryResponse', $result['kind']);
-    $query = data_get($result, 'queries.0');
-    $this->assertIsArray($query);
-    $this->assertArrayHasKey('ast', $query);
-    $this->assertSame('parse', data_get($result, 'queries.1.error'));
-    $this->assertSame('alice', $result['userID']);
-});
-
-class NullablePartialTask extends Task
-{
-    public static function zero(): ZeroDefinition
-    {
-        return ZeroDefinition::make()->allowedFilters([AllowedFilter::partial('list_id')]);
-    }
-}
-
-test('bounded ID sets and parameterized condition groups preserve related authorization', function (): void {
-    /** @var TestCase $this */
-    $registry = new ModelRegistry($this->models());
-    $registry->get('Task')->definition->allowedFilters(AllowedFilter::in('ids', 'id', max: 2), AllowedFilter::conditions('rules', [AllowedFilter::exact('done'), AllowedFilter::related('list_name', 'list', 'id')]));
-    $ast = (new QueryCompiler($registry))->compile('Task.all', ['filters' => ['ids' => ['a', 'b'], 'rules' => ['match' => 'any', 'rules' => [['field' => 'done', 'value' => false], ['field' => 'list_name', 'value' => 'owned']]]]], new ZeroContext(['user_id' => 'alice']));
-    expect(json_encode($ast))->toContain('IN', 'EXISTS', 'alice', 'owned');
-    expect(fn (): array => (new QueryCompiler($registry))->compile('Task.all', ['filters' => ['ids' => ['a', 'b', 'c']]], new ZeroContext(['user_id' => 'alice'])))->toThrow(ValidationException::class);
+    expect($result['kind'])->toBe('QueryResponse');
+    expect(data_get($result, 'queries.0.error'))->toBe('parse');
+    expect(data_get($result, 'queries.0.details.fields'))->toHaveKey('name');
+    expect(data_get($result, 'userID'))->toBe('alice');
 });

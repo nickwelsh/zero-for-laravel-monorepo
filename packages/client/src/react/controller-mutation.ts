@@ -9,7 +9,7 @@ import type {
     MutationPreparation,
 } from '../controller-mutation';
 import { completeMutation, MutationResultError } from '../operation';
-import { selectionKey } from '../query';
+import { selectionKey } from '../validation';
 
 interface Binding<Input, Result, S extends Schema> {
     prepare(

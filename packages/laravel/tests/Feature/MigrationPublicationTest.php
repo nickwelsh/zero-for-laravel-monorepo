@@ -13,13 +13,12 @@ use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Schema;
 use RuntimeException;
-use ZeroForLaravel\Attributes\ZeroPublic;
+use ZeroForLaravel\Definition\ZeroDefinition;
 use ZeroForLaravel\Metadata\ModelRegistry;
 use ZeroForLaravel\Publication\PublicationManager;
 use ZeroForLaravel\Tests\PostgresTestCase;
 use ZeroForLaravel\ZeroServiceProvider;
 
-#[ZeroPublic]
 class MigrationRecord extends Model
 {
     protected $table = 'tasks';
@@ -27,6 +26,11 @@ class MigrationRecord extends Model
     protected $connection = 'testing';
 
     protected $hidden = ['secret'];
+
+    public static function zero(): ZeroDefinition
+    {
+        return ZeroDefinition::make()->publicReads();
+    }
 }
 
 abstract class MigrationPublicationTestCase extends PostgresTestCase

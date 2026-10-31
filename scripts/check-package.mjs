@@ -14,24 +14,10 @@ registerHooks({
         if (specifier === 'react' || specifier.startsWith('react/')) {
             throw new Error('The core package must load without React.');
         }
-        if (specifier.startsWith('@formbraid/')) {
-            throw new Error('Formbraid must remain a type-only dependency.');
-        }
         return nextResolve(specifier, context);
     },
 });
 const core = await import(new URL('dist/index.js', root).href);
 if (typeof core.createControllerMutations !== 'function' || typeof core.liveQuery !== 'function')
     throw new Error('Missing controller runtime exports.');
-if ('createZeroForLaravel' in core || 'createDomainMutations' in core || 'ModelSnapshot' in core)
-    throw new Error('Replaced model/domain APIs must not be public exports.');
 console.log('Built exports exist, and the core package loads without React.');
-
-// Optional integration peers must stay optional in both installation metadata and declarations.
-if (manifest.peerDependenciesMeta?.['@formbraid/core']?.optional !== true)
-    throw new Error('FormBraid must be an optional peer.');
-const { readdir } = await import('node:fs/promises');
-for (const file of await readdir(new URL('dist/', root), { recursive: true })) {
-    if (file.endsWith('.d.ts') && (await readFile(new URL(`dist/${file}`, root), 'utf8')).includes('@formbraid/'))
-        throw new Error(`Query-only declarations depend on FormBraid: ${file}`);
-}

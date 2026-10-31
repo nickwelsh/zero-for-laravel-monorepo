@@ -23,7 +23,6 @@ use ZeroForLaravel\Http\AuthenticateZeroCache;
 use ZeroForLaravel\Http\ZeroController;
 use ZeroForLaravel\Metadata\ModelDiscovery;
 use ZeroForLaravel\Metadata\ModelRegistry;
-use ZeroForLaravel\Mutation\CrudExecutor;
 use ZeroForLaravel\Mutation\MutationProcessor;
 use ZeroForLaravel\Publication\PublicationManager;
 
@@ -58,14 +57,13 @@ final class ZeroServiceProvider extends ServiceProvider
             $this->app->singletonIf(\Typesense\Client::class, fn (): \Typesense\Client => new \Typesense\Client(config()->array('scout.typesense.client-settings')));
         }
 
-        $this->app->singleton(Domain\DomainRegistry::class, fn (): Domain\DomainRegistry => new Domain\DomainRegistry(config()->array('zero.domain_mutations')));
         $this->app->singleton(function (Application $app): ModelRegistry {
             $classes = $app->make(ModelDiscovery::class)->registered();
 
             return new ModelRegistry($classes);
         });
         $this->app->singleton(MutationProcessor::class, fn (Application $app): MutationProcessor => new MutationProcessor(
-            $app->make(ModelRegistry::class), $app->make(CrudExecutor::class),
+            $app->make(ModelRegistry::class),
             config()->string('zero.app_id'), config()->string('zero.upstream_schema'),
         ));
     }

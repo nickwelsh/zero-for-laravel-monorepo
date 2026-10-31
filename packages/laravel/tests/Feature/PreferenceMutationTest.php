@@ -28,16 +28,13 @@ use ZeroForLaravel\Mutation\Mutation;
 use ZeroForLaravel\Tests\Fixtures\MutationPreference;
 use ZeroForLaravel\Tests\Fixtures\PreferenceMutationController;
 use ZeroForLaravel\Tests\Fixtures\Task;
+use ZeroForLaravel\Tests\PostgresTestCase;
 use ZeroForLaravel\Tests\TestCase;
 use ZeroForLaravel\ZeroContext;
 
-uses(TestCase::class);
+uses(getenv('ZERO_TEST_PG_DATABASE') ? PostgresTestCase::class : TestCase::class);
 
 beforeEach(function (): void {
-    if ($database = getenv('PREFERENCE_TEST_DATABASE')) {
-        config(['database.default' => 'preferences', 'database.connections.preferences' => ['driver' => 'pgsql', 'host' => '127.0.0.1', 'port' => 55432, 'database' => $database, 'username' => 'postgres', 'password' => '', 'prefix' => '']]);
-    }
-
     Schema::create('mutation_preferences', function (Blueprint $table): void {
         $table->uuid('id')->primary();
         $table->string('recipient');
@@ -160,12 +157,12 @@ test('assignment distinguishes omitted null same and changed recipients and roll
 
 test('PostgreSQL committed competing insert preserves conditional intent and savepoint usability', function (bool $upsert): void {
     if (DB::connection()->getDriverName() !== 'pgsql') {
-        Assert::markTestSkipped('Set PREFERENCE_TEST_DATABASE to a disposable PostgreSQL database.');
+        Assert::markTestSkipped('Set ZERO_TEST_PG_DATABASE to a dedicated disposable PostgreSQL test database.');
     }
 
     $models = new ModelRegistry([MutationPreference::class]);
     $mutation = new Mutation($models, ['timestamp' => 1700000000123, 'ids' => ['key:preference' => (string) Str::uuid()]], new ZeroContext([]));
-    config(['database.connections.competitor' => config('database.connections.preferences')]);
+    config(['database.connections.competitor' => config('database.connections.testing')]);
     $winner = (string) Str::uuid();
     MutationPreference::creating(function () use ($winner, $upsert): void {
         // Separate connection commits after our absence read, before our insert.

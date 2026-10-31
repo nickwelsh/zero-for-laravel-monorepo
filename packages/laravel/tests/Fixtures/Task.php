@@ -10,15 +10,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
-use ZeroForLaravel\Attributes\ZeroAuthorize;
-use ZeroForLaravel\Attributes\ZeroMutate;
-use ZeroForLaravel\Attributes\ZeroQuery;
-use ZeroForLaravel\Attributes\ZeroServerFill;
 use ZeroForLaravel\ContextField;
-use ZeroForLaravel\Definition\AllowedFilter;
 use ZeroForLaravel\Definition\ZeroDefinition;
-use ZeroForLaravel\Enums\FilterOperator;
-use ZeroForLaravel\Query\ZQLBuilder;
 
 /**
  * @property string $id
@@ -29,10 +22,6 @@ use ZeroForLaravel\Query\ZQLBuilder;
  * @property \Carbon\CarbonImmutable|null $completed_at
  * @property \Illuminate\Support\Carbon $created_at
  */
-#[ZeroQuery(['all', 'one'])]
-#[ZeroMutate('create', 'update', 'destroy', 'restore', 'force_delete')]
-#[ZeroAuthorize('user_id', '=', ContextField::UserId)]
-#[ZeroServerFill('user_id', ContextField::UserId)]
 class Task extends Model
 {
     use HasUuids, SoftDeletes;
@@ -47,10 +36,9 @@ class Task extends Model
     public static function zero(): ZeroDefinition
     {
         return ZeroDefinition::make()
-            ->allowedFilters([AllowedFilter::partial('title'), AllowedFilter::exact('done'), AllowedFilter::exact('completed_at'), AllowedFilter::belongsTo('list'), AllowedFilter::trashed(), AllowedFilter::operator('completed_after', FilterOperator::GREATER_THAN, 'completed_at'), AllowedFilter::operator('title_operator', FilterOperator::DYNAMIC, 'title'), AllowedFilter::beginsWithStrict('title_start', 'title'), AllowedFilter::groupOr('search', [AllowedFilter::partial('title'), AllowedFilter::exact('id')]), AllowedFilter::callback('is_completed', fn (ZQLBuilder $query): ZQLBuilder => $query->where('completed_at', 'IS NOT', null)), AllowedFilter::callback('title_is', fn (ZQLBuilder $query, mixed $value): ZQLBuilder => $query->where('title', $value), 'title')])
-            ->allowedIncludes(['list', 'tags', 'comments'])
-            ->allowedSorts(['title', 'created_at'])
-            ->defaultSort('-created_at');
+            ->authorize('user_id', '=', ContextField::UserId)
+            ->fillFromContext('user_id', ContextField::UserId)
+            ->relations('list', 'tags', 'comments');
     }
 
     /**

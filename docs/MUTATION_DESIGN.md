@@ -521,9 +521,9 @@ An invalid client-side result decode after confirmed server commit is a result/c
 
 ### 12.4 Required upstream capability
 
-The current official Zero documentation and inspected upstream source support JSON returns. The previously inspected installed 1.10.0 signature exposed an older `Promise<void>` contract. Implementation must select and verify a version that provides the required native return, persistence, and recovery behavior across the full client/server stack.
+Pin the Zero client and cache to **1.11.3**. Its native protocol supports JSON returns, persisted outcomes, and recovery across the full client/server stack.
 
-Do not treat the older installed API as proof that returns are unsupported, or claim a particular minimum release without verifying it. Updating dependencies is a separate authorized implementation action; this design document does not change them.
+Verify these capabilities against the pinned version with real commit and lost-response recovery tests.
 
 ## 13. Server dispatch, failures, and retries
 
@@ -535,7 +535,7 @@ The native push endpoint is not automatically the original route's HTTP pipeline
 
 Not every middleware is meaningful for replayed batch execution, especially middleware that redirects or depends on unrelated HTTP side effects. Define supported behavior, surface unsupported dependencies, and never silently bypass a security requirement. The exact dispatcher mechanism is an implementation decision; inventing a synthetic request without the required semantics is not a solution.
 
-Normal routes and the native mutation endpoint must not both perform the same write for one submission. If ordinary HTTP invocation of the action is retained, define that compatibility path explicitly and ensure it shares business semantics without executing the operation twice.
+Submit attributed controller actions only through their generated Zero mutation bindings. Ordinary HTTP invocation returns 405, so the normal route and native endpoint cannot both perform the same submission.
 
 ### 13.2 Structured errors
 
@@ -572,17 +572,15 @@ Cancelling observation, unmounting a form, or navigating away does not promise c
 
 Reuse existing Inertia/Wayfinder route metadata for links and action association. Final generated mutation helper placement and any extensions to familiar form APIs remain open; do not claim that unmodified upstream `<Form>` or `useForm` already routes writes through Zero.
 
-## 15. Integration with the existing package
+## 15. Generation and deployment
 
-Reuse the existing owning layers for generated model metadata, cast conversion, optimistic CRUD/nested writes, native mutation submission, authoritative transactions, validation, and protocol deduplication where they meet this design.
+Model metadata, cast conversion, checked controller operations, native submission, authoritative transactions, validation, and protocol deduplication each have one owning layer.
 
-The existing domain-operation support demonstrates actions with optional optimism. It is a starting point, not proof that controller dispatch, checked shared helpers, or all native JSON result semantics are already implemented.
-
-The older optional result-read endpoint pattern is not the new default. Adopt native returned data for operations requiring result values and preserve compatibility deliberately if existing consumers rely on the previous API.
+Operations return data through native persisted outcomes. There is no separate result-read endpoint.
 
 Keep mutation semantics independent of Inertia. Generated operations can also be used by clients outside page forms. The Inertia adapter owns form presentation and error integration, not database execution or a separate optimistic engine.
 
-Generate coordinated client and authoritative artifacts. Changes to controller dependencies, shared helper methods, policy contracts selected for portable execution, requests, model metadata, or result contracts invalidate the relevant output. Treat pending offline mutations and old clients as an explicit deployment-compatibility concern: retain supported operation versions or reject unsupported contracts safely. Never execute a stale queued intent against incompatible new semantics silently.
+Generate coordinated client and authoritative artifacts. Changes to controller dependencies, shared helper methods, policy contracts selected for portable execution, requests, model metadata, or result contracts invalidate the relevant output. Deploy matching artifacts together and reject unknown contract identities. Never execute queued intent against different semantics silently.
 
 ## 16. Acceptance criteria
 
@@ -614,7 +612,7 @@ These are implementation requirements, not claims that an implementation or test
 | Client/server results   | Different declared speculative and authoritative result shapes are validated and typed honestly.                                                               |
 | Side effects            | Replay never sends external notifications; durable external work is not lost or duplicated merely because of a crash/retry.                                    |
 | Frontend lifecycle      | One submission performs one logical write; local success differs from server acceptance; unmount/cancel does not invent an undo guarantee.                     |
-| Deployment              | Old queued operations follow the explicit compatibility policy instead of silently acquiring new behavior.                                                     |
+| Deployment              | Unknown contract identities reject instead of executing different semantics.                                                                                   |
 
 Use the native Zero client as the replay/transaction oracle, Laravel feature tests for the integration's endpoint and security boundaries, and real database tests for important concurrency and commit/recovery guarantees. Small expression/compiler tests can cover portable semantics. Do not treat snapshots of generated text alone as proof of atomicity or authorization, or duplicate every upstream framework test.
 
@@ -632,7 +630,7 @@ The design is sufficient to guide implementation. These details need explicit re
 - Which policy constructs may optionally be portable and how all required Gate behavior is represented or left authoritative.
 - Result shape inference versus explicit contracts, including client/server differences and distinguishing void from explicit null.
 - Which conditional insert/upsert semantics are exposed as shared primitives and how their server conflict behavior is guaranteed.
-- Protocol compatibility and retention policy for pending offline mutations during deployment.
+- Reload/update handling for rejected unknown contracts during deployment.
 
 These questions do not require more product discussion before recording the architecture. Public choices that materially change authorization, data ownership, identity strategy, or compatibility must still be surfaced when implementation makes them concrete.
 

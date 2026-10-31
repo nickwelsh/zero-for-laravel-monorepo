@@ -22,7 +22,6 @@ export default defineConfig({
             '**/resources/js/zero/generated.queries.ts',
             '**/resources/js/zero/generated.mutations.ts',
             '**/resources/js/zero/App/**',
-            '**/resources/js/zero/pages.d.ts',
             '**/resources/js/zero/generated.files.json',
             'tests/interop/controller-api/**',
             '**/resources/js/actions/**',
@@ -47,10 +46,9 @@ export default defineConfig({
         overrides: [
             // Existing factories and synchronous identity guards need scoped compiler exceptions.
             {
-                files: ['packages/client/src/react/mutation.ts', 'packages/client/src/react/controller-mutation.ts'],
+                files: ['packages/client/src/react/controller-mutation.ts'],
                 rules: { 'react/refs': 'off' },
             },
-            { files: ['packages/client/src/react/filters.tsx'], rules: { 'react/immutability': 'off' } },
             { files: ['**/*.test.{ts,tsx}'], rules: { 'react/globals': 'off' } },
             { files: ['**/*.test.{ts,tsx}'], rules: { 'unicorn/consistent-function-scoping': 'off' } },
             {
@@ -75,7 +73,6 @@ export default defineConfig({
             '**/resources/js/zero/generated.queries.ts',
             '**/resources/js/zero/generated.mutations.ts',
             '**/resources/js/zero/App/**',
-            '**/resources/js/zero/pages.d.ts',
             'tests/interop/controller-api/**',
             '**/resources/js/actions/**',
             '**/resources/js/routes/**',

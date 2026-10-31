@@ -1,17 +1,16 @@
-import { describe, expect, it } from 'vite-plus/test';
+import { expect, it } from 'vite-plus/test';
 import { execFileSync } from 'node:child_process';
 import { runInNewContext } from 'node:vm';
 import { createBuilder, defineQueriesWithType, defineQueryWithType } from '@rocicorp/zero';
-import { handleQueryRequest } from '@rocicorp/zero/server';
 import { asQueryInternals } from '@rocicorp/zero/bindings';
 import { z } from 'zod';
 import { transformSync } from 'esbuild';
 // Version-pinned compatibility oracle: 1.11 canonicalizes condition/relationship
 // order before returning an AST. PHP emits the equivalent unnormalized wire AST.
 import { normalizeAST } from '../../node_modules/@rocicorp/zero/out/zero-protocol/src/ast.js';
-import { schema, queries, definitions } from './generated';
+import { schema, definitions } from './generated';
 import { liveQuery, withQueryInputs } from '../../packages/client/src/live-query';
-import type { QueryArgs } from '@nickwelsh/zero-for-laravel';
+import { dated } from './controller-api/ZeroForLaravel/Tests/Fixtures/QueryController';
 
 it('executes both generated controller definitions with empty, zero-string, and ordinary inputs', () => {
     const zql = createBuilder(schema);
@@ -108,167 +107,35 @@ it('executes both generated controller definitions with empty, zero-string, and 
 });
 
 it('encodes public Date arguments before constructing native named query requests', () => {
-    const source = execFileSync('php', ['packages/laravel/tests/Fixtures/export-controller-mutations.php', 'queries'], {
-        encoding: 'utf8',
-    });
-    const compiled = transformSync(source, { loader: 'ts', format: 'cjs', target: 'es2022' });
-    const modules: Record<string, unknown> = {
-        '@rocicorp/zero': { createBuilder, defineQueriesWithType, defineQueryWithType },
-        '@nickwelsh/zero-for-laravel': { liveQuery, withQueryInputs },
-        zod: { z },
-        './generated': { schema, definitions },
-    };
-    const exported: {
-        actions: Record<string, (input: { input: { after: Date } }) => { request(): { args: unknown } }>;
-    } = { actions: {} };
-    const module = { exports: exported };
-    runInNewContext(compiled.code, { require: (name: string) => modules[name], module, Date });
-    Object.assign(exported, module.exports);
-    const action = exported.actions['ZeroForLaravel\\Tests\\Fixtures\\QueryController@dated.tasks']!;
-    const first = action({ input: { after: new Date('2023-11-14T22:13:20.123Z') } }).request();
-    const equivalent = action({ input: { after: new Date('2023-11-14T23:13:20.123+01:00') } }).request();
+    const first = dated.tasks({ input: { after: new Date('2023-11-14T22:13:20.123Z') } });
+    const equivalent = dated.tasks({ input: { after: new Date('2023-11-14T23:13:20.123+01:00') } });
     expect(first.args).toEqual({ input: { after: '2023-11-14T22:13:20.123Z' } });
     expect(equivalent.args).toEqual(first.args);
-    expect(() => action({ input: { after: new Date(NaN) } })).toThrow();
-}, 60_000);
+    expect(() => dated.tasks({ input: { after: new Date(NaN) } })).toThrow();
+});
 
-describe('PHP / native Zero query equivalence', () => {
-    for (const [name, args] of [
-        ['Task.all', {}],
-        [
-            'Task.all',
-            {
-                filters: {
-                    completed_after: 1700000000000,
-                    title_operator: { operator: '!=', value: 'hidden' },
-                    title_start: 'a%_',
-                    search: 'title',
-                    is_completed: true,
-                    title_is: 'test',
-                },
-            },
-        ],
-        [
-            'Task.all',
-            {
-                filters: { done: false, title: 'a%_\\b', completed_at: null },
-                include: { list: {} },
-            },
-        ],
-        ['Task.all', { filters: { list: 'list-a' }, order: [['title', 'asc']], limit: 23 }],
-        ['Task.all', { filters: { trashed: 'only' } }],
-        ['Task.all', { include: { tags: {}, comments: { limit: 5 } } }],
-        ['Task.all', { include: { list: { include: { tasks: { limit: 2 } } } } }],
-        ['Task.one', { id: 'a', include: { list: {} } }],
-    ] as const) {
-        it(`${name} ${JSON.stringify(args)}`, async () => {
-            const body = ['transform', [{ id: 'q', name, args: [args] }]];
-            const native = await handleQueryRequest({
-                schema,
-                body,
-                query: {},
-                userID: 'alice',
-                handler: (queryName, queryArgs) => {
-                    const operation = queryName.split('.')[1];
-                    return queries.Task[operation as 'all' | 'one'].fn({
-                        args: queryArgs as QueryArgs,
-                        ctx: { user_id: 'alice' },
-                    });
-                },
-            });
-            const php = JSON.parse(
-                execFileSync('php', ['tests/interop/export.php', name, JSON.stringify(args)], { encoding: 'utf8' }),
-            );
-            expect('kind' in native && native.kind).toBe('QueryResponse');
-            if ('kind' in native && native.kind === 'QueryResponse')
-                expect(native.queries[0]).toEqual({ id: 'q', name, ast: normalizeAST(php) });
-        });
+it('applies authoritative visibility to controller roots, nested results, junctions, and boolean scopes', () => {
+    const q = createBuilder(schema).tasks.where('user_id', 'alice').where('deleted_at', 'IS', null);
+    const native = {
+        root: q,
+        related: q
+            .related('list', (child) => child.where('user_id', 'alice'))
+            .related('comments', (child) => child.where('user_id', 'alice').limit(3)),
+        junction: q.whereExists('tags', (child) => child.where('user_id', 'alice').where('id', 'owned')),
+        groups: q.where((eb) =>
+            eb.or(
+                eb.exists('tags', (child) => child.where('user_id', 'alice').where('name', 'Reading')),
+                eb.exists('tags', (child) => child.where('user_id', 'alice').where('name', 'Other')),
+            ),
+        ),
+        scope: q.where((eb) => eb.or(eb.cmp('done', true), eb.cmp('title', 'shared'))),
+    };
+    const php = JSON.parse(execFileSync('php', ['tests/interop/export.php', 'authorized'], { encoding: 'utf8' }));
+    expect(Object.keys(php)).toEqual(Object.keys(native));
+    for (const [name, query] of Object.entries(native)) {
+        expect(normalizeAST(php[name]), name).toEqual(asQueryInternals(query).ast);
     }
 });
-
-it('compiles mandatory runtime scope boolean algebra to native ZQL', async () => {
-    const native = await handleQueryRequest({
-        schema,
-        body: ['transform', [{ id: 'q', name: 'Task.all', args: [{}] }]],
-        query: {},
-        userID: 'alice',
-        handler: () =>
-            createBuilder(schema)
-                .tasks.where('user_id', 'alice')
-                .where((eb) => eb.or(eb.cmp('done', true), eb.cmp('title', 'shared')))
-                .where('deleted_at', 'IS', null)
-                .orderBy('created_at', 'desc')
-                .orderBy('id', 'asc')
-                .limit(50),
-    });
-    const php = JSON.parse(
-        execFileSync('php', ['tests/interop/export.php', 'Task.all', '{}', 'scope'], { encoding: 'utf8' }),
-    );
-    if ('kind' in native && native.kind === 'QueryResponse')
-        expect(native.queries[0]).toEqual({ id: 'q', name: 'Task.all', ast: normalizeAST(php) });
-    else throw new Error('Expected a native query response.');
-});
-
-for (const scenario of ['filter', 'conditions', 'scope'] as const) {
-    it(`compiles a junction ${scenario} predicate to native ZQL`, async () => {
-        const args =
-            scenario === 'filter'
-                ? { filters: { tag: 'owned' } }
-                : scenario === 'conditions'
-                  ? {
-                        filters: {
-                            rules: {
-                                match: 'any',
-                                rules: [
-                                    { field: 'tag', value: 'Reading' },
-                                    { field: 'tag', value: 'Other' },
-                                ],
-                            },
-                        },
-                    }
-                  : {};
-        const native = await handleQueryRequest({
-            schema,
-            body: ['transform', [{ id: 'q', name: 'Task.all', args: [args] }]],
-            query: {},
-            userID: 'alice',
-            handler: () => {
-                let query = createBuilder(schema).tasks.where('user_id', 'alice');
-                if (scenario !== 'scope') query = query.where('deleted_at', 'IS', null);
-                if (scenario === 'filter') {
-                    query = query.whereExists('tags', (tags) => tags.where('user_id', 'alice').where('id', 'owned'));
-                } else if (scenario === 'conditions') {
-                    query = query.where((eb) =>
-                        eb.or(
-                            eb.exists('tags', (tags) => tags.where('user_id', 'alice').where('name', 'Reading')),
-                            eb.exists('tags', (tags) => tags.where('user_id', 'alice').where('name', 'Other')),
-                        ),
-                    );
-                } else {
-                    query = query
-                        .whereExists('tags', (tags) => tags.where('user_id', 'alice'))
-                        .where('deleted_at', 'IS', null);
-                }
-                return query.orderBy('created_at', 'desc').orderBy('id', 'asc').limit(50);
-            },
-        });
-        const php = JSON.parse(
-            execFileSync(
-                'php',
-                [
-                    'tests/interop/export.php',
-                    'Task.all',
-                    JSON.stringify(args),
-                    scenario === 'scope' ? 'junction-scope' : 'junction',
-                ],
-                { encoding: 'utf8' },
-            ),
-        );
-        if ('kind' in native && native.kind === 'QueryResponse')
-            expect(native.queries[0]).toEqual({ id: 'q', name: 'Task.all', ast: normalizeAST(php) });
-        else throw new Error('Expected a native query response.');
-    });
-}
 
 it('matches immutable PHP declarations to the pinned native construction surface', () => {
     const q = createBuilder(schema).tasks;

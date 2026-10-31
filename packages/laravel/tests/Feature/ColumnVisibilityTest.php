@@ -8,11 +8,9 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use LogicException;
-use ZeroForLaravel\Attributes\ZeroAuthorize;
 use ZeroForLaravel\Attributes\ZeroColumns;
 use ZeroForLaravel\Attributes\ZeroExclude;
 use ZeroForLaravel\Attributes\ZeroIncludeColumns;
-use ZeroForLaravel\Attributes\ZeroServerFill;
 use ZeroForLaravel\ContextField;
 use ZeroForLaravel\Definition\ZeroDefinition;
 use ZeroForLaravel\Generation\TypeScriptGenerator;
@@ -113,17 +111,27 @@ class MissingVisibleDeletedAt extends VisibleTask
     use SoftDeletes;
 }
 
-#[ZeroAuthorize('user_id', '=', ContextField::UserId)]
-class MissingVisibleAuthorization extends VisibleTask {}
+class MissingVisibleAuthorization extends VisibleTask
+{
+    public static function zero(): ZeroDefinition
+    {
+        return ZeroDefinition::make()->authorize('user_id', '=', ContextField::UserId);
+    }
+}
 
-#[ZeroServerFill('user_id', ContextField::UserId)]
-class MissingVisibleFill extends VisibleTask {}
+class MissingVisibleFill extends VisibleTask
+{
+    public static function zero(): ZeroDefinition
+    {
+        return parent::zero()->fillFromContext('user_id', ContextField::UserId);
+    }
+}
 
 class MissingVisibleRelationKey extends VisibleTask
 {
     public static function zero(): ZeroDefinition
     {
-        return ZeroDefinition::make()->allowedIncludes(['list']);
+        return parent::zero()->relations('list');
     }
 
     /** @return BelongsTo<MissingVisibleRelationKey, $this> */

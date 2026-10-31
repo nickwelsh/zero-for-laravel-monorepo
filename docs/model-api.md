@@ -2,7 +2,6 @@
 
 The public entry points are controller declarations, generated page contracts, and
 generated actions. Models provide schema, casts, visibility, and writable columns.
-Do not use model snapshot methods or named domain classes for new application code.
 See the [main guide](../README.md) and [working example](../examples/todos/README.md).
 
 ## Visibility remains authoritative
@@ -157,5 +156,4 @@ cause automatic resubmission.
 
 Deploy generated PHP registrations, schema, query bindings, mutation bindings, and
 controller exports together. `zero:generate --check` detects drift. Unknown stale action
-identities reject explicitly; retaining old queued operation versions is an
-application deployment policy, not silent best-effort execution.
+identities reject explicitly instead of executing a different contract.

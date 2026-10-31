@@ -8,7 +8,7 @@ use App\Models\TodoList;
 use ZeroForLaravel\Http\ContextResolver;
 
 return [
-    // Empty discovers models with Zero attributes or a zero() definition under app/Models.
+    // Empty discovers models with a zero() definition under app/Models.
     'models' => [TodoList::class, Todo::class, ListMembership::class],
     'output' => resource_path('js/zero/generated.ts'),
     'react' => true,

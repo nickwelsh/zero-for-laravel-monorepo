@@ -17,12 +17,22 @@ use Illuminate\Testing\PendingCommand;
 use LogicException;
 use ZeroForLaravel\Http\ContextResolver;
 use ZeroForLaravel\Metadata\ModelRegistry;
+use ZeroForLaravel\Query\RegisteredQueries;
+use ZeroForLaravel\Query\RegisteredQuery;
 use ZeroForLaravel\Tests\Fixtures\ControllerMutationController;
 use ZeroForLaravel\Tests\Fixtures\QueryController;
 use ZeroForLaravel\Tests\Fixtures\Task;
 use ZeroForLaravel\Tests\HttpTestCase;
 
 uses(HttpTestCase::class);
+
+function registerHttpQuery(): void
+{
+    Route::get('/http-query', [QueryController::class, 'window']);
+    app()->instance(RegisteredQueries::class, new RegisteredQueries([
+        'q_http' => new RegisteredQuery(QueryController::class.'@window', 'tasks/window', 'tasks', [], static fn (): \ZeroForLaravel\Query\Query => Task::zeroQuery()),
+    ]));
+}
 
 test('annotated mutations cannot bypass native preparation through ordinary HTTP', function (): void {
     Route::post('/controller-write', [ControllerMutationController::class, 'store']);
@@ -50,10 +60,11 @@ test('cache requests are authenticated separately from end users', function (): 
 
 test('query endpoint uses authenticated identity instead of body context', function (): void {
     /** @var HttpTestCase $this */
+    registerHttpQuery();
     $user = (new User)->setKeyType('string');
     $user->forceFill(['id' => 'alice']);
     $this->actingAs($user)->withHeader('X-Api-Key', 'private-test-secret')
-        ->postJson('/zero/query', ['transform', [['id' => 'q', 'name' => 'Task.all', 'args' => [(object) []]]]])
+        ->postJson('/zero/query', ['transform', [['id' => 'q', 'name' => 'q_http', 'args' => [(object) []]]]])
         ->assertOk()->assertJsonPath('userID', 'alice')->assertJsonPath('queries.0.ast.where.conditions.0.right.value', 'alice');
 });
 
@@ -65,15 +76,16 @@ test('bad json returns protocol error without leaking exceptions', function (): 
 
 test('query transforms accept large revalidation batches while authorizing every query', function (): void {
     /** @var HttpTestCase $this */
+    registerHttpQuery();
     $user = (new User)->setKeyType('string');
     $user->forceFill(['id' => 'alice']);
 
     $queries = [];
     for ($index = 0; $index < 257; $index++) {
-        $queries[] = ['id' => 'q'.$index, 'name' => 'Task.all', 'args' => [(object) []]];
+        $queries[] = ['id' => 'q'.$index, 'name' => 'q_http', 'args' => [(object) []]];
     }
 
-    $queries[] = ['id' => 'invalid', 'name' => 'Task.all', 'args' => [['filters' => ['secret' => 'forged']]]];
+    $queries[] = ['id' => 'invalid', 'name' => 'q_http', 'args' => [['ast' => ['table' => 'users']]]];
     $response = $this->actingAs($user)->withHeader('X-Api-Key', 'private-test-secret')
         ->postJson('/zero/query', ['transform', $queries])
         ->assertOk()->assertJsonPath('kind', 'QueryResponse')->assertJsonCount(258, 'queries')
@@ -87,7 +99,7 @@ test('the cache request size limit still bounds transform work', function (): vo
     /** @var HttpTestCase $this */
     $this->withHeader('X-Api-Key', 'private-test-secret')
         ->postJson('/zero/query', ['transform', [[
-            'id' => 'large', 'name' => 'Task.all', 'args' => [['filters' => ['title' => str_repeat('x', 1048576)]]],
+            'id' => 'large', 'name' => 'q_http', 'args' => [['title' => str_repeat('x', 1048576)]],
         ]]])->assertStatus(413);
 });
 

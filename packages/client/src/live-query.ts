@@ -1,8 +1,7 @@
 import type { AnyCustomQuery, QueryRowType, QueryResultType } from '@rocicorp/zero';
 import type { ContractMap, FieldValue } from './contract';
 import type { ReadSelection } from './react/data';
-import { selectionKey } from './query';
-import { decodeColumn, fail, freeze, object } from './validation';
+import { decodeColumn, fail, freeze, object, selectionKey } from './validation';
 
 type NativeQuery = Pick<AnyCustomQuery, 'queryName' | '~'> & ((...args: never[]) => unknown);
 

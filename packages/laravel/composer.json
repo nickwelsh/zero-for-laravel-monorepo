@@ -1,6 +1,6 @@
 {
     "name": "nickwelsh/zero-for-laravel",
-    "description": "Laravel-owned model contracts, queries and CRUD for Rocicorp Zero.",
+    "description": "Controller-first Laravel queries and mutations for Rocicorp Zero.",
     "type": "library",
     "license": "MIT",
     "require": {

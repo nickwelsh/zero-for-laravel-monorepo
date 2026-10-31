@@ -2,8 +2,7 @@
 
 Controller-first Laravel queries and mutations on native Rocicorp Zero **1.11.3**.
 Use **v0.5.0** with the matching `nickwelsh/zero-for-laravel` Composer package.
-This release breaks the v0.4 model-centric API; regenerate all contracts and migrate
-callers using the repository's upgrade guide. React and Inertia are optional peers;
+Generate and deploy the PHP and TypeScript contracts together. React and Inertia are optional peers;
 the `/inertia` adapter requires Inertia 3 and `@inertiajs/react` ^3.8.0.
 
 Laravel owns controller discovery, FormRequests, binding, authorization, and
@@ -28,7 +27,7 @@ return livePages.wrap(module.default, page);
 Put the generated `ZeroProvider` in the authenticated persistent layout, outside
 the wrapped page. Supply the authenticated user ID and trusted-context counterpart.
 The adapter injects declared live props; pages do not call `useQuery` for them.
-Rows are plain decoded data, not model snapshots:
+Rows are plain decoded data:
 
 ```tsx
 import type { QueryData } from '@nickwelsh/zero-for-laravel/react';

@@ -13,10 +13,8 @@ definitions; PHP and TypeScript emission consume those definitions. Unsupported
 dependencies fail generation. No controller executes to discover sample values.
 
 Generated identities include relevant source and model contracts. Deploy PHP
-registrations and client modules together. Unknown old names reject with a reload
+registrations and client modules together. Unknown names reject with a reload
 or unsupported-operation error rather than executing new code under stale identity.
-An application that needs offline-operation retention must retain old registrations
-deliberately; v0.5 does not transparently migrate queued intent from v0.4.
 
 ## HTTP and Zero retain distinct jobs
 

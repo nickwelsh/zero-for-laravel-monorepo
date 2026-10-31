@@ -4,8 +4,7 @@ description: Consume plain typed rows and explicit input/result codecs.
 ---
 
 Live props contain plain decoded rows: `task.title`, `task.list?.name`, and
-`task.comments`. There are no model snapshot wrappers, lazy model methods, or
-bound CRUD methods. Generated `TaskRow` describes model columns;
+`task.comments`. Generated `TaskRow` describes model columns;
 `InferLiveQueryResult<typeof index.tasks>` adds the selected relationship shape.
 `QueryData<typeof index.tasks>` also includes live status, pagination, and inputs.
 

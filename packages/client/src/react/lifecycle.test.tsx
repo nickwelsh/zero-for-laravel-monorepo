@@ -2,8 +2,8 @@
 import { act, cleanup, render, renderHook, screen } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vite-plus/test';
 import { createBuilder, defineQueries, defineQuery } from '@rocicorp/zero';
-import { Task, schema, definitions } from '../../../../tests/interop/generated';
-import { createZeroForLaravel } from '../runtime';
+import { schema, definitions } from '../../../../tests/interop/generated';
+import { index } from '../../../../tests/interop/controller-api/ZeroForLaravel/Tests/Fixtures/QueryController';
 import { liveQuery, withQueryInputs } from '../live-query';
 import { z } from 'zod';
 import { router } from '@inertiajs/react';
@@ -39,13 +39,13 @@ const put = (args: unknown, raw: unknown, type = 'complete') =>
     ]);
 
 it('keeps completed empty results usable through background sync and errors', () => {
-    put({}, []);
-    const { result, rerender } = renderHook(() => useData(Task.query.all()));
+    put({ title: '' }, []);
+    const { result, rerender } = renderHook(() => useData(index.tasks.live({ title: '' })));
     expect(result.current.status).toBe('success');
-    put({}, [], 'unknown');
+    put({ title: '' }, [], 'unknown');
     rerender();
     expect(result.current.status).toBe('refreshing');
-    put({}, [], 'error');
+    put({ title: '' }, [], 'error');
     rerender();
     expect(result.current.status).toBe('stale');
     expect(result.current.data).toEqual([]);
@@ -53,152 +53,30 @@ it('keeps completed empty results usable through background sync and errors', ()
     expect(native.retry).toHaveBeenCalledOnce();
 });
 
-it('keeps the committed sort live through rapid replacements, failure and retry', () => {
-    put({}, rows);
-    const { result, rerender } = renderHook(
-        ({ direction }: { direction: 'asc' | 'desc' | undefined }) =>
-            useData(Task.query.all().reorder(direction ? [['title', direction]] : undefined)),
-        { initialProps: { direction: undefined as 'asc' | 'desc' | undefined } },
-    );
-    rerender({ direction: 'desc' });
-    expect(result.current.status).toBe('refreshing');
-    expect(result.current.data.map((row) => row.data.id)).toEqual(['a', 'b']);
-    put({}, [{ id: 'a', title: 'Edited' }, rows[1]]);
-    rerender({ direction: 'desc' });
-    expect(result.current.data[0]?.data.title).toBe('Edited');
-    rerender({ direction: 'asc' });
-    put({ order: [['title', 'desc']] }, [rows[1], rows[0]]);
-    rerender({ direction: 'asc' });
-    expect(result.current.data[0]?.data.id).toBe('a');
-    put({ order: [['title', 'asc']] }, [], 'error');
-    rerender({ direction: 'asc' });
-    expect(result.current.status).toBe('stale');
-    act(() => result.current.retry());
-    expect(native.retry).toHaveBeenCalledOnce();
-    put({ order: [['title', 'asc']] }, [], 'complete');
-    rerender({ direction: 'asc' });
-    expect(result.current.status).toBe('success');
-    expect(result.current.data).toEqual([]);
-});
-
-it('does not retain data across filters, includes, pagination scope, contracts or identity', () => {
-    put({}, rows);
+it('does not retain data across controller arguments or authorization identities', () => {
+    put({ title: '' }, rows);
     const { result, rerender } = renderHook(({ selection }) => useData(selection), {
-        initialProps: { selection: Task.query.all() },
+        initialProps: { selection: index.tasks.live({ title: '' }) },
     });
-    rerender({ selection: Task.query.all().filter('title', 'other') });
+    rerender({ selection: index.tasks.live({ title: 'other' }) });
     expect(result.current.status).toBe('loading');
     expect(result.current.data).toEqual([]);
-    rerender({ selection: Task.query.all() });
-    rerender({ selection: Task.query.all().with('comments') });
-    expect(result.current.data).toEqual([]);
-    rerender({ selection: Task.query.all() });
-    rerender({ selection: Task.query.all().limit(2) });
-    expect(result.current.data).toEqual([]);
-    rerender({ selection: Task.query.all() });
+    rerender({ selection: index.tasks.live({ title: '' }) });
     native.results.clear();
     native.zero = { context: { user_id: 'bob' } };
-    rerender({ selection: Task.query.all().orderBy('title') });
+    rerender({ selection: index.tasks.live({ title: '' }) });
     expect(result.current.status).toBe('loading');
     expect(result.current.data).toEqual([]);
 });
 
 it('reuses decoded rows and dates on an unrelated render with an inline selection', () => {
-    put({}, [{ id: 'a', completed_at: 1700000000000 }]);
-    const { result, rerender } = renderHook(() => useData(Task.query.all()));
+    put({ title: '' }, [{ id: 'a', completed_at: 1700000000000 }]);
+    const { result, rerender } = renderHook(() => useData(index.tasks.live({ title: '' })));
     const data = result.current.data;
-    const date = data[0]?.data.completed_at;
+    const date = data[0]?.completed_at;
     rerender();
     expect(result.current.data).toBe(data);
-    expect(result.current.data[0]?.data.completed_at).toBe(date);
-});
-
-it('distinguishes exact maximum from exhaustion and never offers impossible advancement', () => {
-    const runtime = createZeroForLaravel(schema, {
-        ...definitions,
-        Task: { ...definitions.Task, maxLimit: 2, defaultLimit: 2 },
-    } as const);
-    put({ limit: 2 }, rows);
-    const { result, rerender } = renderHook(
-        ({ enabled }) => useData(runtime.models.Task.query.all().infinite(2), { enabled }),
-        { initialProps: { enabled: true } },
-    );
-    expect(result.current.infinite).toMatchObject({
-        capped: true,
-        exhausted: false,
-        hasMore: false,
-        stopReason: 'maximum',
-    });
-    act(() => result.current.infinite?.loadMore());
-    expect(result.current.infinite?.limit).toBe(2);
-    put({ limit: 2 }, [rows[0]]);
-    rerender({ enabled: true });
-    expect(result.current.infinite).toMatchObject({ exhausted: true, stopReason: 'exhausted' });
-    put({ limit: 2 }, [], 'error');
-    rerender({ enabled: true });
-    expect(result.current.infinite?.stopReason).toBeUndefined();
-    rerender({ enabled: false });
-    expect(result.current.status).toBe('idle');
-    expect(result.current.infinite?.hasMore).toBeUndefined();
-});
-
-it('resets the growing window when contracts or their maximum change', () => {
-    const make = (maxLimit: number) =>
-        createZeroForLaravel(schema, {
-            ...definitions,
-            Task: { ...definitions.Task, defaultLimit: Math.min(2, maxLimit), maxLimit },
-        } as const).models.Task;
-    put({ limit: 3 }, [...rows, { id: 'c' }]);
-    const { result, rerender } = renderHook(({ model }) => useData(model.query.all().infinite(2)), {
-        initialProps: { model: make(6) },
-    });
-    act(() => result.current.infinite?.loadMore());
-    expect(result.current.infinite?.limit).toBe(4);
-    rerender({ model: make(1) });
-    expect(result.current.infinite).toMatchObject({ limit: 1, capped: true, hasMore: false });
-});
-
-it('preserves an expanded live window across a sort-only transition', () => {
-    const expanded = [...rows, { id: 'c' }, { id: 'd' }];
-    put({ limit: 3 }, expanded.slice(0, 3));
-    const { result, rerender } = renderHook(
-        ({ sort }) =>
-            useData(
-                Task.query
-                    .all()
-                    .reorder(sort ? [['title', 'desc']] : undefined)
-                    .infinite(2),
-            ),
-        { initialProps: { sort: false } },
-    );
-    act(() => result.current.infinite?.loadMore());
-    put({ limit: 5 }, expanded);
-    rerender({ sort: false });
-    expect(result.current.infinite?.limit).toBe(4);
-    expect(result.current.status).toBe('success');
-    rerender({ sort: true });
-    expect(result.current.infinite?.limit).toBe(4);
-    expect(result.current.status).toBe('refreshing');
-    expect(result.current.data.map((row) => row.data.id)).toEqual(['a', 'b', 'c', 'd']);
-});
-
-it('retains the native request when a consumer recreates an identical bounded selection', () => {
-    const runtime = createZeroForLaravel(schema, {
-        ...definitions,
-        Task: {
-            ...definitions.Task,
-            filters: { ...definitions.Task.filters, ids: { kind: 'in', field: 'id', maxItems: 10 } },
-        },
-    } as const);
-    const args = { filters: { ids: ['a', 'b'] }, limit: 2 };
-    put(args, rows);
-    const { result, rerender } = renderHook(() =>
-        useData(runtime.models.Task.query.all().filter('ids', ['a', 'b']).limit(2)),
-    );
-    expect(result.current.status).toBe('success');
-    for (let index = 0; index < 4; index++) rerender();
-    expect(result.current.data.map((row) => row.data.id)).toEqual(['a', 'b']);
-    expect(result.current.complete).toBe(true);
+    expect(result.current.data[0]?.completed_at).toBe(date);
 });
 
 it('decodes controller query rows and resets live data when route arguments change', () => {

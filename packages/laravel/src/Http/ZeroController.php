@@ -21,7 +21,7 @@ final class ZeroController
 
     public function mutate(Request $request, MutationProcessor $processor): JsonResponse
     {
-        return response()->json($processor->process($this->body($request), ['appID' => $request->query('appID'), 'schema' => $request->query('schema')], $this->context($request), $request->user()));
+        return response()->json($processor->process($this->body($request), ['appID' => $request->query('appID'), 'schema' => $request->query('schema')], $this->context($request)));
     }
 
     private function body(Request $request): mixed

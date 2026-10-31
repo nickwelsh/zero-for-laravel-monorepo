@@ -213,7 +213,7 @@ PHP has no JavaScript `undefined` value. The internal representation therefore n
 
 ### 3.4 Versioning
 
-Record the supported `@rocicorp/zero` version and query protocol/AST assumptions in the implementation. The existing package inspected during design uses Zero 1.10.0; this is a research baseline, not a promise that the new integration will target that version forever.
+The supported `@rocicorp/zero` client and cache version is **1.11.3**. Record query protocol/AST assumptions in the implementation and verify them against this pinned version.
 
 PHP compilation targets the representation required by that supported version. Compatibility tests must detect changes to relationship compilation, cursor handling, expression normalization, or protocol shapes. Do not depend on undocumented internals without identifying and testing that dependency.
 
@@ -680,7 +680,7 @@ There is no no-lookup binding mode, fake model proxy, alternate binder, or gener
 
 ### 10.1 Infinite loading is a live growing window
 
-Reuse the existing package's growing-window approach. With a page size of 25, the visible window grows from 25 to 50 to 75 rows. Each window remains a live ordered query; results are not permanently appended HTTP snapshots.
+Use growing live windows. With a page size of 25, the visible window grows from 25 to 50 to 75 rows. Each window remains a live ordered query; results are not permanently appended HTTP snapshots.
 
 Request an additional row where the configured maximum allows it to determine whether another row exists. Do not infer exhaustion from an incomplete local cache result.
 
@@ -693,7 +693,7 @@ Request an additional row where the configured maximum allows it to determine wh
 
 Expose `capped`, `exhausted`, and `stopReason` so a maximum is distinguishable from the end of the dataset. Repeated load calls while growth is pending must not create duplicate or unbounded advances. A late callback from a previous query scope must not grow the current scope's window.
 
-Changes to filters, route IDs, model contracts, or authorization identity reset the window. A sort-only change within the same authorized scope may retain the previous live ordering until its replacement synchronizes, matching existing lifecycle behavior. Results from a previous tenant or filter scope must never be retained as a loading convenience.
+Changes to controller arguments (including sorting), model contracts, or authorization identity reset the window. Results from a previous argument set or authorization identity are not retained as a loading convenience.
 
 ### 10.2 Deterministic ordering
 
@@ -753,15 +753,15 @@ Type-checking the value argument based on the exact preceding field string and o
 
 Generated editor files must not introduce duplicate runtime classes or affect production autoloading. Their regeneration must track changes to models, casts, relationships, and supported query APIs.
 
-## 13. Delivery and compatibility with the existing package
+## 13. Generation and deployment
 
-Keep the query engine independent of Inertia. Controller discovery and live prop injection form an adapter over generated query contracts, native Zero queries, codecs, and lifecycle handling. Existing non-Inertia consumers should continue to use generated queries and explicit hooks where appropriate.
+Keep the query engine independent of Inertia. Controller discovery and live prop injection form an adapter over generated query contracts, native Zero queries, codecs, and lifecycle handling. Non-Inertia consumers use generated queries and explicit hooks where appropriate.
 
-Reuse existing model metadata, public/wire conversions, authorized compilation, live result handling, and growing-window loading wherever they satisfy this specification. Extend or consolidate the owning layer when they do not. The existing restricted query compiler is not a substitute for full ZQL coverage.
+Model metadata, public/wire conversions, authorized compilation, live result handling, and growing-window loading each have one owning layer shared by native and Inertia consumers.
 
 Codegen produces coordinated PHP and TypeScript artifacts from the same application source. Watch relevant controller dependencies, routes, FormRequests, model metadata, and enums during development. A change in a helper used by a supported declaration must invalidate that declaration's generated output.
 
-Production generation must use the current route collection, not a stale cached route table. Generated artifacts must be deployable together. Handle incompatible client/server contracts through explicit version compatibility and a reload/update path, rather than attempting to execute a stale query with a new schema silently.
+Production generation must use the current route collection, not a stale cached route table. Deploy generated artifacts together. Reject unknown contract identities with a reload/update path rather than executing a stale query with a different schema.
 
 A staged implementation may land the engine, analysis, adapter, and advanced features separately. Do not label the integration fully ZQL-compatible until the complete supported-version inventory and parity checks pass. Do not modify this sketch's controllers or install new dependencies merely to record this design.
 

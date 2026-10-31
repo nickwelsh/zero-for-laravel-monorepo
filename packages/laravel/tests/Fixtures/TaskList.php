@@ -6,11 +6,9 @@ namespace ZeroForLaravel\Tests\Fixtures;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
-use ZeroForLaravel\Attributes\ZeroAuthorize;
 use ZeroForLaravel\ContextField;
 use ZeroForLaravel\Definition\ZeroDefinition;
 
-#[ZeroAuthorize('user_id', '=', ContextField::UserId)]
 class TaskList extends Model
 {
     public $timestamps = false;
@@ -23,7 +21,7 @@ class TaskList extends Model
 
     public static function zero(): ZeroDefinition
     {
-        return ZeroDefinition::make()->allowedIncludes(['tasks']);
+        return ZeroDefinition::make()->authorize('user_id', '=', ContextField::UserId)->relations('tasks');
     }
 
     /**

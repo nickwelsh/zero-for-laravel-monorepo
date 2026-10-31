@@ -2,7 +2,7 @@
 declare(strict_types=1);
 // Generated controller mutation registrations.
 return static fn (\ZeroForLaravel\Metadata\ModelRegistry $models, \ZeroForLaravel\Http\ControllerRouteDispatcher $routes): \ZeroForLaravel\Mutation\ControllerMutationRegistry => new \ZeroForLaravel\Mutation\ControllerMutationRegistry($models, $routes, [
-'m_cc56b27d8db39835819de5f22876518d' => ['contract' => array (
+'m_80aaa0bb59e6ad59856c2fdb450891b4' => ['contract' => array (
   'action' => 'App\\Http\\Controllers\\ShareListController@__invoke',
   'optimism' => 'disabled',
   'conceal' => true,
@@ -31,10 +31,10 @@ return static fn (\ZeroForLaravel\Metadata\ModelRegistry $models, \ZeroForLarave
   'sites' => 
   array (
   ),
-  'version' => 'cc56b27d8db39835819de5f22876518d741b320a5a61cdafc1d0cd99de0b7285',
+  'version' => '80aaa0bb59e6ad59856c2fdb450891b445ae056d4da6e3826190584da2f0b1c5',
   'returnType' => 'void',
 ), 'guards' => [], 'result' => static fn (mixed $value): mixed => (new \ZeroForLaravel\Generation\Mutations\ValueContract('void', [], [], false, false))->normalize($value)],
-'m_4bf80a90e9fbeb89a07eb4dbadb284aa' => ['contract' => array (
+'m_0bcf40bb888705f85b344867b89aab04' => ['contract' => array (
   'action' => 'App\\Http\\Controllers\\TodoController@destroy',
   'optimism' => 'generated',
   'conceal' => true,
@@ -106,10 +106,10 @@ return static fn (\ZeroForLaravel\Metadata\ModelRegistry $models, \ZeroForLarave
   'sites' => 
   array (
   ),
-  'version' => '4bf80a90e9fbeb89a07eb4dbadb284aa2198a6e8c53c11e990870bf8aad288a5',
+  'version' => '0bcf40bb888705f85b344867b89aab04b5d26caabc57d1e0d38c00985a2a74ba',
   'returnType' => 'void',
 ), 'guards' => [static function (array $__scope): void { extract($__scope, EXTR_SKIP); \Illuminate\Support\Facades\Gate::authorize('delete', $todo); }], 'result' => static fn (mixed $value): mixed => (new \ZeroForLaravel\Generation\Mutations\ValueContract('void', [], [], false, false))->normalize($value)],
-'m_898bc883607f37899248c48fb28bd263' => ['contract' => array (
+'m_b0c58c177425ca9dc172decf05a24d81' => ['contract' => array (
   'action' => 'App\\Http\\Controllers\\TodoController@store',
   'optimism' => 'generated',
   'conceal' => false,
@@ -211,10 +211,10 @@ return static fn (\ZeroForLaravel\Metadata\ModelRegistry $models, \ZeroForLarave
   array (
     's0' => 'uuid',
   ),
-  'version' => '898bc883607f37899248c48fb28bd2637c98ec248f4ef5e27768813c5d240c74',
+  'version' => 'b0c58c177425ca9dc172decf05a24d81f4a287336b4bd55089ba1a886327ccec',
   'returnType' => 'array',
 ), 'guards' => [static function (array $__scope): void { extract($__scope, EXTR_SKIP); \Illuminate\Support\Facades\Gate::authorize('create', \App\Models\Todo::class); }], 'result' => static fn (mixed $value): mixed => (new \ZeroForLaravel\Generation\Mutations\ValueContract('object', ['id' => new \ZeroForLaravel\Generation\Mutations\ValueContract('string', [], [], false, false)], [], false, false))->normalize($value)],
-'m_8c191fc2ea748f190ec8d4156f063758' => ['contract' => array (
+'m_346d8c43e547e41a57fc168ff963a72f' => ['contract' => array (
   'action' => 'App\\Http\\Controllers\\TodoController@update',
   'optimism' => 'generated',
   'conceal' => true,
@@ -310,10 +310,10 @@ return static fn (\ZeroForLaravel\Metadata\ModelRegistry $models, \ZeroForLarave
   'sites' => 
   array (
   ),
-  'version' => '8c191fc2ea748f190ec8d4156f0637584bbade5aeed2912ddc0079b5fde2a98a',
+  'version' => '346d8c43e547e41a57fc168ff963a72f7c3718a9a98353349dc0f8a964aba161',
   'returnType' => 'void',
 ), 'guards' => [static function (array $__scope): void { extract($__scope, EXTR_SKIP); \Illuminate\Support\Facades\Gate::authorize('update', $todo); }], 'result' => static fn (mixed $value): mixed => (new \ZeroForLaravel\Generation\Mutations\ValueContract('void', [], [], false, false))->normalize($value)],
-'m_0aecc5591757aad0b1f84adb4179d0b9' => ['contract' => array (
+'m_9d7195c6688b9e5f1503612e03b379f9' => ['contract' => array (
   'action' => 'App\\Http\\Controllers\\TodoListController@destroy',
   'optimism' => 'generated',
   'conceal' => true,
@@ -385,10 +385,10 @@ return static fn (\ZeroForLaravel\Metadata\ModelRegistry $models, \ZeroForLarave
   'sites' => 
   array (
   ),
-  'version' => '0aecc5591757aad0b1f84adb4179d0b989b60d58981ebce1d5be0c48236a3de4',
+  'version' => '9d7195c6688b9e5f1503612e03b379f94ff64fc40b4a7d1fc49674dae3337318',
   'returnType' => 'void',
 ), 'guards' => [static function (array $__scope): void { extract($__scope, EXTR_SKIP); \Illuminate\Support\Facades\Gate::authorize('delete', $list); }], 'result' => static fn (mixed $value): mixed => (new \ZeroForLaravel\Generation\Mutations\ValueContract('void', [], [], false, false))->normalize($value)],
-'m_faba244a9ab11dcee9d07095e73fbc87' => ['contract' => array (
+'m_ebb170b8ab48673b0b9ed95701ff999a' => ['contract' => array (
   'action' => 'App\\Http\\Controllers\\TodoListController@store',
   'optimism' => 'generated',
   'conceal' => false,
@@ -490,10 +490,10 @@ return static fn (\ZeroForLaravel\Metadata\ModelRegistry $models, \ZeroForLarave
   array (
     's0' => 'uuid',
   ),
-  'version' => 'faba244a9ab11dcee9d07095e73fbc8738d0c04a9ba5fe2777d83a8000d85251',
+  'version' => 'ebb170b8ab48673b0b9ed95701ff999ae7dbdc86107b2e3738c2bfc396abbae1',
   'returnType' => 'array',
 ), 'guards' => [static function (array $__scope): void { extract($__scope, EXTR_SKIP); \Illuminate\Support\Facades\Gate::authorize('create', \App\Models\TodoList::class); }], 'result' => static fn (mixed $value): mixed => (new \ZeroForLaravel\Generation\Mutations\ValueContract('object', ['id' => new \ZeroForLaravel\Generation\Mutations\ValueContract('string', [], [], false, false)], [], false, false))->normalize($value)],
-'m_6020f1e50a2fc0b3593a4a1e578a4daa' => ['contract' => array (
+'m_9885930d6180e37ae8488db1abfeebaa' => ['contract' => array (
   'action' => 'App\\Http\\Controllers\\TodoListController@update',
   'optimism' => 'generated',
   'conceal' => true,
@@ -589,7 +589,7 @@ return static fn (\ZeroForLaravel\Metadata\ModelRegistry $models, \ZeroForLarave
   'sites' => 
   array (
   ),
-  'version' => '6020f1e50a2fc0b3593a4a1e578a4daa09185645d806f5fe20c4c06f58d44516',
+  'version' => '9885930d6180e37ae8488db1abfeebaa79b55b912868c4cf7e0c230eb5d40fba',
   'returnType' => 'void',
 ), 'guards' => [static function (array $__scope): void { extract($__scope, EXTR_SKIP); \Illuminate\Support\Facades\Gate::authorize('update', $list); }], 'result' => static fn (mixed $value): mixed => (new \ZeroForLaravel\Generation\Mutations\ValueContract('void', [], [], false, false))->normalize($value)],
 ]);

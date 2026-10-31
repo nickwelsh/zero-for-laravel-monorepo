@@ -6,6 +6,8 @@ namespace ZeroForLaravel\Tests\Feature;
 
 use Closure;
 use Illuminate\Auth\Access\AuthorizationException;
+use Illuminate\Foundation\Auth\User;
+use Illuminate\Http\Request;
 use Illuminate\Routing\Middleware\SubstituteBindings;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Route;
@@ -15,13 +17,13 @@ use LogicException;
 use PhpParser\ParserFactory;
 use PHPUnit\Framework\Assert;
 use stdClass;
-use ZeroForLaravel\Domain\OperationException;
 use ZeroForLaravel\Generation\Mutations\ControllerMutationCompiler;
 use ZeroForLaravel\Generation\Mutations\ControllerMutationGenerator;
 use ZeroForLaravel\Generation\Mutations\MutationProgram;
 use ZeroForLaravel\Http\ControllerRouteDispatcher;
 use ZeroForLaravel\Metadata\ModelRegistry;
 use ZeroForLaravel\Mutation\ControllerMutationRegistry;
+use ZeroForLaravel\Mutation\OperationException;
 use ZeroForLaravel\Tests\Fixtures\ControllerMutationController;
 use ZeroForLaravel\Tests\Fixtures\Task;
 use ZeroForLaravel\Tests\TestCase;
@@ -141,6 +143,32 @@ test('explicit creation sites and metadata remain separate from request input', 
     expect(Task::firstOrFail()->user_id)->toBe('alice');
     $wire['prepared']['ids']['key:task'] = 'invalid';
     expect(fn () => $models->connection()->transaction(fn () => $registry->execute($program->name(), $wire, new ZeroContext(['user_id' => 'alice']))))->toThrow(ValidationException::class);
+});
+
+test('controller FormRequests isolate invocation input from transport query and retain the authenticated user', function (): void {
+    Route::post('/isolated', [ControllerMutationController::class, 'store']);
+    [$models, $program, $registry, $wire] = mutationRegistration($this, 'store');
+    $user = (new User)->setKeyType('string')->forceFill(['id' => 'alice']);
+    \Pest\Laravel\actingAs($user);
+    $request = Request::create('/zero/mutate?title=Forged&user_id=bob&schema=zero_test_0', 'POST');
+    app()->instance('request', $request);
+    $seen = null;
+    Task::creating(function () use (&$seen): void {
+        $seen = request()->user()?->getAuthIdentifier();
+    });
+    try {
+        $wire['input'] = ['title' => '  Actual  '];
+        $models->connection()->transaction(fn () => $registry->execute($program->name(), $wire, new ZeroContext(['user_id' => 'alice'])));
+        expect(Task::firstOrFail()->title)->toBe('Actual');
+        expect(Task::firstOrFail()->user_id)->toBe('alice');
+        expect($seen)->toBe('alice');
+        $wire['input'] = [];
+        expect(fn () => $models->connection()->transaction(fn () => $registry->execute($program->name(), $wire, new ZeroContext(['user_id' => 'alice']))))
+            ->toThrow(ValidationException::class);
+        expect(Task::count())->toBe(1);
+    } finally {
+        Task::flushEventListeners();
+    }
 });
 
 test('concealment makes missing binding, denied policies and validation indistinguishable', function (): void {

@@ -9,8 +9,7 @@ import {
     type ComponentType,
     type ReactNode,
 } from 'react';
-import { object } from '../validation';
-import { selectionKey } from '../query';
+import { object, selectionKey } from '../validation';
 import { useData, type Data, type ReadSelection, type QueryInputs } from './data';
 import { StartingZero } from './provider';
 

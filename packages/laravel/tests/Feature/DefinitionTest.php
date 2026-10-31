@@ -7,14 +7,12 @@ namespace ZeroForLaravel\Tests\Feature;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
-use Illuminate\Validation\ValidationException;
 use LogicException;
-use ZeroForLaravel\Attributes\ZeroQuery;
 use ZeroForLaravel\ContextField;
-use ZeroForLaravel\Definition\AllowedFilter;
 use ZeroForLaravel\Definition\ZeroDefinition;
 use ZeroForLaravel\Generation\TypeScriptGenerator;
 use ZeroForLaravel\Metadata\ModelRegistry;
+use ZeroForLaravel\Query\Query;
 use ZeroForLaravel\Query\QueryCompiler;
 use ZeroForLaravel\Query\ZeroOperator;
 use ZeroForLaravel\Query\ZQLBuilder;
@@ -23,7 +21,6 @@ use ZeroForLaravel\ZeroContext;
 
 uses(TestCase::class);
 
-#[ZeroQuery(['all', 'one'])]
 class DefinedTask extends Model
 {
     protected $table = 'tasks';
@@ -37,9 +34,7 @@ class DefinedTask extends Model
         return ZeroDefinition::make()
             ->authorize('user_id', '=', ContextField::UserId)
             ->fillFromContext('user_id', 'user_id')
-            ->allowedFilters('title', AllowedFilter::exact('id'), AllowedFilter::belongsTo('list'))
-            ->allowedSorts('title', 'created_at')
-            ->allowedIncludes('list');
+            ->relations('list');
     }
 
     /** @return BelongsTo<ScopedList, $this> */
@@ -69,7 +64,6 @@ class ScopedList extends Model
     }
 }
 
-#[ZeroQuery(['all'])]
 class ScopeRelationTask extends Model
 {
     protected $table = 'tasks';
@@ -89,15 +83,14 @@ class ScopeRelationTask extends Model
     }
 }
 
-test('definitions own visibility fills and variadic query declarations', function (): void {
+test('definitions own schema visibility and context fills', function (): void {
     $registry = new ModelRegistry([DefinedTask::class, ScopedList::class]);
     $metadata = $registry->get('DefinedTask');
     expect($metadata->writable)->toBe(['title']);
     expect($metadata->serverFill)->toBe(['user_id' => 'user_id']);
-    expect(array_keys($metadata->definition->filters))->toBe(['title', 'id', 'list']);
-    expect($metadata->definition->sorts)->toBe(['title', 'created_at']);
+    expect(array_keys($metadata->toArray()))->toBe(['name', 'table', 'key', 'columns', 'authorization', 'serverFill', 'writable', 'idGenerator', 'timestamps', 'relations']);
 
-    $ast = (new QueryCompiler($registry))->compile('DefinedTask.all', [], new ZeroContext(['user_id' => 'alice']));
+    $ast = (new QueryCompiler($registry))->compileDeclaration(new Query($metadata, $registry), new ZeroContext(['user_id' => 'alice']));
     expect(data_get($ast, 'where.right.value'))->toBe('alice');
 });
 
@@ -110,7 +103,7 @@ test('server scopes run per request including nested rows but never during gener
 
     $compiler = new QueryCompiler($registry);
     foreach (['alice', 'bob'] as $user) {
-        $ast = $compiler->compile('DefinedTask.all', ['include' => ['list' => []]], new ZeroContext(['user_id' => $user]));
+        $ast = $compiler->compileDeclaration((new Query($registry->get('DefinedTask'), $registry))->related('list'), new ZeroContext(['user_id' => $user]));
         expect(data_get($ast, 'related.0.subquery.where.type'))->toBe('or');
         expect(data_get($ast, 'related.0.subquery.where.conditions.0.right.value'))->toBe($user);
     }
@@ -118,30 +111,31 @@ test('server scopes run per request including nested rows but never during gener
     expect(ScopedList::$calls)->toBe(2);
 });
 
-test('scope relations keep target authorization and do not become public includes', function (): void {
+test('scope relations keep target authorization without adding result relationships', function (): void {
     $registry = new ModelRegistry([ScopeRelationTask::class, ScopedList::class]);
     $compiler = new QueryCompiler($registry);
-    $ast = $compiler->compile('ScopeRelationTask.all', [], new ZeroContext(['user_id' => 'alice']));
+    $ast = $compiler->compileDeclaration(new Query($registry->get('ScopeRelationTask'), $registry), new ZeroContext(['user_id' => 'alice']));
     expect(data_get($ast, 'where.op'))->toBe('EXISTS');
     expect(data_get($ast, 'where.related.subquery.where.conditions.0.type'))->toBe('or');
     expect(data_get($ast, 'where.related.subquery.where.conditions.1.right.value'))->toBe('shared');
-    expect(fn (): array => $compiler->compile('ScopeRelationTask.all', ['include' => ['list' => []]], new ZeroContext(['user_id' => 'alice'])))->toThrow(ValidationException::class);
+    expect($ast)->not->toHaveKey('related');
 });
 
 test('an empty mandatory scope cannot silently grant access', function (): void {
     $registry = new ModelRegistry([DefinedTask::class, ScopedList::class]);
     $registry->get('ScopedList')->definition->serverScopes = [fn (): null => null];
-    (new QueryCompiler($registry))->compile('DefinedTask.all', ['include' => ['list' => []]], new ZeroContext(['user_id' => 'alice']));
+    (new QueryCompiler($registry))->compileDeclaration((new Query($registry->get('DefinedTask'), $registry))->related('list'), new ZeroContext(['user_id' => 'alice']));
 })->throws(LogicException::class, 'must add');
 
 test('missing scope context is denied on included models', function (): void {
     $registry = new ModelRegistry([ScopeRelationTask::class, ScopedList::class]);
-    (new QueryCompiler($registry))->compile('ScopeRelationTask.all', [], new ZeroContext([]));
+    (new QueryCompiler($registry))->compileDeclaration(new Query($registry->get('ScopeRelationTask'), $registry), new ZeroContext([]));
 })->throws(AuthorizationException::class);
 
-test('relationship filters retain mandatory server scopes on their targets', function (): void {
+test('declaration existence predicates retain mandatory server scopes on their targets', function (): void {
     $registry = new ModelRegistry([DefinedTask::class, ScopedList::class]);
-    $ast = (new QueryCompiler($registry))->compile('DefinedTask.all', ['filters' => ['list' => 'list-a']], new ZeroContext(['user_id' => 'alice']));
+    $query = (new Query($registry->get('DefinedTask'), $registry))->whereExists('list', fn (Query $list): Query => $list->where('id', 'list-a'));
+    $ast = (new QueryCompiler($registry))->compileDeclaration($query, new ZeroContext(['user_id' => 'alice']));
     expect(data_get($ast, 'where.conditions.1.related.subquery.where.conditions.0.type'))->toBe('or');
     expect(data_get($ast, 'where.conditions.1.related.subquery.where.conditions.1.right.value'))->toBe('list-a');
 });

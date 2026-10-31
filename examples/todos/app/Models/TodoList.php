@@ -26,7 +26,7 @@ class TodoList extends Model
     public static function zero(): ZeroDefinition
     {
         return ZeroDefinition::make()->authorizeRelation('memberships')->fillFromContext('user_id', ContextField::UserId)
-            ->allowedIncludes(['todos']);
+            ->relations('todos');
     }
 
     /** @return HasMany<ListMembership, $this> */

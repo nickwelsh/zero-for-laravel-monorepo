@@ -57,7 +57,7 @@ final class ResetCommand extends Command
                 }
             }
 
-            $slots = [$id.'_0']; // Legacy exact slot; current slots come from the exact shard catalog.
+            $slots = [];
             if ($connection->scalar('SELECT to_regclass(?)', ['"'.$id.'_0".replicas']) !== null) {
                 foreach ($connection->select('SELECT slot FROM "'.$id.'_0".replicas') as $row) {
                     if (! is_object($row) || ! is_string($row->slot ?? null)) {

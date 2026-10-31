@@ -90,8 +90,6 @@ export const definitions = {
                 "default": null
             }
         },
-        "queries": [],
-        "mutations": [],
         "authorization": [
             {
                 "field": "user_id",
@@ -101,7 +99,6 @@ export const definitions = {
                 }
             }
         ],
-        "validation": {},
         "serverFill": {},
         "writable": [],
         "idGenerator": null,
@@ -110,12 +107,6 @@ export const definitions = {
             "updated": null,
             "deleted": null
         },
-        "filters": {},
-        "includes": [],
-        "sorts": [],
-        "defaultOrder": [],
-        "defaultLimit": 50,
-        "maxLimit": 1000,
         "relations": {}
     },
     "MutationPreference": {
@@ -181,10 +172,7 @@ export const definitions = {
                 "default": null
             }
         },
-        "queries": [],
-        "mutations": [],
         "authorization": [],
-        "validation": {},
         "serverFill": {},
         "writable": [
             "recipient",
@@ -198,12 +186,6 @@ export const definitions = {
             "updated": "updated_at",
             "deleted": null
         },
-        "filters": {},
-        "includes": [],
-        "sorts": [],
-        "defaultOrder": [],
-        "defaultLimit": 50,
-        "maxLimit": 1000,
         "relations": {}
     },
     "Tag": {
@@ -236,8 +218,6 @@ export const definitions = {
                 "default": null
             }
         },
-        "queries": [],
-        "mutations": [],
         "authorization": [
             {
                 "field": "user_id",
@@ -247,7 +227,6 @@ export const definitions = {
                 }
             }
         ],
-        "validation": {},
         "serverFill": {},
         "writable": [],
         "idGenerator": null,
@@ -256,12 +235,6 @@ export const definitions = {
             "updated": null,
             "deleted": null
         },
-        "filters": {},
-        "includes": [],
-        "sorts": [],
-        "defaultOrder": [],
-        "defaultLimit": 50,
-        "maxLimit": 1000,
         "relations": {}
     },
     "Task": {
@@ -343,17 +316,6 @@ export const definitions = {
                 "default": null
             }
         },
-        "queries": [
-            "all",
-            "one"
-        ],
-        "mutations": [
-            "create",
-            "update",
-            "destroy",
-            "restore",
-            "force_delete"
-        ],
         "authorization": [
             {
                 "field": "user_id",
@@ -363,7 +325,6 @@ export const definitions = {
                 }
             }
         ],
-        "validation": {},
         "serverFill": {
             "user_id": "user_id"
         },
@@ -379,105 +340,6 @@ export const definitions = {
             "updated": "updated_at",
             "deleted": "deleted_at"
         },
-        "filters": {
-            "title": {
-                "kind": "partial",
-                "field": "title"
-            },
-            "done": {
-                "kind": "exact",
-                "field": "done"
-            },
-            "completed_at": {
-                "kind": "exact",
-                "field": "completed_at"
-            },
-            "list": {
-                "kind": "belongsTo",
-                "field": "list"
-            },
-            "trashed": {
-                "kind": "trashed",
-                "field": ""
-            },
-            "completed_after": {
-                "kind": "operator",
-                "field": "completed_at",
-                "operator": ">"
-            },
-            "title_operator": {
-                "kind": "operator",
-                "field": "title",
-                "operator": "dynamic"
-            },
-            "title_start": {
-                "kind": "beginsWith",
-                "field": "title"
-            },
-            "search": {
-                "kind": "group",
-                "field": "title",
-                "operator": "or",
-                "members": [
-                    {
-                        "kind": "partial",
-                        "field": "title"
-                    },
-                    {
-                        "kind": "exact",
-                        "field": "id"
-                    }
-                ]
-            },
-            "is_completed": {
-                "kind": "callback",
-                "field": "",
-                "expression": {
-                    "type": "simple",
-                    "op": "IS NOT",
-                    "left": {
-                        "type": "column",
-                        "name": "completed_at"
-                    },
-                    "right": {
-                        "type": "literal",
-                        "value": null
-                    }
-                }
-            },
-            "title_is": {
-                "kind": "callback",
-                "field": "title",
-                "expression": {
-                    "type": "simple",
-                    "op": "=",
-                    "left": {
-                        "type": "column",
-                        "name": "title"
-                    },
-                    "right": {
-                        "type": "filterValue"
-                    }
-                }
-            }
-        },
-        "includes": [
-            "list",
-            "tags",
-            "comments"
-        ],
-        "sorts": [
-            "title",
-            "created_at"
-        ],
-        "defaultOrder": [
-            [
-                "created_at",
-                "desc"
-            ]
-        ],
-        "defaultLimit": 50,
-        "maxLimit": 1000,
         "relations": {
             "list": {
                 "model": "TaskList",
@@ -565,8 +427,6 @@ export const definitions = {
                 "default": null
             }
         },
-        "queries": [],
-        "mutations": [],
         "authorization": [
             {
                 "field": "user_id",
@@ -576,7 +436,6 @@ export const definitions = {
                 }
             }
         ],
-        "validation": {},
         "serverFill": {},
         "writable": [],
         "idGenerator": null,
@@ -585,14 +444,6 @@ export const definitions = {
             "updated": null,
             "deleted": null
         },
-        "filters": {},
-        "includes": [
-            "tasks"
-        ],
-        "sorts": [],
-        "defaultOrder": [],
-        "defaultLimit": 50,
-        "maxLimit": 1000,
         "relations": {
             "tasks": {
                 "model": "Task",
@@ -624,7 +475,7 @@ import type {Schema} from '@rocicorp/zero';
 import {createControllerMutations, type ModelContract} from '@nickwelsh/zero-for-laravel';
 import {z} from 'zod';
 export const controllerMutationContracts = {
-    "m_080a8f841ba65a42979659670c0301b4": {
+    "m_9e30fefaacfdea569dc928aea82a6382": {
         "action": "ZeroForLaravel\\Tests\\Fixtures\\PreferenceMutationController@assign",
         "optimism": "generated",
         "conceal": false,
@@ -1145,7 +996,7 @@ export const controllerMutationContracts = {
             "key:subscribe": "uuid",
             "key:unsubscribe": "uuid"
         },
-        "version": "080a8f841ba65a42979659670c0301b40cfc1278965ded28cc8f2d5c2dbeeb60",
+        "version": "9e30fefaacfdea569dc928aea82a6382fd2f807a4b1291572a4579552f230265",
         "returnType": "array"
     }
 } as const;
@@ -1158,10 +1009,10 @@ export const clientResultSchema0 = z.union([z.strictObject({"id": z.string()}), 
 const codec0 = {input: inputSchema0, encode: (input: Input0) => ({...(input["list_id"] === undefined ? {} : {"list_id": (input["list_id"] === null ? null : input["list_id"])})}), serverResult: serverResultSchema0, clientResult: clientResultSchema0};
 export function createControllerMutationBindings<S extends Schema>(schema: S, models: Readonly<Record<string, ModelContract>>) {
   const codecs = {
-    "m_080a8f841ba65a42979659670c0301b4": {...codec0},
+    "m_9e30fefaacfdea569dc928aea82a6382": {...codec0},
   };
   const runtime = createControllerMutations(schema, models, controllerMutationContracts, codecs);
   return {...runtime, actions: {
-    "ZeroForLaravel\\Tests\\Fixtures\\PreferenceMutationController@assign": runtime.bind("m_080a8f841ba65a42979659670c0301b4", codecs["m_080a8f841ba65a42979659670c0301b4"]),
+    "ZeroForLaravel\\Tests\\Fixtures\\PreferenceMutationController@assign": runtime.bind("m_9e30fefaacfdea569dc928aea82a6382", codecs["m_9e30fefaacfdea569dc928aea82a6382"]),
   }};
 }

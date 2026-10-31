@@ -1,42 +1,51 @@
+import { createBuilder, defineQueries, defineQuery } from '@rocicorp/zero';
 import { expect, it } from 'vite-plus/test';
-import { nestedRuntime } from '../../../tests/interop/nested';
-import { toPlain } from './record';
-import { createZeroForLaravel } from './runtime';
+import { liveQuery } from './index';
 import { schema, definitions } from '../../../tests/interop/generated';
 
-it('projects nested snapshots while preserving dates, scalar JSON, and missing relationships', () => {
-    const runtime = nestedRuntime();
-    const selection = runtime.models.Task.query.all().with('list').with('comments');
-    const snapshots = selection.decode([
+const queries = defineQueries({
+    tasks: defineQuery(({ args: _args }: { args: Record<string, never> }) =>
+        createBuilder(schema).tasks.related('list').related('comments'),
+    ),
+});
+
+it('decodes controller results as immutable plain rows with nested dates and scalar JSON intact', () => {
+    const selection = liveQuery(queries.tasks, {}, definitions, 'Task', false);
+    const raw = [
         {
             id: 't',
-            completed_at: 1700000000000,
+            completed_at: 1700000000123,
             list: { id: 'l', name: 'List' },
             comments: [{ id: 'c', body: 'Child' }],
         },
-    ]);
-    const plain = toPlain(snapshots);
-    expect(plain[0]?.list?.name).toBe('List');
-    expect(plain[0]?.comments[0]?.body).toBe('Child');
-    expect(plain[0]?.completed_at).toBe(snapshots[0]?.data.completed_at);
-    expect(plain[0]?.completed_at).toBeInstanceOf(Date);
-    expect(Object.isFrozen(plain[0]?.comments)).toBe(true);
-    const absent = toPlain(selection.decode([{ id: 't', completed_at: null }]));
+    ];
+    const rows = selection.decode(raw);
+    expect(rows[0]?.list?.name).toBe('List');
+    expect(rows[0]?.comments[0]?.body).toBe('Child');
+    expect(rows[0]?.completed_at?.toISOString()).toBe('2023-11-14T22:13:20.123Z');
+    expect(Object.isFrozen(rows[0]?.comments)).toBe(true);
+    expect(selection.decode(raw)).toBe(rows);
+    const absent = selection.decode([{ id: 't', completed_at: null }]);
     expect(absent[0]?.completed_at).toBeNull();
     expect(absent[0]).not.toHaveProperty('list');
-    expect(toPlain(selection.decode([{ id: 't', list: null }]))[0]?.list).toBeUndefined();
     const json = { data: { data: 'scalar JSON' } };
-    const scalar = createZeroForLaravel(schema, {
-        ...definitions,
-        Task: {
-            ...definitions.Task,
-            columns: {
-                ...definitions.Task.columns,
-                title: { ...definitions.Task.columns.title, type: 'json', cast: 'object' },
+    const scalar = liveQuery(
+        queries.tasks,
+        {},
+        {
+            ...definitions,
+            Task: {
+                ...definitions.Task,
+                columns: {
+                    ...definitions.Task.columns,
+                    title: { ...definitions.Task.columns.title, type: 'json', cast: 'object' },
+                },
             },
-        },
-    } as const);
-    const scalarRows = scalar.models.Task.query.all().decode([{ id: 't', title: json }]);
-    expect(toPlain(scalarRows)[0]?.title).toBe(scalarRows[0]?.data.title);
-    expect(toPlain(scalarRows)[0]?.title).toEqual(json);
+        } as const,
+        'Task',
+        false,
+    );
+    const scalarRows = scalar.decode([{ id: 't', title: json }]);
+    expect(scalarRows[0]?.title).toEqual(json);
+    expect(scalarRows[0]?.title).not.toBe(json);
 });

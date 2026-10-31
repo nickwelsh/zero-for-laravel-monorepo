@@ -77,12 +77,6 @@ final class GenerateCommand extends Command
             $outputs[dirname($path).'/'.$base.'.react.ts'] = $generator->generateReact('./'.$base, './zero.config', './'.$base.'.mutations', $custom);
         }
 
-        foreach ($registry->all() as $model) {
-            foreach ($model->diagnostics as $diagnostic) {
-                $this->warn($diagnostic);
-            }
-        }
-
         if ($this->option('check')) {
             if ($stale !== []) {
                 $this->error('Stale Zero controller files exist. Run zero:generate.');

@@ -177,8 +177,8 @@ You can also register accounts through the starter kit.
 ## Authorization
 
 A list has one owner and explicit memberships, including its owner. List queries
-use `ZeroAuthorizeRelation('memberships')`; memberships are visible only to their
-user. Todo queries use `ZeroAuthorizeRelation('list')`. Policies enforce writes,
+use `ZeroDefinition::authorizeRelation('memberships')`; memberships are visible only to their
+user. Todo queries use `ZeroDefinition::authorizeRelation('list')`. Policies enforce writes,
 and FormRequests validate destination-list access, preventing a member from moving
 a todo into someone else's private list. Deleting a list cascades its todos and
 memberships. Sharing adds membership by registered email; duplicate shares are safe.

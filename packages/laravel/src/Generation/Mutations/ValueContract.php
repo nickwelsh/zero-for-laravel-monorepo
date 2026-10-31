@@ -14,7 +14,7 @@ use PHPStan\PhpDocParser\Parser\TokenIterator;
 use PHPStan\PhpDocParser\Parser\TypeParser;
 use PHPStan\PhpDocParser\ParserConfig;
 use stdClass;
-use ZeroForLaravel\Domain\OperationException;
+use ZeroForLaravel\Mutation\OperationException;
 
 /** Validator-independent public JSON shape, including omission versus null. */
 final readonly class ValueContract

@@ -2,6 +2,8 @@
 
 // Isolated fixture server. Its test-only bearer identities are never application middleware.
 require __DIR__.'/../../packages/laravel/vendor/autoload.php';
+// QueryDirection is declared alongside this test controller, not in its own PSR-4 file.
+require_once __DIR__.'/../../packages/laravel/tests/Fixtures/QueryController.php';
 
 use Illuminate\Contracts\Http\Kernel;
 use Illuminate\Foundation\Application;
@@ -20,6 +22,7 @@ class FixtureIdentity
         $identity = $request->bearerToken();
         abort_unless(in_array($identity, ['alice', 'bob'], true), 401);
         $user = (new User)->setKeyType('string')->forceFill(['id' => $identity]);
+        auth()->setUser($user);
         $request->setUserResolver(fn () => $user);
         if ($request->is('callbacks/zero/query') && str_contains($request->getContent(), '"desc"')) { usleep(1200000); }
         return $next($request);
@@ -34,6 +37,13 @@ class FixtureMutations
     {
         $task = Task::create($request->validated());
         return ['id' => $task->id];
+    }
+
+    #[\ZeroForLaravel\Attributes\ZeroMutation]
+    public function update(\ZeroForLaravel\Tests\Fixtures\ControllerMutationRequest $request, Task $task): void
+    {
+        Gate::authorize('update', $task);
+        $task->update($request->validated());
     }
 }
 
@@ -63,6 +73,8 @@ ini_set('error_log', $root.'/php.log');
 $kernel = $app->make(PHP_SAPI === 'cli' ? \Illuminate\Contracts\Console\Kernel::class : Kernel::class);
 $kernel->bootstrap();
 \Illuminate\Support\Facades\Route::post('/fixture/tasks', [FixtureMutations::class, 'store'])->middleware(FixtureIdentity::class);
+\Illuminate\Support\Facades\Route::put('/fixture/tasks/{task}', [FixtureMutations::class, 'update'])->middleware([FixtureIdentity::class, \Illuminate\Routing\Middleware\SubstituteBindings::class]);
+\Illuminate\Support\Facades\Route::get('/fixture/tasks/sorted/{direction}', [\ZeroForLaravel\Tests\Fixtures\QueryController::class, 'sorted'])->middleware([FixtureIdentity::class, \Illuminate\Routing\Middleware\SubstituteBindings::class]);
 foreach (['create', 'update', 'delete', 'restore', 'forceDelete'] as $ability) {
     Gate::define($ability, fn ($user, $model) => $ability === 'create' || ($model->user_id === $user->getAuthIdentifier() && $model->title !== 'Locked'));
 }
@@ -70,8 +82,12 @@ if (PHP_SAPI === 'cli') {
     if (($argv[1] ?? null) === 'reset') { exit(Artisan::call('zero:reset', [($argv[2] ?? null) === 'force' ? '--force' : '--dry-run' => true], new \Symfony\Component\Console\Output\ConsoleOutput)); }
     if (($argv[1] ?? null) === 'dev') { exit(Artisan::call('zero:dev', [], new \Symfony\Component\Console\Output\ConsoleOutput)); }
     if (Artisan::call('migrate', ['--path' => __DIR__.'/migrations', '--realpath' => true, '--force' => true]) !== 0 || Artisan::call('zero:generate') !== 0 || Artisan::call('zero:generate', ['--check' => true]) !== 0) { throw new RuntimeException('Fixture setup failed.'); }
-    $program = app(\ZeroForLaravel\Generation\Mutations\ControllerMutationCompiler::class)->compile(FixtureMutations::class, 'store');
-    file_put_contents($root.'/controller-contracts.json', json_encode([$program->name() => $program->contract()], JSON_THROW_ON_ERROR));
+    $contracts = [];
+    foreach (['store', 'update'] as $method) {
+        $program = app(\ZeroForLaravel\Generation\Mutations\ControllerMutationCompiler::class)->compile(FixtureMutations::class, $method);
+        $contracts[$program->name()] = $program->contract();
+    }
+    file_put_contents($root.'/controller-contracts.json', json_encode($contracts, JSON_THROW_ON_ERROR));
     exit(0);
 }
 $request = Request::capture();

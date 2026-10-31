@@ -5,14 +5,11 @@ declare(strict_types=1);
 namespace ZeroForLaravel\Mutation;
 
 use Illuminate\Auth\Access\AuthorizationException;
-use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Database\QueryException;
 use Illuminate\Validation\ValidationException;
 use LogicException;
 use Throwable;
-use ZeroForLaravel\Domain\DomainRegistry;
-use ZeroForLaravel\Domain\OperationException;
 use ZeroForLaravel\Metadata\ModelRegistry;
 use ZeroForLaravel\Support\Input;
 use ZeroForLaravel\ZeroContext;
@@ -20,13 +17,13 @@ use ZeroForLaravel\ZeroContext;
 /** @phpstan-type Invocation array{clientID: non-empty-string, name: non-empty-string, type: 'custom', id: int, timestamp: numeric-string|int|float, args: list<mixed>} */
 final readonly class MutationProcessor
 {
-    public function __construct(private ModelRegistry $registry, private CrudExecutor $executor, private string $appId, private string $upstreamSchema) {}
+    public function __construct(private ModelRegistry $registry, private string $appId, private string $upstreamSchema) {}
 
     /**
      * @param  array<string, mixed>  $params
      * @return array<string, mixed>
      */
-    public function process(mixed $body, array $params, ZeroContext $context, ?Authenticatable $user): array
+    public function process(mixed $body, array $params, ZeroContext $context): array
     {
         try {
             $body = Input::object($body, 'push');
@@ -69,7 +66,7 @@ final readonly class MutationProcessor
                     continue;
                 }
 
-                $responses[] = $this->apply($body['clientGroupID'], $mutation, $context, $user);
+                $responses[] = $this->apply($body['clientGroupID'], $mutation, $context);
             } catch (OutOfOrder) {
                 return $this->failure('oooMutation', array_slice($mutations, $index), 'Mutation is out of order.');
             } catch (QueryException $error) {
@@ -90,26 +87,23 @@ final readonly class MutationProcessor
      * @param  Invocation  $mutation
      * @return array<string, mixed>
      */
-    private function apply(string $group, array $mutation, ZeroContext $context, ?Authenticatable $user): array
+    private function apply(string $group, array $mutation, ZeroContext $context): array
     {
         $id = ['clientID' => $mutation['clientID'], 'id' => $mutation['id']];
         $failure = null;
         try {
             try {
-                return $this->registry->connection()->transaction(function () use ($group, $mutation, $context, $user, $id): array {
+                return $this->registry->connection()->transaction(function () use ($group, $mutation, $context, $id): array {
                     $this->advance($group, $mutation);
                     if (count($mutation['args']) !== 1) {
                         Input::fail('args', 'Expected one argument object.');
                     }
 
-                    $result = [];
-                    if (str_starts_with($mutation['name'], 'm_')) {
-                        $result = resolve(ControllerMutationRegistry::class)->execute($mutation['name'], $mutation['args'][0], $context);
-                    } elseif (str_starts_with($mutation['name'], 'actions.')) {
-                        $result = resolve(DomainRegistry::class)->execute($mutation['name'], $mutation['args'][0], $context, $user);
-                    } else {
-                        $this->executor->execute($mutation['name'], $mutation['args'][0], $context, $user);
+                    if (! str_starts_with($mutation['name'], 'm_')) {
+                        throw new OperationException('unknown_mutation', 'Unsupported mutation version.');
                     }
+
+                    $result = resolve(ControllerMutationRegistry::class)->execute($mutation['name'], $mutation['args'][0], $context);
 
                     if (array_key_exists('data', $result)) {
                         $this->registry->connection()->table($this->upstreamSchema.'.mutations')->insert([

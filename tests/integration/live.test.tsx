@@ -5,7 +5,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createServer } from 'node:net';
 import { randomBytes } from 'node:crypto';
-import { Zero } from '@rocicorp/zero';
+import { Zero, createBuilder, defineQueriesWithType, defineQueryWithType } from '@rocicorp/zero';
+import { runInNewContext } from 'node:vm';
 import { z } from 'zod';
 import {
     createControllerMutations,
@@ -14,9 +15,10 @@ import {
 import { ZeroProvider } from '@rocicorp/zero/react';
 import { render, waitFor } from '@testing-library/react';
 import { useData, type Data } from '../../packages/client/src/react/data';
-import type { SelectionData } from '../../packages/client/src/query';
+import { liveQuery, withQueryInputs } from '../../packages/client/src/live-query';
+import type { index } from '../interop/controller-api/ZeroForLaravel/Tests/Fixtures/QueryController';
 import { expect, it } from 'vite-plus/test';
-import { Task, schema, mutators, definitions } from '../interop/generated';
+import { schema, definitions } from '../interop/generated';
 import type { ClientContext } from '../../packages/client/src/contract';
 
 const enabled = process.env.ZERO_LIVE_TESTS === '1';
@@ -37,10 +39,29 @@ async function until(check: () => boolean | Promise<boolean>, message: string) {
     throw new Error(message);
 }
 async function stop(child: ChildProcess | undefined) {
-    if (!child || child.exitCode !== null) return;
-    child.kill('SIGTERM');
+    if (!child || child.exitCode !== null || child.signalCode !== null) return;
+    // Zero workers create their own process groups. Stop the full fixture tree,
+    // not just the PHP launcher, before dropping its disposable database.
+    const processes = execFileSync('ps', ['-eo', 'pid=,ppid='], { encoding: 'utf8' })
+        .trim()
+        .split('\n')
+        .map((line) => line.trim().split(/\s+/).map(Number));
+    const owned = new Set([child.pid!]);
+    for (let size = 0; size !== owned.size;) {
+        size = owned.size;
+        for (const [pid, parent] of processes) if (owned.has(parent!)) owned.add(pid!);
+    }
+    process.kill(-child.pid!, 'SIGTERM');
     await Promise.race([new Promise<void>((resolve) => child.once('exit', () => resolve())), sleep(5000)]);
-    if (child.exitCode === null) child.kill('SIGKILL');
+    for (const pid of owned) {
+        try {
+            process.kill(pid, 'SIGKILL');
+        } catch (error) {
+            if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error;
+        }
+    }
+    if (child.exitCode === null && child.signalCode === null)
+        await new Promise<void>((resolve) => child.once('exit', () => resolve()));
 }
 
 it.skipIf(!enabled)(
@@ -108,16 +129,49 @@ it.skipIf(!enabled)(
                 string,
                 ControllerMutationContract
             >;
-            const name = Object.keys(contracts)[0]!;
+            const name = Object.keys(contracts).find(
+                (registration) => contracts[registration]!.action === 'FixtureMutations@store',
+            )!;
+            const updateName = Object.keys(contracts).find(
+                (registration) => contracts[registration]!.action === 'FixtureMutations@update',
+            )!;
             const codec = {
                 input: z.object({ title: z.string() }),
                 encode: (input: { title: string }) => input,
                 serverResult: z.object({ id: z.string() }),
                 clientResult: z.object({ id: z.string() }),
             };
-            const controllers = createControllerMutations(schema, definitions, contracts, { [name]: codec });
+            const updateCodec = { ...codec, serverResult: z.undefined(), clientResult: z.undefined() };
+            const controllers = createControllerMutations(schema, definitions, contracts, {
+                [name]: codec,
+                [updateName]: updateCodec,
+            });
             const store = controllers.bind(name, codec);
-            const allMutators = { ...mutators, ...controllers.mutators };
+            const update = controllers.bind(updateName, updateCodec);
+            const allMutators = controllers.mutators;
+            // Compile outside jsdom; its Uint8Array differs from Node TextEncoder's.
+            const compiled = execFileSync(
+                'node_modules/.bin/esbuild',
+                [join(root, 'generated.queries.ts'), '--format=cjs', '--target=es2022'],
+                { encoding: 'utf8' },
+            );
+            const modules: Record<string, unknown> = {
+                '@rocicorp/zero': { createBuilder, defineQueriesWithType, defineQueryWithType },
+                '@nickwelsh/zero-for-laravel': { liveQuery, withQueryInputs },
+                zod: { z },
+                './generated': { schema, definitions },
+            };
+            const module = {
+                exports: {} as {
+                    actions: Record<
+                        string,
+                        (input: { direction: 'asc' | 'desc' }) => ReturnType<typeof index.tasks.live>
+                    >;
+                },
+            };
+            runInNewContext(compiled, { require: (specifier: string) => modules[specifier], module });
+            const tasks = module.exports.actions['ZeroForLaravel\\Tests\\Fixtures\\QueryController@sorted.tasks']!;
+            const queryName = tasks({ direction: 'asc' }).request().query.queryName;
             expect(
                 psql(
                     `SELECT attnames::text FROM pg_publication_tables WHERE pubname='${publication}' AND tablename='tasks'`,
@@ -139,6 +193,7 @@ it.skipIf(!enabled)(
                 ],
                 {
                     env,
+                    detached: true,
                     stdio: ['ignore', 'pipe', 'pipe'],
                 },
             );
@@ -161,13 +216,23 @@ it.skipIf(!enabled)(
                 headers: { 'X-Api-Key': key, Authorization: 'Bearer alice', 'Content-Type': 'application/json' },
                 body: JSON.stringify([
                     'transform',
-                    Array.from({ length: 257 }, (_, i) => ({ id: String(i), name: 'Task.all', args: [{}] })),
+                    Array.from({ length: 257 }, (_, i) => ({
+                        id: String(i),
+                        name: queryName,
+                        args: [{ direction: 'asc' }],
+                    })),
                 ]),
             });
-            const transformed = (await batch.json()) as { queries: unknown[] };
+            const transformed = (await batch.json()) as { queries: { ast?: unknown; error?: string }[] };
             expect(transformed.queries).toHaveLength(257);
+            expect(transformed.queries[0]).toHaveProperty('ast');
+            expect(transformed.queries.every((query) => query.ast && !query.error)).toBe(true);
             symlinkSync(join(process.cwd(), 'node_modules'), join(root, 'node_modules'), 'dir');
-            cache = spawn('php', ['tests/integration/app.php', 'dev'], { env, stdio: ['ignore', 'pipe', 'pipe'] });
+            cache = spawn('php', ['tests/integration/app.php', 'dev'], {
+                env,
+                detached: true,
+                stdio: ['ignore', 'pipe', 'pipe'],
+            });
             cache.stderr?.on('data', (chunk) => {
                 logs += String(chunk);
             });
@@ -198,7 +263,7 @@ it.skipIf(!enabled)(
                 kvStore: 'mem',
                 logLevel: 'error',
             });
-            const view = zero.materialize(Task.query.all().request());
+            const view = zero.materialize(tasks({ direction: 'asc' }).request());
             let result: readonly { id: string; title: string }[] = [];
             let complete = false;
             const unsubscribe = view.addListener((rows, type) => {
@@ -222,11 +287,10 @@ it.skipIf(!enabled)(
                     () => result[0]?.title === 'Updated upstream',
                     'Upstream update did not reach subscription',
                 );
-                const selection = Task.query.all();
-                let state: Data<SelectionData<typeof selection>> | undefined;
+                let state: Data<readonly { id: string; title: string }[]> | undefined;
                 let renders = 0;
                 function Probe({ direction }: { direction: 'asc' | 'desc' }) {
-                    state = useData(Task.query.all().reorder([['title', direction]]));
+                    state = useData(tasks({ direction }));
                     renders++;
                     return null;
                 }
@@ -238,15 +302,15 @@ it.skipIf(!enabled)(
                 const host = render(tree('asc'));
                 try {
                     await waitFor(() => expect(state?.status).toBe('success'), { timeout: 10000 });
-                    expect(state?.data.map((row) => row.data.id)).toEqual([alice, third]);
+                    expect(state?.data.map((row) => row.id)).toEqual([alice, third]);
                     host.rerender(tree('desc'));
                     expect(state?.status).toBe('refreshing');
-                    expect(state?.data.map((row) => row.data.id)).toEqual([alice, third]);
-                    const liveEdit = zero.mutate(Task.update().prepare({ id: alice, title: 'A live edit' }));
+                    expect(state?.data.map((row) => row.id)).toEqual([third, alice]);
+                    const liveEdit = zero.mutate(update.prepare({ title: 'A live edit' }, { task: alice }));
                     await liveEdit.client;
-                    await waitFor(() => expect(state?.data[0]?.data.title).toBe('A live edit'), { timeout: 10000 });
                     await waitFor(() => expect(state?.status).toBe('success'), { timeout: 10000 });
-                    expect(state?.data.map((row) => row.data.id)).toEqual([third, alice]);
+                    expect(state?.data.map((row) => row.id)).toEqual([third, alice]);
+                    expect(state?.data[1]?.title).toBe('A live edit');
                     expect((await liveEdit.server).type).toBe('success');
                 } finally {
                     host.unmount();
@@ -255,12 +319,12 @@ it.skipIf(!enabled)(
                 psql(`UPDATE tasks SET title='After unmount' WHERE id='${alice}'`);
                 await sleep(200);
                 expect(renders).toBe(unmounted);
-                const rejected = zero.mutate(Task.update().prepare({ id: bob, title: 'Forbidden' }));
+                const rejected = zero.mutate(update.prepare({ title: 'Forbidden' }, { task: bob }));
                 expect((await rejected.server).type).toBe('error');
                 expect(psql(`SELECT title FROM tasks WHERE id='${bob}'`)).toBe('Other owner');
                 psql(`UPDATE tasks SET title='Locked' WHERE id='${alice}'`);
                 await until(() => result[0]?.title === 'Locked', 'Policy fixture did not synchronize');
-                const optimistic = zero.mutate(Task.update().prepare({ id: alice, title: 'Optimistic edit' }));
+                const optimistic = zero.mutate(update.prepare({ title: 'Optimistic edit' }, { task: alice }));
                 expect((await optimistic.client).type).toBe('success');
                 expect((await optimistic.server).type).toBe('error');
                 await until(() => result[0]?.title === 'Locked', 'Rejected optimistic edit did not roll back');
@@ -283,7 +347,7 @@ it.skipIf(!enabled)(
             await zero.close();
             zero = new Zero<typeof schema, undefined, ClientContext>({
                 schema,
-                mutators,
+                mutators: allMutators,
                 userID: 'bob',
                 auth: 'bob',
                 context: { user_id: 'bob' },
@@ -291,7 +355,7 @@ it.skipIf(!enabled)(
                 kvStore: 'mem',
                 logLevel: 'error',
             });
-            const bobView = zero.materialize(Task.query.all().request());
+            const bobView = zero.materialize(tasks({ direction: 'asc' }).request());
             let bobIDs: readonly string[] = [];
             const removeBob = bobView.addListener((rows) => {
                 bobIDs = rows.map((row) => row.id);
@@ -314,7 +378,11 @@ it.skipIf(!enabled)(
             expect(reset).toContain('Local replica files reset');
             expect(existsSync(join(root, 'replica.db'))).toBe(false);
             expect(psql('SELECT count(*) FROM tasks')).toBe('4');
-            cache = spawn('php', ['tests/integration/app.php', 'dev'], { env, stdio: ['ignore', 'pipe', 'pipe'] });
+            cache = spawn('php', ['tests/integration/app.php', 'dev'], {
+                env,
+                detached: true,
+                stdio: ['ignore', 'pipe', 'pipe'],
+            });
             cache.stderr?.on('data', (chunk) => {
                 logs += String(chunk);
             });
@@ -342,6 +410,14 @@ it.skipIf(!enabled)(
             await stop(php);
             if (created) {
                 // Exact disposable database's slots only; this never selects a developer app.
+                await until(
+                    () =>
+                        psql(
+                            `SELECT count(*) FROM pg_replication_slots WHERE database='${database}' AND active`,
+                            'postgres',
+                        ) === '0',
+                    'Disposable database replication did not stop',
+                );
                 psql(
                     `SELECT pg_drop_replication_slot(slot_name) FROM pg_replication_slots WHERE database='${database}' AND NOT active`,
                     'postgres',

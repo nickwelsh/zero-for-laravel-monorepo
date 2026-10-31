@@ -7,7 +7,6 @@ require __DIR__.'/../../packages/laravel/vendor/autoload.php';
 use Illuminate\Container\Container;
 use Illuminate\Database\Capsule\Manager;
 use Illuminate\Database\Schema\Blueprint;
-use ZeroForLaravel\Definition\AllowedFilter;
 use ZeroForLaravel\Generation\TypeScriptGenerator;
 use ZeroForLaravel\Metadata\ModelRegistry;
 use ZeroForLaravel\Query\QueryCompiler;
@@ -55,29 +54,8 @@ $capsule->schema()->create('comments', function (Blueprint $table) {
 });
 Container::setInstance($capsule->getContainer());
 $registry = new ModelRegistry([Task::class, TaskList::class, Tag::class, Comment::class]);
-if (($argv[3] ?? null) === 'scope') {
-    $registry->get('Task')->definition->enforceServerScope(fn (ZeroForLaravel\Query\ZQLBuilder $query) => $query->where(fn (ZeroForLaravel\Query\ZeroOperator $op) => $op->or($op->cmp('done', true), $op->cmp('title', 'shared'))));
-}
-if (in_array($argv[3] ?? null, ['junction', 'junction-scope'], true)) {
-    $registry->get('Task')->definition->allowedFilters([
-        AllowedFilter::related('tag', 'tags', 'id'),
-        AllowedFilter::conditions('rules', [AllowedFilter::related('tag', 'tags', 'name')]),
-    ]);
-    $registry->get('Tag')->definition->defaultSort('name');
-    if ($argv[3] === 'junction-scope') {
-        $registry->get('Task')->definition->enforceServerScope(fn (ZeroForLaravel\Query\ZQLBuilder $query) => $query->whereExists('tags'), relations: ['tags']);
-    }
-}
 if (($argv[1] ?? null) === 'generate') {
     echo (new TypeScriptGenerator)->generate($registry);
-    // Exercise the retained internal engines without publishing their former model API.
-    echo "import {createZeroForLaravel} from '../../packages/client/src/runtime';\n";
-    echo "import type {ModelInstance} from '../../packages/client/src/record';\n";
-    echo "export const {models, queries, mutators} = createZeroForLaravel(schema, definitions);\n";
-    foreach ($registry->all() as $model) {
-        echo 'export const '.$model->name.' = models.'.$model->name.";\n";
-        echo 'export type '.$model->name.' = ModelInstance<typeof schema, typeof definitions, '.json_encode($model->name, JSON_THROW_ON_ERROR).">;\n";
-    }
 } elseif (in_array($argv[1] ?? null, ['controller', 'controller-module'], true)) {
     Container::getInstance()->instance(ModelRegistry::class, $registry);
     $compiler = new ZeroForLaravel\Generation\ControllerQueryCompiler((new PhpParser\ParserFactory)->createForHostVersion(), $registry);
@@ -144,7 +122,23 @@ if (($argv[1] ?? null) === 'generate') {
         $queries[$operator] = $query->where('list_id', $operator, null);
     }
     echo json_encode(array_map(fn ($q) => ['ast' => $q->ast(), 'format' => $q->format()], $queries), JSON_THROW_ON_ERROR);
+} elseif (($argv[1] ?? null) === 'authorized') {
+    $query = new ZeroForLaravel\Query\Query($registry->get('Task'), $registry);
+    $queries = [
+        'root' => $query,
+        'related' => $query->related('list')->related('comments', fn ($q) => $q->limit(3)),
+        'junction' => $query->whereExists('tags', fn ($q) => $q->where('id', 'owned')),
+        'groups' => $query->where(fn ($eb) => $eb->or(
+            $eb->exists('tags', fn ($q) => $q->where('name', 'Reading')),
+            $eb->exists('tags', fn ($q) => $q->where('name', 'Other')),
+        )),
+    ];
+    $compiler = new QueryCompiler($registry);
+    $context = new ZeroContext(['user_id' => 'alice']);
+    $asts = array_map(fn ($q) => $compiler->compileDeclaration($q, $context), $queries);
+    $registry->get('Task')->definition->enforceServerScope(fn (ZeroForLaravel\Query\ZQLBuilder $q) => $q->where(fn (ZeroForLaravel\Query\ZeroOperator $op) => $op->or($op->cmp('done', true), $op->cmp('title', 'shared'))));
+    $asts['scope'] = $compiler->compileDeclaration($query, $context);
+    echo json_encode($asts, JSON_THROW_ON_ERROR);
 } else {
-    $args = json_decode($argv[2] ?? '{}', flags: JSON_THROW_ON_ERROR);
-    echo json_encode((new QueryCompiler($registry))->compile($argv[1] ?? 'Task.all', $args, new ZeroContext(['user_id' => 'alice'])), JSON_THROW_ON_ERROR);
+    throw new RuntimeException('Unknown controller interop fixture mode.');
 }

@@ -12,12 +12,12 @@ use Illuminate\Contracts\Http\Kernel;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
-use ZeroForLaravel\Domain\OperationException;
 use ZeroForLaravel\Generation\Mutations\ControllerMutationCompiler;
 use ZeroForLaravel\Generation\Mutations\ControllerMutationGenerator;
 use ZeroForLaravel\Http\ControllerRouteDispatcher;
 use ZeroForLaravel\Metadata\ModelRegistry;
 use ZeroForLaravel\Mutation\ControllerMutationRegistry;
+use ZeroForLaravel\Mutation\OperationException;
 use ZeroForLaravel\Query\QueryCompiler;
 use ZeroForLaravel\ZeroContext;
 

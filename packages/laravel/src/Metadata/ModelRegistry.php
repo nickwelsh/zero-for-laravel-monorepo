@@ -18,15 +18,8 @@ use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Database\Query\JoinClause;
 use LogicException;
 use ReflectionClass;
-use ReflectionMethod;
 use ZeroForLaravel\Attributes;
-use ZeroForLaravel\ContextField;
 use ZeroForLaravel\Definition\ZeroDefinition;
-use ZeroForLaravel\Generation\RuleExtractor;
-use ZeroForLaravel\Query\FilterParameter;
-use ZeroForLaravel\Query\ZeroOperator;
-use ZeroForLaravel\Query\ZQLBuilder;
-use ZeroForLaravel\Support\Input;
 
 /** @phpstan-import-type Column from \ZeroForLaravel\Metadata\ModelMetadata */
 final class ModelRegistry
@@ -77,29 +70,6 @@ final class ModelRegistry
 
         foreach ($this->models as $metadata) {
             $this->validateAuthorizationPath($metadata, []);
-            $this->validateNestedMutations($metadata);
-        }
-
-        // Relationship-owned inputs can have validation rules without being caller-writable.
-        $boundFields = [];
-        foreach ($this->models as $parent) {
-            foreach ($parent->definition->nestedMutations as $relations) {
-                foreach (array_keys($relations) as $name) {
-                    $relation = $parent->relations[$name];
-                    $belongsTo = ($relation['kind'] ?? null) === 'belongsTo';
-                    $dependent = $belongsTo ? $parent->name : $relation['model'];
-                    $boundFields[$dependent][] = $relation['path'][0][$belongsTo ? 'source' : 'dest'][0];
-                }
-            }
-        }
-
-        foreach ($this->models as $metadata) {
-            [$metadata->validation, $metadata->diagnostics] = (new RuleExtractor)->extract(
-                $metadata->definition->requests,
-                array_values(array_unique([...$metadata->writable, ...($boundFields[$metadata->name] ?? [])])),
-                $metadata->columns,
-                ['create', 'update', 'destroy', 'restore', 'force_delete'],
-            );
         }
     }
 
@@ -214,40 +184,18 @@ final class ModelRegistry
             throw new LogicException("{$name}: zero() must return ZeroDefinition.");
         }
 
-        $queries = ($this->attributes($class, Attributes\ZeroQuery::class)[0] ?? null)->queries ?? [];
-        $mutations = ($this->attributes($class, Attributes\ZeroMutate::class)[0] ?? null)->operations ?? [];
-        if (array_diff($queries, ['all', 'one']) || array_diff($mutations, ['create', 'update', 'destroy', 'restore', 'force_delete'])) {
-            throw new LogicException("{$name}: unsupported automatic operation.");
-        }
-
-        $authorization = array_map(fn (Attributes\ZeroAuthorize $a): array => [
-            'field' => $a->field, 'op' => $a->operator,
-            'value' => $a->value instanceof ContextField ? ['context' => $a->value->value] : ['literal' => $a->value],
-        ], $this->attributes($class, Attributes\ZeroAuthorize::class));
-        $authorization = [...$authorization, ...$definition->authorization];
-
-        $authorizationRelations = array_values(array_unique([...$definition->authorizationRelations, ...array_map(fn (Attributes\ZeroAuthorizeRelation $attribute): string => $attribute->relation, $this->attributes($class, Attributes\ZeroAuthorizeRelation::class))]));
-        if ($authorization === [] && $authorizationRelations === [] && $this->attributes($class, Attributes\ZeroPublic::class) === [] && ! $definition->public && $definition->serverScopes === []) {
-            throw new LogicException("{$name}: declare publicReads, authorize, authorizeRelation, or enforceServerScope visibility (or a legacy ZeroPublic/ZeroAuthorize attribute).");
+        $authorization = $definition->authorization;
+        $authorizationRelations = array_values(array_unique($definition->authorizationRelations));
+        if ($authorization === [] && $authorizationRelations === [] && ! $definition->public && $definition->serverScopes === []) {
+            throw new LogicException("{$name}: declare publicReads, authorize, authorizeRelation, or enforceServerScope visibility.");
         }
 
         $fills = $definition->serverFill;
-        foreach ($this->attributes($class, Attributes\ZeroServerFill::class) as $fill) {
-            if (isset($fills[$fill->field])) {
-                throw new LogicException("{$name}: conflicting server fill for {$fill->field}.");
-            }
-
-            $fills[$fill->field] = $fill->source->value;
-        }
 
         $traits = class_uses_recursive($class);
         $deleted = in_array(SoftDeletes::class, $traits) && method_exists($model, 'getDeletedAtColumn') ? $model->getDeletedAtColumn() : null;
         if ($deleted !== null && ! is_string($deleted)) {
             throw new LogicException("{$name}: deleted-at column must be a string.");
-        }
-
-        if ($deleted === null && array_intersect($mutations, ['restore', 'force_delete'])) {
-            throw new LogicException("{$name}: restore and force_delete require SoftDeletes.");
         }
 
         $created = $model->usesTimestamps() ? $model->getCreatedAtColumn() : null;
@@ -324,113 +272,9 @@ final class ModelRegistry
         }
 
         $generator = in_array(HasUlids::class, $traits) ? 'ulid' : (in_array(HasUuids::class, $traits) ? 'uuid' : null);
-        if (in_array('create', $mutations, true)) {
-            if ($generator === null || $model->getIncrementing() || $columns[$model->getKeyName()]['type'] !== 'string') {
-                throw new LogicException("{$name}: automatic create requires HasUuids or HasUlids and a string key.");
-            }
-
-            $owner = (new ReflectionMethod($class, 'newUniqueId'))->getDeclaringClass()->getName();
-            $source = (new ReflectionMethod($class, 'newUniqueId'))->getFileName();
-            if (! str_contains(str_replace('\\', '/', $source ?: ''), '/Illuminate/Database/Eloquent/Concerns/')) {
-                throw new LogicException("{$owner}: custom newUniqueId needs a matching client generator; automatic generation is unsupported.");
-            }
-
-            if ($model->uniqueIds() !== [$model->getKeyName()]) {
-                throw new LogicException("{$name}: custom uniqueIds are unsupported.");
-            }
-        }
-
         $writable = array_values(array_intersect(array_diff($this->fillable($model), array_filter(array_merge([$model->getKeyName(), $created, $updated, $deleted], array_keys($fills)))), array_keys($columns)));
-        $filterDefinitions = [];
-        $pendingFilters = array_values($definition->filters);
-        while ($pendingFilters !== []) {
-            $filter = Input::object(array_pop($pendingFilters), 'filter');
-            $filterDefinitions[] = $filter;
-            $members = $filter['members'] ?? [];
-            $conditions = $filter['conditions'] ?? [];
-            if (! is_array($members) || ! is_array($conditions)) {
-                throw new LogicException('Invalid filter members.');
-            }
 
-            foreach ([...$members, ...array_values($conditions)] as $member) {
-                $pendingFilters[] = Input::object($member, 'filter');
-            }
-
-            if ($filter['kind'] === 'callback' && is_string($filter['field']) && $filter['field'] !== '') {
-                $this->requireColumn($columns, $name, $filter['field']);
-            }
-        }
-
-        foreach ($filterDefinitions as $filter) {
-            if (! is_string($filter['kind']) || ! is_string($filter['field'])) {
-                throw new LogicException('Invalid filter definition.');
-            }
-
-            if (in_array($filter['kind'], ['exact', 'partial', 'beginsWith', 'endsWith', 'operator', 'in', 'pattern'], true)) {
-                $this->requireColumn($columns, $name, $filter['field']);
-                if ($columns[$filter['field']]['type'] === 'json') {
-                    throw new LogicException("{$name}: JSON filters are not supported by Zero.");
-                }
-
-                if (in_array($filter['kind'], ['partial', 'beginsWith', 'endsWith', 'pattern'], true) && $columns[$filter['field']]['type'] !== 'string') {
-                    throw new LogicException("{$name}: partial filters require a string field.");
-                }
-            }
-
-            if ($filter['kind'] === 'trashed' && $deleted === null) {
-                throw new LogicException("{$name}: trashed filter requires SoftDeletes.");
-            }
-        }
-
-        foreach (array_merge($definition->sorts, array_column($definition->defaultOrder, 0)) as $field) {
-            $this->requireColumn($columns, $name, $field);
-            if ($columns[$field]['type'] === 'json') {
-                throw new LogicException("{$name}: JSON sorting is not supported by Zero.");
-            }
-        }
-
-        $metadata = new ModelMetadata($class, $name, $model->getTable(), $model->getKeyName(), $columns, $queries, $mutations, $authorization, $fills, $writable, $generator, $created, $updated, $deleted, $definition, authorizationRelations: $authorizationRelations);
-        foreach ($definition->filters as $filterName => $filter) {
-            if (isset($filter['callback'])) {
-                $query = new ZQLBuilder(new ZeroOperator($metadata, fn () => throw new LogicException('Callback relationship predicates belong in an explicit server scope.')));
-                ($filter['callback'])($query, new FilterParameter);
-                unset($definition->filters[$filterName]['callback']);
-                $definition->filters[$filterName]['expression'] = $query->condition();
-            }
-        }
-
-        return $metadata;
-    }
-
-    private function validateNestedMutations(ModelMetadata $parent): void
-    {
-        foreach ($parent->definition->nestedMutations as $relations) {
-            foreach ($relations as $name => $operations) {
-                $relation = $parent->relations[$name];
-                $child = $this->get($relation['model']);
-                $hop = $relation['path'][0];
-                $belongsTo = ($relation['kind'] ?? null) === 'belongsTo';
-                $owner = $belongsTo ? $child : $parent;
-                $dependent = $belongsTo ? $parent : $child;
-                $key = $belongsTo ? $hop['dest'][0] : $hop['source'][0];
-                $foreignKey = $belongsTo ? $hop['source'][0] : $hop['dest'][0];
-                if ($key !== $owner->key || $foreignKey === $dependent->key || isset($dependent->serverFill[$foreignKey]) || in_array($foreignKey, [$dependent->createdAt, $dependent->updatedAt, $dependent->deletedAt], true)) {
-                    throw new LogicException("{$parent->name}.{$name}: nested mutations require primary-key relations and an unprotected foreign key.");
-                }
-
-                if (isset($operations['create'])) {
-                    $model = new $child->class;
-                    if ($child->idGenerator === null || $model->getIncrementing() || $child->columns[$child->key]['type'] !== 'string' || $model->uniqueIds() !== [$child->key]) {
-                        throw new LogicException("{$child->name}: nested create requires HasUuids or HasUlids and a string primary key.");
-                    }
-
-                    $source = (new ReflectionMethod($child->class, 'newUniqueId'))->getFileName();
-                    if (! str_contains(str_replace('\\', '/', $source ?: ''), '/Illuminate/Database/Eloquent/Concerns/')) {
-                        throw new LogicException("{$child->name}: custom newUniqueId is unsupported for nested create.");
-                    }
-                }
-            }
-        }
+        return new ModelMetadata($class, $name, $model->getTable(), $model->getKeyName(), $columns, $authorization, $fills, $writable, $generator, $created, $updated, $deleted, $definition, authorizationRelations: $authorizationRelations);
     }
 
     /** @return list<string> */
@@ -451,9 +295,8 @@ final class ModelRegistry
     private function describeRelations(ModelMetadata $metadata): void
     {
         $model = new $metadata->class;
-        $filters = array_filter($metadata->definition->filters, fn (array $f): bool => $f['kind'] === 'belongsTo');
-        foreach (array_unique(array_merge($metadata->definition->includes, $metadata->authorizationRelations, $metadata->definition->scopeRelations, array_column($filters, 'field'), ...array_map(array_keys(...), array_values($metadata->definition->nestedMutations)))) as $name) {
-            if (isset($metadata->columns[$name]) || $name === 'data' || in_array($name, array_diff($metadata->mutations, ['create']), true)) {
+        foreach (array_unique([...$metadata->authorizationRelations, ...$metadata->definition->scopeRelations]) as $name) {
+            if (isset($metadata->columns[$name])) {
                 throw new LogicException("{$metadata->name}.{$name}: relation name conflicts with a model column or instance API.");
             }
 
@@ -526,20 +369,7 @@ final class ModelRegistry
                 $this->requireColumn($target->columns, $target->name, $field);
             }
 
-            foreach ($filters as $filter) {
-                if ($filter['field'] === $name && ! $relation instanceof BelongsTo) {
-                    throw new LogicException("{$metadata->name}.{$name}: belongsTo filter needs BelongsTo.");
-                }
-            }
-
-            $nested = array_filter($metadata->definition->nestedMutations, fn (array $relations): bool => isset($relations[$name])) !== [];
-            if ($nested && (! $relation instanceof BelongsTo && ! $relation instanceof HasOne && ! $relation instanceof HasMany)) {
-                throw new LogicException("{$metadata->name}.{$name}: nested mutations require a direct belongsTo, hasOne, or hasMany relation.");
-            }
-
-            $metadata->relations[$name] = ['model' => $targetName, 'cardinality' => $cardinality, 'path' => $path,
-                ...($nested ? ['kind' => $relation instanceof BelongsTo ? 'belongsTo' : ($relation instanceof HasMany ? 'hasMany' : 'hasOne')] : []),
-            ];
+            $metadata->relations[$name] = ['model' => $targetName, 'cardinality' => $cardinality, 'path' => $path];
         }
     }
 

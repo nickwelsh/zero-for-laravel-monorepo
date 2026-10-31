@@ -4,13 +4,11 @@ Controller-first live queries and mutations for [Rocicorp Zero](https://zero.roc
 Laravel owns validation, binding, authorization, and authoritative writes. Zero owns
 replication, subscriptions, optimistic transactions, replay, and mutation outcomes.
 
-**v0.5.0 is a breaking controller-first release.** Install matching versions of
+**v0.5.0** provides controller-first queries and mutations. Install matching versions of
 `nickwelsh/zero-for-laravel` and `@nickwelsh/zero-for-laravel`. Both the Zero client
 and zero-cache must use **1.11.3**. PHP 8.3+, Laravel 12/13, PostgreSQL 15+ with
 logical replication, and React 18/19 are supported targets. Automatic live page
 props require Inertia 3 (the React adapter requires `@inertiajs/react` ^3.8.0).
-See the [upgrade guide](apps/docs/content/docs/0.x/docs/upgrading.mdx) before
-upgrading a v0.4 application; this is not a drop-in update.
 
 ```sh
 composer require nickwelsh/zero-for-laravel:^0.5.0
@@ -67,7 +65,7 @@ public static function zero(): ZeroDefinition
     return ZeroDefinition::make()
         ->authorize('user_id', '=', ContextField::UserId)
         ->fillFromContext('user_id', ContextField::UserId)
-        ->allowedIncludes(['list']);
+        ->relations('list');
 }
 ```
 

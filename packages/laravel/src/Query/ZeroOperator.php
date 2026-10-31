@@ -26,11 +26,11 @@ final readonly class ZeroOperator
             throw new LogicException('Unsupported ZQL comparison.');
         }
 
-        if (! $value instanceof FilterParameter && (! in_array($operator, ['IS', 'IS NOT'], true) || $value !== null)) {
+        if (! in_array($operator, ['IS', 'IS NOT'], true) || $value !== null) {
             Input::value($value, $this->model->columns[$field], $field);
         }
 
-        return ['type' => 'simple', 'op' => $operator, 'left' => ['type' => 'column', 'name' => $field], 'right' => $value instanceof FilterParameter ? ['type' => 'filterValue'] : ['type' => 'literal', 'value' => $value]];
+        return ['type' => 'simple', 'op' => $operator, 'left' => ['type' => 'column', 'name' => $field], 'right' => ['type' => 'literal', 'value' => $value]];
     }
 
     /** @param Closure(ZQLBuilder): mixed|null $refine

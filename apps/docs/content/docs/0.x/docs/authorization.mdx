@@ -10,9 +10,9 @@ and the list with `->authorizeRelation('memberships')`. Todos can then use
 `->authorizeRelation('list')` to inherit access to their parent list.
 
 These predicates compile to correlated `EXISTS` queries in both Laravel and the
-native client. Multiple scalar and relationship authorization attributes combine
-with AND. Authorization relations do not automatically become allowed includes;
-declare includes separately. Register every target model. Cycles and authorization
+native client. Multiple scalar and relationship authorization declarations combine
+with AND. Authorization relationships are schema dependencies, not result selections;
+select related rows with `related()` in controllers. Register every target model. Cycles and authorization
 paths deeper than eight relationships fail generation. Write policies and
 FormRequests still control mutations and association changes.
 
@@ -53,8 +53,8 @@ For runtime PHP, use a mandatory server scope:
 ```
 
 Register `shares` on the list definition with `->relations('shares')` or through
-its own scope's `relations` argument. This declares schema dependencies without allowing client
-includes. Every related target must be registered and define its own visibility.
+its own scope's `relations` argument. This declares schema dependencies; controllers
+choose which related rows to select. Every target must define its own visibility.
 Scopes also apply to included rows and relationship predicates. Conditions within
 a scope can use OR; the mandatory scope as a whole is ANDed with user filters.
 An empty scope is an error. Missing required context denies access.

@@ -5,10 +5,9 @@ declare(strict_types=1);
 namespace ZeroForLaravel\Tests\Fixtures;
 
 use Illuminate\Database\Eloquent\Model;
-use ZeroForLaravel\Attributes\ZeroAuthorize;
 use ZeroForLaravel\ContextField;
+use ZeroForLaravel\Definition\ZeroDefinition;
 
-#[ZeroAuthorize('user_id', '=', ContextField::UserId)]
 class Comment extends Model
 {
     public $timestamps = false;
@@ -16,4 +15,9 @@ class Comment extends Model
     public $incrementing = false;
 
     protected $keyType = 'string';
+
+    public static function zero(): ZeroDefinition
+    {
+        return ZeroDefinition::make()->authorize('user_id', '=', ContextField::UserId);
+    }
 }

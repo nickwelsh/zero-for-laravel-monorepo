@@ -6,20 +6,20 @@ namespace ZeroForLaravel\Tests\Feature;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Schema\Blueprint;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use LogicException;
 use ZeroForLaravel\Attributes\ZeroExclude;
-use ZeroForLaravel\Attributes\ZeroPublic;
-use ZeroForLaravel\Definition\AllowedFilter;
+use ZeroForLaravel\ContextField;
 use ZeroForLaravel\Definition\ZeroDefinition;
 use ZeroForLaravel\Metadata\ModelRegistry;
+use ZeroForLaravel\Mutation\Mutation;
 use ZeroForLaravel\Query\Query;
 use ZeroForLaravel\Tests\Fixtures\Comment;
 use ZeroForLaravel\Tests\Fixtures\Tag;
 use ZeroForLaravel\Tests\Fixtures\Task;
 use ZeroForLaravel\Tests\Fixtures\TaskList;
 use ZeroForLaravel\Tests\TestCase;
+use ZeroForLaravel\ZeroContext;
 
 uses(TestCase::class);
 
@@ -37,11 +37,6 @@ test('date columns follow zeros numeric wire representation', function (): void 
     $this->assertSame('number', $column['type']);
     $this->assertTrue($column['date']);
 });
-
-test('json filters fail during generation', function (): void {
-    DB::statement('ALTER TABLE tasks ADD COLUMN payload JSON');
-    new ModelRegistry([JsonFilteredTask::class]);
-})->throws(LogicException::class, 'JSON');
 
 test('resolves one column plan and separate public mutation inputs', function (): void {
     /** @var TestCase $this */
@@ -73,22 +68,18 @@ test('exclusions are additive to eloquent hidden columns', function (): void {
     $this->assertArrayNotHasKey('completed_at', $task->columns);
 });
 
-#[ZeroPublic]
 class Calendar extends Model
 {
     public $timestamps = false;
 
+    public static function zero(): ZeroDefinition
+    {
+        return ZeroDefinition::make()->publicReads();
+    }
+
     protected function casts(): array
     {
         return ['day' => 'immutable_date'];
-    }
-}
-
-class JsonFilteredTask extends Task
-{
-    public static function zero(): ZeroDefinition
-    {
-        return ZeroDefinition::make()->allowedFilters([AllowedFilter::exact('payload')]);
     }
 }
 
@@ -98,7 +89,7 @@ class WrongKeyTask extends Task
 
     public static function zero(): ZeroDefinition
     {
-        return ZeroDefinition::make();
+        return ZeroDefinition::make()->publicReads();
     }
 }
 
@@ -112,16 +103,19 @@ class HiddenRelationTask extends Task
     protected $hidden = ['secret', 'list_id'];
 }
 
-#[ZeroPublic]
 #[ZeroExclude(['completed_at'])]
 class ExcludedTask extends Model
 {
     protected $table = 'tasks';
 
     protected $hidden = ['secret'];
+
+    public static function zero(): ZeroDefinition
+    {
+        return ZeroDefinition::make()->publicReads();
+    }
 }
 
-#[ZeroPublic]
 class InvalidDefinitionTask extends Model
 {
     protected $table = 'tasks';
@@ -136,7 +130,7 @@ class InvalidRelationTask extends Task
 {
     public static function zero(): ZeroDefinition
     {
-        return ZeroDefinition::make()->allowedIncludes(['invalidRelation']);
+        return ZeroDefinition::make()->publicReads()->relations('invalidRelation');
     }
 
     public function invalidRelation(): string
@@ -161,11 +155,11 @@ enum CastStatus: string
 
 class CastTask extends Task
 {
-    protected $fillable = ['title', 'options', 'status'];
+    protected $fillable = ['title', 'options', 'status', 'completed_at', 'scheduled_at'];
 
     public static function zero(): ZeroDefinition
     {
-        return ZeroDefinition::make();
+        return ZeroDefinition::make()->publicReads()->fillFromContext('user_id', ContextField::UserId);
     }
 
     /** @return array<string, string> */
@@ -192,4 +186,35 @@ test('exports native cast metadata including implicit timestamps and backed enum
 
     $query = new Query($model, new ModelRegistry([CastTask::class]));
     expect(data_get($query->where('scheduled_at', '2026-10-30T20:31:45+02:00')->ast(), 'where.right.value'))->toBe('2026-10-30 18:31:45');
+});
+
+test('controller mutation primitives preserve JSON enum date casts and patch semantics through Eloquent', function (): void {
+    Schema::table('tasks', function (Blueprint $table): void {
+        $table->text('options')->nullable();
+        $table->string('status')->default('draft');
+        $table->string('scheduled_at')->nullable();
+    });
+    $registry = new ModelRegistry([CastTask::class]);
+    $id = '019a0000-0000-7000-8000-000000000001';
+    $mutation = new Mutation($registry, ['timestamp' => 1700000000123, 'ids' => ['key:cast' => $id]], new ZeroContext(['user_id' => 'alice']));
+    $registry->connection()->transaction(function () use ($mutation, $id): void {
+        $task = $mutation->create(CastTask::class, [
+            'title' => 'Casts', 'options' => ['theme' => 'dark'], 'status' => 'published',
+            'completed_at' => '2026-10-01T12:30:00.000Z', 'scheduled_at' => '2026-10-01T12:30:00.000Z',
+        ], 'cast');
+        $mutation->update($task, ['title' => 'Patched']);
+        $task->refresh();
+        expect($task->id)->toBe($id);
+        expect($task->title)->toBe('Patched');
+        expect($task->user_id)->toBe('alice');
+        expect($task->done)->toBeFalse();
+        expect($task->getAttribute('options'))->toBe(['theme' => 'dark']);
+        expect($task->getRawOriginal('options'))->toBe('{"theme":"dark"}');
+        expect($task->getAttribute('status'))->toBe(CastStatus::Published);
+        expect($task->completed_at?->toISOString())->toBe('2026-10-01T12:30:00.000000Z');
+        expect($task->getRawOriginal('scheduled_at'))->toBe('2026-10-01 12:30:00');
+        expect($task->created_at->getTimestamp())->toBe(1700000000);
+        expect(fn (): bool => $mutation->delete($task))->toThrow(LogicException::class, 'Portable delete does not support soft deletes.');
+        expect(CastTask::withTrashed()->findOrFail($id)->trashed())->toBeFalse();
+    });
 });

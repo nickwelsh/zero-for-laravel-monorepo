@@ -25,12 +25,6 @@ importers:
       '@dreamsicle.io/stylelint-config-tailwindcss':
         specifier: ^1.2.2
         version: 1.2.2(stylelint@17.16.0(supports-color@10.2.2)(typescript@7.0.2))
-      '@formbraid/core':
-        specifier: 0.1.0
-        version: 0.1.0
-      '@formbraid/react':
-        specifier: 0.1.0
-        version: 0.1.0(react@19.3.1)
       '@inertiajs/react':
         specifier: ^3.8.0
         version: 3.8.0(axios@1.21.0(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2))(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
@@ -52,9 +46,6 @@ importers:
       '@vitest/coverage-v8':
         specifier: 5.0.5
         version: 5.0.5(@vitest/browser@5.0.5)(vitest@5.0.5)
-      effect:
-        specifier: 4.0.2
-        version: 4.0.2
       esbuild:
         specifier: ^0.28.2
         version: 0.28.2
@@ -310,9 +301,6 @@ importers:
 
   packages/client:
     dependencies:
-      '@formbraid/core':
-        specifier: ^0.1.0
-        version: 0.1.0
       '@rocicorp/zero':
         specifier: 1.11.3
         version: 1.11.3(@opentelemetry/core@2.9.0(@opentelemetry/api@1.9.1))(supports-color@10.2.2)(svelte@5.57.2)(vite-plus@1.4.0(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(@vitest/coverage-v8@5.0.5)(@vitest/ui@5.0.5)(@volar/typescript@2.4.28(typescript@7.0.2))(@vue/language-core@3.3.13)(esbuild@0.28.2)(jiti@2.7.0)(jsdom@27.4.0(supports-color@10.2.2))(svelte@5.57.2)(terser@5.51.2)(tsx@4.23.15)(typescript@7.0.2)(yaml@2.9.1))
@@ -966,18 +954,6 @@ packages:
 
   '@floating-ui/utils@0.2.12':
     resolution: {integrity: sha512-HpCo8tmWzLVad5s2d19EhAz5zqrrQ6s69qd6moPMQvkOuSwDT1YgRfWSVuc4ennqrgv3OHppiOGMQ7oC13yIww==}
-
-  '@formbraid/core@0.1.0':
-    resolution: {integrity: sha512-YuKz8wWe5KYw+Kwj1xKQe3lAVczUeg+Thrql4zsnUUTj9hi1UcTQgJrX3/P4g3DxlbKSEHYnvYDcbAgZVzoPWQ==}
-
-  '@formbraid/react@0.1.0':
-    resolution: {integrity: sha512-D0LUlCOgCNtwNkcKmxaRA2Eg5p8vwY60+vkx4sPhfBkjRq9VKzAsi4d4tWTZEU3hnXD9999jJBaT69tUadnPUQ==}
-    peerDependencies:
-      '@formbraid/generator': ^0.1.0
-      react: ^19.0.0
-    peerDependenciesMeta:
-      '@formbraid/generator':
-        optional: true
 
   '@fuma-translate/react@1.0.2':
     resolution: {integrity: sha512-uOiOtBx3nRXR8Nu1GzBf1tApgF1FErDBTHxRIAQeyQdyOoZbrNRN6H4kDCWObY4qyGeGbHydG0DHzgeUgFDMIw==}
@@ -4874,9 +4850,6 @@ packages:
   eastasianwidth@0.2.0:
     resolution: {integrity: sha512-I88TYZWc9XiYHRQ4/3c5rjjfgkjhLyW2luGIheGERbNQ6OY7yTybanSpDXZa8y7VUP9YmDcYa+eyq4ca7iLqWA==}
 
-  effect@4.0.2:
-    resolution: {integrity: sha512-YeYnLqSFrL4+tCOXRrfNP03w8FILoF/wDl+ukraJAGzXrjcS383W7LAAvGBbLatEyktmLxRq+9xJinx7QzXW5A==}
-
   electron-to-chromium@1.5.451:
     resolution: {integrity: sha512-vUNKPrUzw8ByEMOxloq0a71iD/mPuPxVkbDm3G5YhnxTzOw/I6qAg2MUS0cYj/c267lWmw26yW4Vv7foxTxPLg==}
 
@@ -8673,16 +8646,6 @@ snapshots:
 
   '@floating-ui/utils@0.2.12': {}
 
-  '@formbraid/core@0.1.0':
-    dependencies:
-      effect: 4.0.2
-
-  '@formbraid/react@0.1.0(react@19.3.1)':
-    dependencies:
-      '@formbraid/core': 0.1.0
-      effect: 4.0.2
-      react: 19.3.1
-
   '@fuma-translate/react@1.0.2(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)':
     dependencies:
       react: 19.3.1
@@ -12464,8 +12427,6 @@ snapshots:
       stream-shift: 1.0.3
 
   eastasianwidth@0.2.0: {}
-
-  effect@4.0.2: {}
 
   electron-to-chromium@1.5.451: {}
 

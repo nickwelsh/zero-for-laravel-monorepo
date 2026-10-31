@@ -14,22 +14,22 @@ The source defaults live in
 
 ## Laravel settings
 
-| Key                           | Default                                      | Purpose                                                                                                                                |
-| ----------------------------- | -------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| `models`                      | `[]`                                         | Discover models under `app/Models` with Zero attributes or a `zero()` definition; otherwise list every participating model explicitly. |
-| `output`                      | `resources/js/zero/generated.ts`             | Generated schema, metadata, and plain row types; query/mutation modules are written alongside it.                                      |
-| `controller_output`           | `bootstrap/zero-queries.php`                 | Authoritative controller query registrations.                                                                                          |
-| `mutation_output`             | `bootstrap/zero-mutations.php`               | Authoritative controller mutation registrations.                                                                                       |
-| `react`                       | `false`                                      | Also generate the React wrapper and check it for drift.                                                                                |
-| `wayfinder_import`            | `@/zero`                                     | TypeScript module root for the opt-in Wayfinder page converter; not a filesystem path.                                                 |
-| `sync_publication_on_migrate` | `false`                                      | Synchronize the dedicated publication after successful PostgreSQL `up` migration batches.                                              |
-| `publication`                 | `ZERO_PUBLICATION` or `laravel_zero`         | Dedicated PostgreSQL publication managed by the package.                                                                               |
-| `app_id`                      | `ZERO_APP_ID` or `zero`                      | Application identity shared with Zero cache.                                                                                           |
-| `upstream_schema`             | `ZERO_UPSTREAM_SCHEMA` or `zero_0`           | Zero-owned bookkeeping schema; match the cache's `<app-id>_0`.                                                                         |
-| `api_key`                     | `ZERO_API_KEY`                               | Private cache API key; never include it in browser code.                                                                               |
-| `route_prefix`                | `zero`                                       | Prefix for query and mutation endpoints.                                                                                               |
-| `middleware`                  | `['api', 'auth']`                            | Authenticate the end user independently of cache authentication.                                                                       |
-| `context_resolver`            | `ZeroForLaravel\Http\ContextResolver::class` | Resolve trusted `ZeroContext`; by default supplies the authenticated `user_id`.                                                        |
+| Key                           | Default                                      | Purpose                                                                                                             |
+| ----------------------------- | -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `models`                      | `[]`                                         | Discover models under `app/Models` with a `zero()` definition; otherwise list every participating model explicitly. |
+| `output`                      | `resources/js/zero/generated.ts`             | Generated schema, metadata, and plain row types; query/mutation modules are written alongside it.                   |
+| `controller_output`           | `bootstrap/zero-queries.php`                 | Authoritative controller query registrations.                                                                       |
+| `mutation_output`             | `bootstrap/zero-mutations.php`               | Authoritative controller mutation registrations.                                                                    |
+| `react`                       | `false`                                      | Also generate the React wrapper and check it for drift.                                                             |
+| `wayfinder_import`            | `@/zero`                                     | TypeScript module root for the opt-in Wayfinder page converter; not a filesystem path.                              |
+| `sync_publication_on_migrate` | `false`                                      | Synchronize the dedicated publication after successful PostgreSQL `up` migration batches.                           |
+| `publication`                 | `ZERO_PUBLICATION` or `laravel_zero`         | Dedicated PostgreSQL publication managed by the package.                                                            |
+| `app_id`                      | `ZERO_APP_ID` or `zero`                      | Application identity shared with Zero cache.                                                                        |
+| `upstream_schema`             | `ZERO_UPSTREAM_SCHEMA` or `zero_0`           | Zero-owned bookkeeping schema; match the cache's `<app-id>_0`.                                                      |
+| `api_key`                     | `ZERO_API_KEY`                               | Private cache API key; never include it in browser code.                                                            |
+| `route_prefix`                | `zero`                                       | Prefix for query and mutation endpoints.                                                                            |
+| `middleware`                  | `['api', 'auth']`                            | Authenticate the end user independently of cache authentication.                                                    |
+| `context_resolver`            | `ZeroForLaravel\Http\ContextResolver::class` | Resolve trusted `ZeroContext`; by default supplies the authenticated `user_id`.                                     |
 
 Register relationship targets even if they expose no top-level queries or writes.
 Choose the middleware and guard appropriate to your application. Session

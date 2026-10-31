@@ -144,7 +144,7 @@ remain committed.
 
 Deploy additive schema changes first, regenerate/version matching PHP and JS
 contracts, synchronize publication membership, and verify authenticated subscribed
-queries before removing compatibility paths. Coordinate destructive schema changes
+queries before removing application columns or tables. Coordinate destructive schema changes
 with cache/client rollout and pause affected traffic while membership is released.
 Publication synchronization restricts what enters the cache; query callbacks enforce
 which clients can see those published rows. Neither successful publication DDL nor

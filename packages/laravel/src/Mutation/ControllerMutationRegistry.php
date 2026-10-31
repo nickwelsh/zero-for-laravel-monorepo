@@ -15,7 +15,6 @@ use JsonException;
 use LogicException;
 use stdClass;
 use Symfony\Component\HttpKernel\Exception\HttpExceptionInterface;
-use ZeroForLaravel\Domain\OperationException;
 use ZeroForLaravel\Generation\Mutations\MutationProgram;
 use ZeroForLaravel\Http\ControllerRouteDispatcher;
 use ZeroForLaravel\Metadata\ModelRegistry;
@@ -49,11 +48,6 @@ final readonly class ControllerMutationRegistry
         } catch (JsonException) {
             throw new OperationException('invalid_result', 'Mutation result must be explicit JSON data.');
         }
-    }
-
-    public function has(string $name): bool
-    {
-        return isset($this->registrations[$name]);
     }
 
     /**

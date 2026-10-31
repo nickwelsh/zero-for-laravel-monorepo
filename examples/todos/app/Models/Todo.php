@@ -27,7 +27,7 @@ class Todo extends Model
     public static function zero(): ZeroDefinition
     {
         return ZeroDefinition::make()->authorizeRelation('list')
-            ->allowedIncludes(['list']);
+            ->relations('list');
     }
 
     /** @return BelongsTo<TodoList, $this> */

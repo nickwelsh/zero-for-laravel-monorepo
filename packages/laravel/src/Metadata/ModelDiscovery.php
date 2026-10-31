@@ -10,7 +10,6 @@ use RecursiveDirectoryIterator;
 use RecursiveIteratorIterator;
 use ReflectionClass;
 use SplFileInfo;
-use ZeroForLaravel\Attributes;
 
 final class ModelDiscovery
 {
@@ -76,18 +75,6 @@ final class ModelDiscovery
 
             if (method_exists($class, 'zero')) {
                 $classes[] = $class;
-
-                continue;
-            }
-
-            for ($reflection = new ReflectionClass($class); $reflection; $reflection = $reflection->getParentClass()) {
-                foreach ([Attributes\ZeroQuery::class, Attributes\ZeroMutate::class, Attributes\ZeroAuthorize::class, Attributes\ZeroAuthorizeRelation::class, Attributes\ZeroPublic::class] as $attribute) {
-                    if ($reflection->getAttributes($attribute) !== []) {
-                        $classes[] = $class;
-
-                        continue 3;
-                    }
-                }
             }
         }
 

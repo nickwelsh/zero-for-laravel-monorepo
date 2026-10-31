@@ -8,13 +8,14 @@ use Closure;
 use LogicException;
 use ZeroForLaravel\ContextField;
 use ZeroForLaravel\Query\ZQLBuilder;
+use ZeroForLaravel\Search\ScoutSearch;
 use ZeroForLaravel\ZeroContext;
 
 final class ZeroDefinition
 {
     public bool $public = false;
 
-    public ?\ZeroForLaravel\Search\ScoutSearch $search = null;
+    public ?ScoutSearch $search = null;
 
     /** @var list<array{field: string, op: string, value: array{context: string}|array{literal: string|int|float|bool|null}}> */
     public array $authorization = [];
@@ -31,63 +32,14 @@ final class ZeroDefinition
     /** @var list<string> */
     public array $scopeRelations = [];
 
-    /**
-     * @var array<string, array{kind: string, field: string, operator?: string, members?: list<array<string, mixed>>, conditions?: array<string, array<string, mixed>>, maxItems?: int, prefix?: string, suffix?: string, callback?: Closure, expression?: array<string, mixed>}>
-     */
-    public array $filters = [];
-
-    /**
-     * @var list<string>
-     */
-    public array $includes = [];
-
-    /**
-     * @var list<string>
-     */
-    public array $sorts = [];
-
-    /**
-     * @var list<array{string, 'asc'|'desc'}>
-     */
-    public array $defaultOrder = [];
-
-    /**
-     * @var array<string, class-string<\Illuminate\Foundation\Http\FormRequest>>
-     */
-    public array $requests = [];
-
-    /** @var array<string, array<string, array<string, NestedMutation>>> */
-    public array $nestedMutations = [];
-
-    public int $defaultLimit = 50;
-
-    public int $maxLimit = 1000;
-
     public static function make(): self
     {
         return new self;
     }
 
-    public function search(\ZeroForLaravel\Search\ScoutSearch $search): self
+    public function search(ScoutSearch $search): self
     {
         $this->search = $search;
-
-        return $this;
-    }
-
-    public function allowedNestedMutations(string $operation, NestedMutation ...$mutations): self
-    {
-        if (! in_array($operation, ['create', 'update'], true)) {
-            throw new LogicException('Nested mutations require a create or update parent operation.');
-        }
-
-        foreach ($mutations as $mutation) {
-            if (isset($this->nestedMutations[$operation][$mutation->relation][$mutation->operation])) {
-                throw new LogicException('Duplicate nested mutation declaration.');
-            }
-
-            $this->nestedMutations[$operation][$mutation->relation][$mutation->operation] = clone $mutation;
-        }
 
         return $this;
     }
@@ -114,7 +66,7 @@ final class ZeroDefinition
     }
 
     /** @param Closure(ZQLBuilder, ZeroContext): mixed $scope
-     * @param  list<string>  $relations  Relationships needed by the scope but not necessarily exposed as includes.
+     * @param  list<string>  $relations  Relationships needed by the scope.
      */
     public function enforceServerScope(Closure $scope, array $relations = []): self
     {
@@ -124,7 +76,7 @@ final class ZeroDefinition
         return $this;
     }
 
-    /** Declare schema dependencies without exposing them as client includes. */
+    /** Declare schema dependencies used by controller queries and visibility. */
     public function relations(string ...$relations): self
     {
         $this->scopeRelations = array_values(array_unique([...$this->scopeRelations, ...$relations]));
@@ -139,80 +91,6 @@ final class ZeroDefinition
         }
 
         $this->serverFill[$field] = $source instanceof ContextField ? $source->value : $source;
-
-        return $this;
-    }
-
-    /**
-     * @param  string|AllowedFilter|list<string|AllowedFilter>  ...$filters
-     */
-    public function allowedFilters(string|AllowedFilter|array ...$filters): self
-    {
-        $filters = count($filters) === 1 && is_array($filters[0]) ? $filters[0] : $filters;
-        foreach ($filters as $filter) {
-            $filter = is_string($filter) ? AllowedFilter::partial($filter) : $filter;
-            if (! $filter instanceof AllowedFilter || isset($this->filters[$filter->name])) {
-                throw new LogicException('Invalid or duplicate filter definition.');
-            }
-
-            $this->filters[$filter->name] = $filter->toArray();
-            foreach ([$filter->toArray(), ...array_values($filter->conditions)] as $member) {
-                if ($member['kind'] === 'related' && is_string($member['field'])) {
-                    $this->relations($member['field']);
-                }
-            }
-        }
-
-        return $this;
-    }
-
-    /**
-     * @param  string|list<string>  ...$includes
-     */
-    public function allowedIncludes(string|array ...$includes): self
-    {
-        $includes = array_merge(...array_map(fn (string|array $value): array => is_array($value) ? $value : [$value], $includes));
-        $this->includes = array_values(array_unique($includes));
-
-        return $this;
-    }
-
-    /**
-     * @param  string|list<string>  ...$sorts
-     */
-    public function allowedSorts(string|array ...$sorts): self
-    {
-        $sorts = array_merge(...array_map(fn (string|array $value): array => is_array($value) ? $value : [$value], $sorts));
-        $this->sorts = array_values(array_unique($sorts));
-
-        return $this;
-    }
-
-    public function defaultSort(string ...$sorts): self
-    {
-        $this->defaultOrder = array_map(fn (string $sort): array => [ltrim($sort, '-'), str_starts_with($sort, '-') ? 'desc' : 'asc'], array_values($sorts));
-
-        return $this;
-    }
-
-    public function limits(int $default = 50, int $max = 1000): self
-    {
-        if ($default < 1 || $max < $default) {
-            throw new LogicException('Query limits must be positive and default must not exceed max.');
-        }
-
-        $this->defaultLimit = $default;
-        $this->maxLimit = $max;
-
-        return $this;
-    }
-
-    /**
-     * @param  array<string, class-string<\Illuminate\Foundation\Http\FormRequest>>  $requests
-     */
-    public function mutationRequests(array $requests): self
-    {
-        $this->requests = $requests;
 
         return $this;
     }
