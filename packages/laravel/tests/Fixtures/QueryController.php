@@ -9,6 +9,11 @@ use Inertia\Response;
 
 final class QueryController
 {
+    public function plain(): Response
+    {
+        return Inertia::render('tasks/plain', ['heading' => 'Unchanged', 'count' => 2]);
+    }
+
     public function show(Task $task): Response
     {
         return Inertia::render('tasks/show', ['task' => $task]);

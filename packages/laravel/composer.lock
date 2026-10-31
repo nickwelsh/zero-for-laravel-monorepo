@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "851e2600454fc5ec8c49bb42293d1f83",
+    "content-hash": "158bbea1d86cc7be638c5d5f5d6ff834",
     "packages": [
         {
             "name": "brick/math",
@@ -7730,6 +7730,73 @@
             "time": "2026-03-17T14:54:13+00:00"
         },
         {
+            "name": "laravel/wayfinder",
+            "version": "dev-next",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/laravel/wayfinder.git",
+                "reference": "be273f802dbcc3c9a4a411ab1eea7586b922f7c9"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://api.github.com/repos/laravel/wayfinder/zipball/be273f802dbcc3c9a4a411ab1eea7586b922f7c9",
+                "reference": "be273f802dbcc3c9a4a411ab1eea7586b922f7c9",
+                "shasum": ""
+            },
+            "require": {
+                "illuminate/console": "^12.0|^13.0",
+                "illuminate/filesystem": "^12.0|^13.0",
+                "illuminate/routing": "^12.0|^13.0",
+                "illuminate/support": "^12.0|^13.0",
+                "laravel/ranger": "^0.5.1",
+                "laravel/surveyor": "^0.3.0",
+                "php": "^8.2",
+                "phpstan/phpdoc-parser": "^2.3"
+            },
+            "require-dev": {
+                "inertiajs/inertia-laravel": "^3.0",
+                "laravel/pint": "^1.21",
+                "orchestra/testbench": "^10.1|^11.0"
+            },
+            "type": "library",
+            "extra": {
+                "laravel": {
+                    "providers": [
+                        "Laravel\\Wayfinder\\WayfinderServiceProvider"
+                    ]
+                }
+            },
+            "autoload": {
+                "psr-4": {
+                    "Laravel\\Wayfinder\\": "src"
+                }
+            },
+            "notification-url": "https://packagist.org/downloads/",
+            "license": [
+                "MIT"
+            ],
+            "authors": [
+                {
+                    "name": "Taylor Otwell",
+                    "email": "taylor@laravel.com"
+                }
+            ],
+            "description": "Generate TypeScript representations of your Laravel actions and routes.",
+            "homepage": "https://github.com/laravel/wayfinder",
+            "keywords": [
+                "laravel",
+                "php",
+                "routes",
+                "typescript"
+            ],
+            "support": {
+                "issues": "https://github.com/laravel/wayfinder/issues",
+                "source": "https://github.com/laravel/wayfinder"
+            },
+            "time": "2026-09-10T13:39:05+00:00",
+            "published-time": "2026-09-10T13:39:09+00:00"
+        },
+        {
             "name": "mockery/mockery",
             "version": "1.6.15",
             "source": {
@@ -11706,7 +11773,9 @@
     ],
     "aliases": [],
     "minimum-stability": "stable",
-    "stability-flags": {},
+    "stability-flags": {
+        "laravel/wayfinder": 20
+    },
     "prefer-stable": false,
     "prefer-lowest": false,
     "platform": {

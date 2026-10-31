@@ -36,8 +36,50 @@ export default function Tasks({ tasks }: { tasks: Data<InferLiveQueryResult<type
 }
 ```
 
-There is no generated global page namespace. Define page props in your application
+Zero does not generate a global page namespace. Define page props in your application
 and infer live data from the exported queries. Ordinary props remain application-owned.
+
+## Optional Wayfinder page types
+
+If you use `laravel/wayfinder` **`dev-next`** to generate `Inertia.Pages`, register
+`ZeroForLaravel\WayfinderServiceProvider::class` in `bootstrap/providers.php`.
+This is opt-in and requires Wayfinder's next-branch Inertia converter; the stable
+route-only Wayfinder release does not expose it. Zero does not install Wayfinder
+as a production dependency.
+
+Generate Zero's contracts first, then let Wayfinder generate its own declarations:
+
+```sh
+php artisan zero:generate --react
+php artisan wayfinder:generate --fresh
+```
+
+The integration customizes Wayfinder's converter before it writes the page type.
+It changes only props in Zero's generated query registrations for that controller
+method and component. Wayfinder still owns the page name, shared data, ordinary
+props, and output file. There is no second declaration or global type override.
+For example, its dashboard prop becomes:
+
+```typescript
+lists: import('@nickwelsh/zero-for-laravel/react').Data<
+    import('@nickwelsh/zero-for-laravel').InferLiveQueryResult<
+        (typeof import('@/zero/App/Http/Controllers/DashboardController'))['index']['lists']
+    >
+>;
+```
+
+This references the generated query instead of serializing the PHP `Query` class.
+It preserves related rows, decoded `Date` fields, and singular-result `undefined`,
+and includes the live prop's loading, error, and pagination API. It describes props
+**after the Inertia live adapter has injected them**, not raw server page JSON.
+Continue to install `createInertiaAdapter` in the resolver.
+
+`zero.wayfinder_import` defaults to `@/zero`. Set it to the TypeScript module root
+containing your generated controller modules if you use another alias or directory.
+Relative module roots resolve from Wayfinder's generated `types.d.ts`, not from
+your PHP configuration file. Regenerate Zero whenever declarations change, and use
+`zero:generate --check` in CI to catch stale registrations. This integration uses
+the current `dev-next` converter API; an upstream breaking change may require an update.
 
 ## Native Zero access
 

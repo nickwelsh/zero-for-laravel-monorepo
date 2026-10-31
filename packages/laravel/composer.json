@@ -16,6 +16,7 @@
         "larastan/larastan": "^3.9",
         "laravel/pint": "^1.0",
         "laravel/scout": "^10.0",
+        "laravel/wayfinder": "dev-next",
         "orchestra/testbench": "^10.0|^11.0",
         "peckphp/peck": "^0.3.0",
         "pestphp/pest": "^4.0",

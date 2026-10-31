@@ -134,6 +134,13 @@ The generated file manifest tracks obsolete controller modules for safe removal.
 Deploy these together. `zero:generate --check` detects drift. The editable
 `zero.config.ts` holds public connection options and is never overwritten.
 
+Applications using Wayfinder `dev-next` can opt into
+`ZeroForLaravel\WayfinderServiceProvider` to have **Wayfinder's own page generator**
+emit precise live-query prop types. Run `zero:generate` before `wayfinder:generate`.
+Only registered Zero props are customized; shared and ordinary props stay with
+Wayfinder, without duplicate declarations or global overrides. The controller
+module root is configurable with `zero.wayfinder_import` (default `@/zero`).
+
 Install `createInertiaAdapter(bindings)` from the `/inertia` export in your
 `createInertiaApp` resolver and call `livePages.wrap(module.default, page)`.
 Put the generated `ZeroProvider` in the authenticated persistent layout, outside

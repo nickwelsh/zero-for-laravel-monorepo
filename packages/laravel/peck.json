@@ -30,7 +30,8 @@
             "asc",
             "desc",
             "cardinality",
-            "dest"
+            "dest",
+            "wayfinder"
         ]
     }
 }
