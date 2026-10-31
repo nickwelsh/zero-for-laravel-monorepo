@@ -57,28 +57,38 @@ if ! command -v composer >/dev/null; then
     rm -f "$installer"
 fi
 
-# This database is orb-local and disposable. Trust only the local test role,
-# never remote connections; live tests also need database/replication privileges.
-pg_version=$(ls /etc/postgresql | sort -V | tail -1)
-pg_config="/etc/postgresql/$pg_version/main"
-sudo tee "$pg_config/conf.d/amp-orb.conf" > /dev/null <<'EOF'
+# Own the orb-local database without requiring systemd (custom orbs may lack it).
+# Setup uses it temporarily; .amp/services.yaml owns the runtime process.
+pg_bin=$(pg_config --bindir)
+pg_data="$PWD/.test-database/postgres"
+mkdir -p "$pg_data"
+if [[ ! -f "$pg_data/PG_VERSION" ]]; then
+    step "$pg_bin/initdb" -D "$pg_data" -U postgres --auth-local=trust --auth-host=trust
+fi
+cat > "$pg_data/amp-orb.conf" <<'EOF'
 listen_addresses = '127.0.0.1'
+port = 55433
+unix_socket_directories = ''
 wal_level = logical
 fsync = off
 synchronous_commit = off
 full_page_writes = off
 EOF
-if ! sudo grep -Fqx '# Amp orb test connections' "$pg_config/pg_hba.conf"; then
-    sudo sed -i '1i# Amp orb test connections\nhost all postgres 127.0.0.1/32 trust' "$pg_config/pg_hba.conf"
+if ! grep -Fqx "include = 'amp-orb.conf'" "$pg_data/postgresql.conf"; then
+    echo "include = 'amp-orb.conf'" >> "$pg_data/postgresql.conf"
 fi
-step sudo systemctl enable --now postgresql
-step sudo systemctl restart "postgresql@$pg_version-main"
-if ! sudo -u postgres psql -tAc "SELECT 1 FROM pg_database WHERE datname = 'laravel_zero_test'" | grep -qx 1; then
-    step sudo -u postgres createdb laravel_zero_test
+if ! "$pg_bin/pg_ctl" -D "$pg_data" status >/dev/null; then
+    step "$pg_bin/pg_ctl" -D "$pg_data" -l "$pg_data/setup.log" -w start
+    trap '"$pg_bin/pg_ctl" -D "$pg_data" -m fast -w stop' EXIT
 fi
+for database in laravel_zero_test laravel_zero_todos_demo; do
+    if ! psql -h 127.0.0.1 -p 55433 -U postgres -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname = '$database'" | grep -qx 1; then
+        step createdb -h 127.0.0.1 -p 55433 -U postgres "$database"
+    fi
+done
 
 # Login shells used by agents and supervised services inherit test settings.
-profile_marker='# Zero for Laravel orb test environment'
+profile_marker='# Zero for Laravel managed PostgreSQL environment'
 if ! grep -Fqx "$profile_marker" "$HOME/.bash_profile" 2>/dev/null; then
     cat >> "$HOME/.bash_profile" <<EOF
 
@@ -86,6 +96,7 @@ $profile_marker
 if [[ "\$PWD" == "$PWD" || "\$PWD" == "$PWD/"* ]]; then
     export ZERO_TEST_PG_DATABASE=\${ZERO_TEST_PG_DATABASE:-laravel_zero_test}
     export ZERO_TEST_PG_HOST=\${ZERO_TEST_PG_HOST:-127.0.0.1}
+    export ZERO_TEST_PG_PORT=\${ZERO_TEST_PG_PORT:-55433}
     export ZERO_TEST_PG_USER=\${ZERO_TEST_PG_USER:-postgres}
 fi
 EOF
@@ -94,8 +105,9 @@ fi
 step composer --working-dir=packages/laravel install --no-interaction --prefer-dist
 step composer --working-dir=examples/todos install --no-interaction --prefer-dist
 step pnpm install --frozen-lockfile
-step php examples/todos/artisan wayfinder:generate --fresh
 step pnpm --filter @nickwelsh/zero-for-laravel build
 [[ -f examples/todos/.env ]] || cp -- examples/todos/.env.example examples/todos/.env
+mkdir -p examples/todos/storage/app/zero
+step node .agents/todos-demo.mjs prepare
 printf '\nOrb dependencies ready: Node %s, pnpm %s, PHP %s\n' \
     "$(node --version)" "$(pnpm --version)" "$(php -r 'echo PHP_VERSION;')"

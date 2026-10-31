@@ -1,0 +1,18 @@
+services:
+  postgres:
+    command: exec "$(pg_config --bindir)/postgres" -D .test-database/postgres -h 127.0.0.1 -p "$PORT"
+    port: 55433
+  todos-app:
+    command: node .agents/todos-demo.mjs app
+    port: 8090
+    health: /up
+  todos-cache:
+    command: node .agents/todos-demo.mjs cache
+    port: 4858
+  todos-portal:
+    command: node .agents/todos-proxy.mjs
+    port: 8091
+    health: /up
+    portal:
+      title: Todos demo
+      description: 'Sign in as alice@example.com or bob@example.com with password todos-demo-password.'

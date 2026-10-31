@@ -6,7 +6,7 @@ import { createRequire } from 'node:module';
 
 process.loadEnvFile('.env');
 const require = createRequire(import.meta.url);
-const replica = join(process.cwd(), 'storage/app/zero/replica.db');
+const replica = process.env.ZERO_REPLICA_FILE ?? join(process.cwd(), 'storage/app/zero/replica.db');
 const certificate =
     process.env.ZERO_CA_CERT ??
     process.env.ZERO_HERD_CA ??

@@ -18,6 +18,32 @@ Use Herd, PHP 8.4.1+, Node 24+, pnpm 11, and PostgreSQL 15+ with logical replica
 (`wal_level=logical`) and replication privileges for the local database user.
 The example uses Pest 5; the library itself supports PHP 8.3 with Laravel 12.
 
+## Amp orb demo
+
+The repository's `.agents/setup` installs dependencies, prepares an isolated local
+PostgreSQL cluster, migrates and seeds `laravel_zero_todos_demo`, and builds the app.
+It is safe to rerun: existing accounts, todos, keys, and databases are preserved.
+It never resets the database or starts permanent servers during setup.
+
+From the repository root, run `amp orb services ensure` to start the declared
+PostgreSQL, Laravel, Zero cache, and single-origin portal services. Open the exact
+portal URL printed by that command. The Portal tab also starts declared services
+when opened; no resume hook is needed. Use `amp orb service logs <name>` to inspect
+`postgres`, `todos-app`, `todos-cache`, or `todos-portal`.
+
+Sign in as `alice@example.com` or `bob@example.com` with password
+`todos-demo-password`. Both accounts belong to Household; Alice also has Personal.
+These are local-only demo accounts, not production credentials.
+
+The orb uses a separate PostgreSQL cluster on 55433, Laravel on 8090, Zero on 4858,
+and the proxy on 8091. Laravel and Zero's `/sync/` WebSocket share one portal, avoiding cross-origin
+portal authentication. The cache URL follows the browser's origin; native query
+and mutation callback URLs remain internal to the orb. The proxy is trusted only
+on loopback and only when the demo launcher opts in in the local environment.
+Generated demo keys and the separate orb replica stay in ignored `storage/app/zero`;
+database files stay in ignored `.test-database/postgres`. No generated portal
+hostname or key is committed, and the normal Herd `.env` settings are unchanged.
+
 ## Install
 
 From the repository root:
