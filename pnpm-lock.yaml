@@ -53,8 +53,8 @@ importers:
         specifier: 5.0.5
         version: 5.0.5(@vitest/browser@5.0.5)(vitest@5.0.5)
       effect:
-        specifier: 4.0.2
-        version: 4.0.2
+        specifier: 4.0.7
+        version: 4.0.7
       esbuild:
         specifier: ^0.28.2
         version: 0.28.2
@@ -4721,6 +4721,9 @@ packages:
 
   effect@4.0.2:
     resolution: {integrity: sha512-YeYnLqSFrL4+tCOXRrfNP03w8FILoF/wDl+ukraJAGzXrjcS383W7LAAvGBbLatEyktmLxRq+9xJinx7QzXW5A==}
+
+  effect@4.0.7:
+    resolution: {integrity: sha512-47CiUzNAmeLr40pDT9vKMxxtB8o3bdpZEKU4IUM3fVxsK2GYzPsV7fQoZP0I41A308BZd71nMxqJ0KRh3s9u2g==}
 
   electron-to-chromium@1.5.451:
     resolution: {integrity: sha512-vUNKPrUzw8ByEMOxloq0a71iD/mPuPxVkbDm3G5YhnxTzOw/I6qAg2MUS0cYj/c267lWmw26yW4Vv7foxTxPLg==}
@@ -12203,6 +12206,8 @@ snapshots:
   eastasianwidth@0.2.0: {}
 
   effect@4.0.2: {}
+
+  effect@4.0.7: {}
 
   electron-to-chromium@1.5.451: {}
 

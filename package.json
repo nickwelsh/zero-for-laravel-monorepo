@@ -43,7 +43,7 @@
         "@types/react": "^19.0.0",
         "@types/react-dom": "^19.3.0",
         "@vitest/coverage-v8": "5.0.5",
-        "effect": "4.0.2",
+        "effect": "4.0.7",
         "esbuild": "^0.28.2",
         "eslint-plugin-no-only-tests": "^3.4.0",
         "eslint-plugin-no-use-extend-native": "^0.7.3",
