@@ -129,7 +129,8 @@ test('generation owns named controller modules and removes only stale generated 
         expect(Artisan::call('zero:generate', $options))->toBe(0);
         $controller = $directory.'/ZeroForLaravel/Tests/Fixtures/ControllerMutationController.ts';
         expect(File::get($controller))->toContain(' as store}', ' as StoreInput', '../../../generated.mutations');
-        expect(File::get($directory.'/pages.d.ts'))->toContain('namespace Inertia', 'namespace Tasks', 'type Index');
+        expect(File::get($directory.'/ZeroForLaravel/Tests/Fixtures/QueryController.ts'))->toContain(' as index}', '.request()', 'live: liveQueries');
+        expect(File::exists($directory.'/pages.d.ts'))->toBeFalse();
         expect(Artisan::call('zero:generate', [...$options, '--check' => true]))->toBe(0);
         File::put($directory.'/handwritten.ts', 'export const keep = true;');
         Route::setRoutes(new RouteCollection);

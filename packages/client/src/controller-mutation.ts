@@ -96,6 +96,13 @@ export interface ControllerMutationAction<Input, Result> {
     readonly inputSchema: MutationCodec<Input>;
     readonly serverResultSchema: MutationCodec<Result>;
 }
+export type InferMutationInput<M extends { inputSchema: MutationCodec<unknown> }> = ReturnType<
+    M['inputSchema']['parse']
+>;
+/** The authoritative, decoded server result; optimistic results can differ. */
+export type InferMutationResult<M extends { serverResultSchema: MutationCodec<unknown> }> = ReturnType<
+    M['serverResultSchema']['parse']
+>;
 export interface ControllerMutationOptions<Input, ServerResult, ClientResult> {
     readonly input: MutationCodec<Input>;
     /** Runs before native request creation, e.g. Date -> epoch milliseconds. */
@@ -469,6 +476,7 @@ export function createControllerMutations<S extends Schema>(
             if (!contract) throw new Error('Unknown controller mutation.');
             const mutator = mutators[name] as unknown as Mutator<ControllerMutationWire, S, ClientContext>;
             return {
+                inputSchema: config.input,
                 serverResultSchema: config.serverResult,
                 clientResultSchema: config.clientResult,
                 prepare(

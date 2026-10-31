@@ -29,7 +29,11 @@ The adapter injects declared live props; pages do not call `useQuery` for them.
 Rows are plain decoded data, not model snapshots:
 
 ```tsx
-export default function Dashboard({ lists }: Inertia.Pages.Dashboard) {
+import type { InferLiveQueryResult } from '@nickwelsh/zero-for-laravel';
+import type { Data } from '@nickwelsh/zero-for-laravel/react';
+import type { index } from '@/zero/App/Http/Controllers/DashboardController';
+
+export default function Dashboard({ lists }: { lists: Data<InferLiveQueryResult<typeof index.lists>> }) {
     return lists.data.map((list) => <p key={list.id}>{list.name}</p>);
 }
 ```
@@ -37,6 +41,12 @@ export default function Dashboard({ lists }: Inertia.Pages.Dashboard) {
 Live props distinguish loading, success, refreshing, stale, failure, and disabled
 states. Connection status is separate from query completion. Infinite queries grow
 one live window; cursor pages keep raw ordering values to avoid rounding timestamps.
+
+No global page types are generated. The same named query works with native Zero:
+`zero.run(index.lists(input))` or `useQuery(index.lists(input))`. For decoded live
+data, use `useData(index.lists.live(input))`. `InferQueryInput` and `InferQueryResult`
+describe native calls; `InferLiveQueryResult` describes decoded rows. The generated
+`.react.ts` exports a schema-typed `useZero` returning the native instance.
 
 ## Controller mutations
 
@@ -48,6 +58,13 @@ const createTodo = useControllerMutation(create);
 const saved = await createTodo({ list_id: list.id, title: 'A new task' });
 console.log(saved.id); // Validated authoritative result, not just local prediction.
 ```
+
+For native lifecycle access, use `zero.mutate(actions[create.action].prepare(input))`
+with `actions` from the generated provider. Outside React, construct Zero with
+`mutators` and use `actions` from the same `createControllerMutationBindings` call.
+Infer business input and decoded server output with `InferMutationInput<typeof create>`
+and `InferMutationResult<typeof create>`. Native results remain success/error envelopes;
+parse successful server data with `create.serverResultSchema` when bypassing the hook.
 
 Use a bound route argument map for update/delete actions. The hook exposes pending,
 local application, server acceptance, field errors, and committed-result decoding

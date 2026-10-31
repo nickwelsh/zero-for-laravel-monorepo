@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace ZeroForLaravel\Generation;
 
-use Illuminate\Support\Str;
 use LogicException;
 use ZeroForLaravel\Generation\Mutations\MutationProgram;
 
@@ -40,39 +39,36 @@ final class PublicApiGenerator
             $controllers[$path][] = 'export type {Input'.$index.' as '.ucfirst($method).'Input, ServerResult'.$index.' as '.ucfirst($method).'Result} from '.json_encode($import, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES).';';
         }
 
-        $outputs = array_map(fn (array $lines): string => implode("\n", $lines)."\n", $controllers);
-        $pages = [];
+        $queryActions = [];
         foreach ($queries as $query) {
-            $name = implode('.', array_map(Str::studly(...), explode('/', str_replace('::', '/', $query->component))));
-            if (! preg_match('/^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*$/D', $name)) {
-                throw new LogicException('Unsupported TypeScript page name: '.$query->component);
+            [$controller, $method] = explode('@', $query->action, 2);
+            $segments = explode('\\', $controller);
+            foreach ([...$segments, $method] as $segment) {
+                if (! preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/D', $segment)) {
+                    throw new LogicException('Unsupported TypeScript controller identifier: '.$segment);
+                }
             }
 
-            if (isset($pages[$name]) && $pages[$name]['component'] !== $query->component) {
-                throw new LogicException('Inertia page names collide after normalization: '.$query->component.' and '.$pages[$name]['component']);
+            $path = implode('/', $segments).'.ts';
+            if (! isset($queryActions[$path])) {
+                $import = (count($segments) === 1 ? './' : str_repeat('../', count($segments) - 1)).$base.'.queries';
+                $controllers[$path] ??= [self::HEADER];
+                $controllers[$path][] = 'import {actions as liveQueries} from '.json_encode($import, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES).';';
             }
 
-            $pages[$name]['component'] = $query->component;
-            $pages[$name]['actions'][$query->action] = true;
+            $action = json_encode($query->action.'.'.$query->prop, JSON_THROW_ON_ERROR);
+            $queryActions[$path][$method][] = '['.json_encode($query->prop, JSON_THROW_ON_ERROR).']: Object.assign((input: Parameters<typeof liveQueries['.$action.']>[0]) => liveQueries['.$action.'](input).request(), {live: liveQueries['.$action.']})';
         }
 
-        ksort($pages);
-        $lines = [self::HEADER, 'import type {Pages as Contracts} from '.json_encode('./'.$base.'.queries', JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES).';', 'declare global {', '  namespace Inertia {', '    namespace Pages {'];
-        foreach ($pages as $name => $page) {
-            $segments = explode('.', $name);
-            $type = array_pop($segments);
-            foreach ($segments as $segment) {
-                $lines[] = 'namespace '.$segment.' {';
-            }
-
-            $lines[] = 'type '.$type.' = '.implode(' | ', array_map(fn (string $action): string => 'Contracts['.json_encode($action, JSON_THROW_ON_ERROR).']', array_keys($page['actions']))).';';
-            foreach ($segments as $_) {
-                $lines[] = '}';
+        foreach ($queryActions as $path => $methods) {
+            $index = 0;
+            foreach ($methods as $method => $properties) {
+                $controllers[$path][] = 'const query'.$index.' = {'.implode(', ', $properties).'};';
+                $controllers[$path][] = 'export {query'.$index.' as '.$method.'};';
+                $index++;
             }
         }
 
-        $outputs['pages.d.ts'] = implode("\n", [...$lines, '    }', '  }', '}', '']);
-
-        return $outputs;
+        return array_map(fn (array $lines): string => implode("\n", $lines)."\n", $controllers);
     }
 }

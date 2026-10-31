@@ -1,10 +1,19 @@
-import type { AnyCustomQuery, QueryRowType } from '@rocicorp/zero';
+import type { AnyCustomQuery, QueryRowType, QueryResultType } from '@rocicorp/zero';
 import type { ContractMap, FieldValue } from './contract';
 import type { ReadSelection } from './react/data';
 import { selectionKey } from './query';
 import { decodeColumn, fail, freeze, object } from './validation';
 
 type NativeQuery = Pick<AnyCustomQuery, 'queryName' | '~'> & ((...args: never[]) => unknown);
+
+export type InferQueryInput<Q extends (...args: never[]) => unknown> = Parameters<Q>[0];
+/** Native Zero rows, including wire-format dates (epoch milliseconds). */
+export type InferQueryResult<Q extends (...args: never[]) => ReturnType<AnyCustomQuery>> = QueryResultType<
+    ReturnType<Q>
+>;
+/** Decoded rows for the optional live-data adapter, not native Zero results. */
+export type InferLiveQueryResult<Q extends { live: (...args: never[]) => { decode: (...args: never[]) => unknown } }> =
+    ReturnType<ReturnType<Q['live']>['decode']>;
 
 type DecodedRow<D extends ContractMap, N extends keyof D & string, R> = R extends undefined
     ? undefined

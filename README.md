@@ -127,9 +127,9 @@ php artisan zero:sync-publication
 
 Generation writes the native schema/metadata, sibling `.queries.ts`, `.mutations.ts`,
 optional `.react.ts`, and matching `bootstrap/zero-{queries,mutations}.php` registries.
-It also writes one module per controller, with named action exports and types such
-as `StoreInput`/`StoreResult`, plus `pages.d.ts` for `Inertia.Pages` types. Page names
-follow component paths: `settings/profile` becomes `Inertia.Pages.Settings.Profile`.
+It also writes one module per controller, with named mutations and native query
+factories grouped by method and prop. Types come from these exports, not a global
+page namespace; consumers own their page props and presentation types.
 The generated file manifest tracks obsolete controller modules for safe removal.
 Deploy these together. `zero:generate --check` detects drift. The editable
 `zero.config.ts` holds public connection options and is never overwritten.
@@ -142,9 +142,11 @@ replaces the client and clears identity-scoped results.
 
 ```tsx
 import { store } from '@/zero/App/Http/Controllers/TaskController';
-import { useControllerMutation } from '@nickwelsh/zero-for-laravel/react';
+import type { index } from '@/zero/App/Http/Controllers/TaskController';
+import { useControllerMutation, type Data } from '@nickwelsh/zero-for-laravel/react';
+import type { InferLiveQueryResult } from '@nickwelsh/zero-for-laravel';
 
-export default function Tasks({ tasks }: Inertia.Pages.Tasks.Index) {
+export default function Tasks({ tasks }: { tasks: Data<InferLiveQueryResult<typeof index.tasks>> }) {
     const create = useControllerMutation(store);
     // Await create(input) for validated authoritative result data.
     return tasks.data.map((task) => <p key={task.id}>{task.title}</p>);
@@ -157,12 +159,20 @@ cursor values retain storage precision rather than being reconstructed from date
 continues to describe serializable Inertia props. Live status distinguishes idle,
 loading, refreshing, success, stale, and failure. Connection state is separate.
 
-For non-Inertia reads, use generated query `actions` with typed public arguments
-and `useData()`. Internal `bindings` consume wire arguments from page metadata.
-For native mutation lifecycle access, obtain a binding from the generated binding
-factory and call `binding.prepare(input, routeArguments)`
-and `zero.mutate(request)`, then observe `.client` and `.server`. A committed result
-decode failure is not a rolled-back write and must not trigger resubmission.
+For native reads, call `zero.run(index.tasks(input))` or pass that same request to
+Zero's `useQuery`. For the optional decoded-data adapter, call
+`useData(index.tasks.live(input))`. Internal `bindings` consume wire arguments from
+page metadata. The generated `.react.ts` exports a schema-typed `useZero` hook.
+For writes, call `zero.mutate(actions[store.action].prepare(input, routeArguments))`
+using `actions` from that same generated provider, then observe `.client` and `.server`.
+Outside React, construct Zero with the `mutators` returned by
+`createControllerMutationBindings(schema, definitions, projections)` and use its
+`actions`. Do not mix bindings from different factory instances.
+`InferQueryInput`/`InferQueryResult` describe native calls; `InferMutationInput` and
+`InferMutationResult` describe business input and decoded authoritative results.
+`InferLiveQueryResult` describes decoded adapter rows (including `Date` values),
+whereas native results retain wire values. A committed result decode failure is
+not a rolled-back write and must not trigger resubmission.
 
 Generated creates use **prepared fields**: UUIDs/ULIDs inferred from Eloquent traits,
 plus timestamps inferred from the model's timestamp settings. The client captures

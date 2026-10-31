@@ -63,7 +63,8 @@ $fixture = new class('export') extends TestCase
         $programs = array_map(fn (string $method): MutationProgram => $compiler->compile(ControllerMutationController::class, $method), ['store', 'complete', 'authoritative', 'noResult', 'explicit', 'structured', 'projected', 'bulk']);
 
         if ($mode === 'public') {
-            $queries = (new ControllerQueryCompiler((new ParserFactory)->createForNewestSupportedVersion(), new ModelRegistry($this->models())))->compile(QueryController::class, 'index');
+            $queryCompiler = new ControllerQueryCompiler((new ParserFactory)->createForNewestSupportedVersion(), new ModelRegistry($this->models()));
+            $queries = [...$queryCompiler->compile(QueryController::class, 'index'), ...$queryCompiler->compile(QueryController::class, 'show'), ...$queryCompiler->compile(QueryController::class, 'dated')];
             $files = (new PublicApiGenerator)->generate($programs, $queries, 'generated');
             $files['generated.mutations.ts'] = "export * from '../../../packages/client/src/controller-mutation.fixture';\n";
             $files['generated.queries.ts'] = (new ControllerQueryGenerator(new ZodSchemaDriver))->typescript($queries, '../generated');

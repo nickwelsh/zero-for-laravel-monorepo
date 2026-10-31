@@ -4,7 +4,9 @@ import { createZeroForLaravel } from '../../packages/client/src/runtime';
 import { toPlain } from '../../packages/client/src/record';
 import { createDomainMutations } from '../../packages/client/src/domain';
 import type { SelectionData } from '../../packages/client/src/query';
-import { useData } from '@nickwelsh/zero-for-laravel/react';
+import { useData, type Data } from '@nickwelsh/zero-for-laravel/react';
+import type { InferLiveQueryResult } from '@nickwelsh/zero-for-laravel';
+import type { index } from './controller-api/ZeroForLaravel/Tests/Fixtures/QueryController';
 import { useMutation } from '../../packages/client/src/react/mutation';
 import {
     useFilter,
@@ -246,10 +248,10 @@ domain.actions.unregistered({});
 const scalarProjection = toPlain({ data: { data: 'scalar' } } as const);
 const scalarData: 'scalar' = scalarProjection.data.data;
 
-function generatedPageTypes(page: Inertia.Pages.Tasks.Index) {
+function generatedPageTypes(page: { heading: string; tasks: Data<InferLiveQueryResult<typeof index.tasks>> }) {
     const title: string = page.tasks.data[0]!.title;
     const heading: string = page.heading;
-    // @ts-expect-error Page names come from Inertia components, and props remain typed.
+    // @ts-expect-error Consumer-owned props remain typed without a global namespace.
     const missing = page.unknown;
     return { title, heading };
 }

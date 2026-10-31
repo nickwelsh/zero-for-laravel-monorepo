@@ -25,17 +25,67 @@ changes isolate subscriptions and local storage; native Zero owns construction
 and cleanup.
 
 ```tsx
-export default function Tasks({ tasks }: Inertia.Pages.Tasks.Index) {
+import type { InferLiveQueryResult } from '@nickwelsh/zero-for-laravel';
+import type { Data } from '@nickwelsh/zero-for-laravel/react';
+import type { index } from '@/zero/App/Http/Controllers/TaskController';
+
+export default function Tasks({ tasks }: { tasks: Data<InferLiveQueryResult<typeof index.tasks>> }) {
     if (tasks.status === 'loading') return <p role="status">Loading tasks…</p>;
     if (tasks.status === 'failure') return <p role="alert">Unable to load tasks.</p>;
     return tasks.data.map((task) => <p key={task.id}>{task.title}</p>);
 }
 ```
 
-`pages.d.ts` declares the global `Inertia.Pages` namespace. Names follow the Inertia
-component path, not the controller: `tasks/index` becomes `Inertia.Pages.Tasks.Index`,
-and `settings/profile` becomes `Inertia.Pages.Settings.Profile`. Include the generated
-directory in your TypeScript project. Normalized name collisions fail generation.
+There is no generated global page namespace. Define page props in your application
+and infer live data from the exported queries. Ordinary props remain application-owned.
+
+## Native Zero access
+
+The generated hook returns the actual, schema-typed Zero instance. Query factories
+produce native requests, usable by `run`, `preload`, `materialize`, or Zero's `useQuery`:
+
+```tsx
+import { useQuery } from '@rocicorp/zero/react';
+import { useZero, actions } from '@/zero/generated.react';
+import { index } from '@/zero/App/Http/Controllers/TaskController';
+import { store } from '@/zero/App/Http/Controllers/TaskController';
+import type {
+    InferQueryInput,
+    InferQueryResult,
+    InferMutationInput,
+    InferMutationResult,
+} from '@nickwelsh/zero-for-laravel';
+
+const zero = useZero(); // Inside a component under ZeroProvider.
+const [tasks] = useQuery(index.tasks({}));
+const rows = await zero.run(index.tasks({}));
+const submission = zero.mutate(actions[store.action].prepare({ title: 'New task' }));
+await submission.client;
+const outcome = await submission.server;
+
+type QueryInput = InferQueryInput<typeof index.tasks>;
+type QueryResult = InferQueryResult<typeof index.tasks>;
+type CreateInput = InferMutationInput<typeof store>;
+type CreateResult = InferMutationResult<typeof store>;
+```
+
+Supply the inputs required by your controller. Native queries preserve wire-format
+values, including numeric timestamps. `index.tasks.live(input)` instead returns the
+selection accepted by `useData`, whose dates are decoded to `Date`. Its row type is
+`InferLiveQueryResult<typeof index.tasks>`. Neither path requires an Inertia page.
+
+Mutation requests must come from the bindings registered with that Zero instance.
+The generated provider exports its `actions` and native `mutators`; applications
+with custom projections obtain both from their `createZeroBindings(projections)`
+result. Outside React, use `createControllerMutationBindings` from `.mutations.ts`
+and pass its `mutators` to `new Zero`. No React lifecycle or global singleton is
+required by that factory. `useZero` follows native lifecycle semantics and must run
+under the initialized provider, not the pre-initialization Inertia shell.
+
+`InferMutationResult` describes the decoded authoritative result. Native `.server`
+returns a success/error envelope; on success, parse its `data` with the action's
+`serverResultSchema`, or use the binding's `execute` helper. Optimistic `.client`
+results can differ from authoritative results.
 
 No per-prop `useQuery` is necessary. Rows and related rows are plain decoded data,
 without a `.data` wrapper or mutation methods. Live objects distinguish loading,

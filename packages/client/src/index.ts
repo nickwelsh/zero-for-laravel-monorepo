@@ -1,5 +1,6 @@
 export { liveQuery } from './live-query';
 export type { LiveQueryResult } from './live-query';
+export type { InferQueryInput, InferQueryResult, InferLiveQueryResult } from './live-query';
 export { createControllerMutations, runControllerMutation } from './controller-mutation';
 export type {
     ControllerMutationContract,
@@ -7,6 +8,8 @@ export type {
     ControllerMutationWire,
     ControllerMutationAction,
     MutationPreparation,
+    InferMutationInput,
+    InferMutationResult,
 } from './controller-mutation';
 export { InputError, encodeDate } from './validation';
 export type {

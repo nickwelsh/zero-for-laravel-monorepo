@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vite-plus/test';
 import { execFileSync } from 'node:child_process';
 import { runInNewContext } from 'node:vm';
-import { createBuilder, defineQueries, defineQuery } from '@rocicorp/zero';
+import { createBuilder, defineQueriesWithType, defineQueryWithType } from '@rocicorp/zero';
 import { handleQueryRequest } from '@rocicorp/zero/server';
 import { asQueryInternals } from '@rocicorp/zero/bindings';
 import { z } from 'zod';
-import ts from 'typescript';
+import { transformSync } from 'esbuild';
 // Version-pinned compatibility oracle: 1.11 canonicalizes condition/relationship
 // order before returning an AST. PHP emits the equivalent unnormalized wire AST.
 import { normalizeAST } from '../../node_modules/@rocicorp/zero/out/zero-protocol/src/ast.js';
@@ -85,11 +85,9 @@ it('executes both generated controller definitions with empty, zero-string, and 
         asQueryInternals(zql.tasks.orderBy('title', 'desc').orderBy('id', 'asc').limit(5)).ast,
     );
     const source = execFileSync('php', ['tests/interop/export.php', 'controller-module'], { encoding: 'utf8' });
-    const compiled = ts.transpileModule(source, {
-        compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
-    });
+    const compiled = transformSync(source, { loader: 'ts', format: 'cjs', target: 'es2022' });
     const modules: Record<string, unknown> = {
-        '@rocicorp/zero': { createBuilder, defineQueries, defineQuery },
+        '@rocicorp/zero': { createBuilder, defineQueriesWithType, defineQueryWithType },
         '@nickwelsh/zero-for-laravel': { liveQuery },
         zod: { z },
         './generated': { schema, definitions },
@@ -97,7 +95,9 @@ it('executes both generated controller definitions with empty, zero-string, and 
     const exported: {
         bindings: Record<string, (args: unknown) => { request(): { args: unknown }; decode(raw: unknown): unknown }>;
     } = { bindings: {} };
-    runInNewContext(compiled.outputText, { require: (name: string) => modules[name], exports: exported });
+    const module = { exports: exported };
+    runInNewContext(compiled.code, { require: (name: string) => modules[name], module });
+    Object.assign(exported, module.exports);
     const binding = exported.bindings[generated.name]!;
     expect(() => binding({ title: '0', user_id: 'other' })).toThrow();
     const selected = binding({ title: '0' });
@@ -111,11 +111,9 @@ it('encodes public Date arguments before constructing native named query request
     const source = execFileSync('php', ['packages/laravel/tests/Fixtures/export-controller-mutations.php', 'queries'], {
         encoding: 'utf8',
     });
-    const compiled = ts.transpileModule(source, {
-        compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
-    });
+    const compiled = transformSync(source, { loader: 'ts', format: 'cjs', target: 'es2022' });
     const modules: Record<string, unknown> = {
-        '@rocicorp/zero': { createBuilder, defineQueries, defineQuery },
+        '@rocicorp/zero': { createBuilder, defineQueriesWithType, defineQueryWithType },
         '@nickwelsh/zero-for-laravel': { liveQuery },
         zod: { z },
         './generated': { schema, definitions },
@@ -123,7 +121,9 @@ it('encodes public Date arguments before constructing native named query request
     const exported: {
         actions: Record<string, (input: { input: { after: Date } }) => { request(): { args: unknown } }>;
     } = { actions: {} };
-    runInNewContext(compiled.outputText, { require: (name: string) => modules[name], exports: exported, Date });
+    const module = { exports: exported };
+    runInNewContext(compiled.code, { require: (name: string) => modules[name], module, Date });
+    Object.assign(exported, module.exports);
     const action = exported.actions['ZeroForLaravel\\Tests\\Fixtures\\QueryController@dated.tasks']!;
     const first = action({ input: { after: new Date('2023-11-14T22:13:20.123Z') } }).request();
     const equivalent = action({ input: { after: new Date('2023-11-14T23:13:20.123+01:00') } }).request();

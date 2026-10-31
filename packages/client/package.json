@@ -50,7 +50,8 @@
         "uuid": "^13.0.0"
     },
     "devDependencies": {
-        "@inertiajs/react": "^3.8.0"
+        "@inertiajs/react": "^3.8.0",
+        "typescript": "^7.0.2"
     },
     "peerDependencies": {
         "@formbraid/core": "^0.1.0",

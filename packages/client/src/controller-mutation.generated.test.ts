@@ -1,11 +1,29 @@
 // @vitest-environment jsdom
 import { Zero, createBuilder } from '@rocicorp/zero';
+import { ZeroContext, useQuery } from '@rocicorp/zero/react';
+import { createElement, type ReactNode } from 'react';
+import { renderHook, waitFor } from '@testing-library/react';
 import { expect, expectTypeOf, it } from 'vite-plus/test';
 import { schema, definitions } from '../../../tests/interop/generated';
 import { createControllerMutationBindings } from './controller-mutation.fixture';
 import type { ClientContext } from './contract';
-import { createZeroBindings } from '../../../tests/interop/controller-react.generated';
-import { projected as projectedAction } from '../../../tests/interop/controller-api/ZeroForLaravel/Tests/Fixtures/ControllerMutationController';
+import { createZeroBindings, useZero } from '../../../tests/interop/controller-react.generated';
+import {
+    projected as projectedAction,
+    store as storeAction,
+} from '../../../tests/interop/controller-api/ZeroForLaravel/Tests/Fixtures/ControllerMutationController';
+import {
+    index,
+    show,
+    dated,
+} from '../../../tests/interop/controller-api/ZeroForLaravel/Tests/Fixtures/QueryController';
+import type {
+    InferQueryInput,
+    InferQueryResult,
+    InferLiveQueryResult,
+    InferMutationInput,
+    InferMutationResult,
+} from './index';
 
 const prefix = 'ZeroForLaravel\\Tests\\Fixtures\\ControllerMutationController@' as const;
 const projections = {
@@ -15,7 +33,7 @@ const projections = {
 it('executes the PHP-generated typed bindings without application-authored codecs', async () => {
     const generated = createZeroBindings(projections);
     expect(generated.ZeroProvider).toBeTypeOf('function');
-    const store = generated.actions[`${prefix}store`];
+    const store = generated.actions[storeAction.action];
     const complete = generated.actions[`${prefix}complete`];
     const noResult = generated.actions[`${prefix}noResult`];
     const authoritative = generated.actions[`${prefix}authoritative`];
@@ -58,6 +76,29 @@ it('executes the PHP-generated typed bindings without application-authored codec
         const { id } = store.clientResultSchema.parse(created.data);
         expect(id).toBe(request.args.prepared.ids.s0);
         expect((await zero.run(createBuilder(schema).tasks.where('id', id).one()))?.done).toBe(false);
+        const queryInput: InferQueryInput<typeof index.tasks> = { title: 'Generated' };
+        const rows: InferQueryResult<typeof index.tasks> = await zero.run(index.tasks(queryInput));
+        expect(rows.map((row) => row.id)).toEqual([id]);
+        expectTypeOf(rows[0]!.created_at).toEqualTypeOf<number | null>();
+        expectTypeOf<InferLiveQueryResult<typeof index.tasks>[number]['created_at']>().toEqualTypeOf<Date | null>();
+        expectTypeOf<InferMutationInput<typeof storeAction>['title']>().toEqualTypeOf<string>();
+        expectTypeOf<InferMutationResult<typeof storeAction>>().toEqualTypeOf<{ id: string }>();
+        const single: InferQueryResult<typeof show.task> = await zero.run(show.task({ task: id }));
+        expect(single?.id).toBe(id);
+        expect(await zero.run(show.task({ task: 'missing' }))).toBeUndefined();
+        // @ts-expect-error Query inputs reject incorrect scalar types at compile time and runtime.
+        expect(() => index.tasks({ title: 42 })).toThrow();
+        const observed = renderHook(() => ({ zero: useZero(), rows: useQuery(index.tasks(queryInput))[0] }), {
+            wrapper: ({ children }: { children: ReactNode }) =>
+                createElement(ZeroContext.Provider, { value: zero }, children),
+        });
+        try {
+            expect(observed.result.current.zero).toBe(zero);
+            expectTypeOf(observed.result.current.zero).toEqualTypeOf<Zero<typeof schema, undefined, ClientContext>>();
+            await waitFor(() => expect(observed.result.current.rows.map((row) => row.id)).toEqual([id]));
+        } finally {
+            observed.unmount();
+        }
 
         const changed = await zero.mutate(complete.prepare({ title: 'Validated' }, { task: id })).client;
         expect(changed).toEqual({ type: 'success', data: { before: false, after: true } });
@@ -141,6 +182,12 @@ it('keyed repeated creation encodes dates before enqueue and preserves identity 
             const rows = await zero.run(createBuilder(schema).tasks.orderBy('title', 'asc'));
             expect(rows).toHaveLength(2);
             expect(rows[0]?.completed_at).toBe(Date.parse('2026-10-01T12:30:00.000Z'));
+            expect(
+                (await zero.run(dated.tasks({ input: { after: new Date('2026-10-01T12:30:00.000Z') } }))).map(
+                    (row) => row.title,
+                ),
+            ).toEqual(['First']);
+            expect(await zero.run(dated.tasks({ input: { after: new Date('2026-10-01T12:30:00.001Z') } }))).toEqual([]);
             const ids = rows.map((row) => row.id);
             if (reverse) expect(ids).toEqual(expected);
             else expected = ids;

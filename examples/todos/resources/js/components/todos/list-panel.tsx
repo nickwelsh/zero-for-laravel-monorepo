@@ -1,4 +1,5 @@
 import { useControllerMutation } from '@nickwelsh/zero-for-laravel/react';
+import type { InferLiveQueryResult } from '@nickwelsh/zero-for-laravel';
 import { Pencil, Trash2 } from 'lucide-react';
 import { useState } from 'react';
 import { toast } from 'sonner';
@@ -8,10 +9,11 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { destroy as destroyList, update as updateList } from '@/zero/App/Http/Controllers/TodoListController';
 import { __invoke as shareList } from '@/zero/App/Http/Controllers/ShareListController';
+import type { index } from '@/zero/App/Http/Controllers/DashboardController';
 import { ListTodos } from './list-todos';
 import { commitMutation } from './mutations';
 
-export type ListRow = Inertia.Pages.Dashboard['lists']['data'][number];
+export type ListRow = InferLiveQueryResult<typeof index.lists>[number];
 
 export function ListPanel({ list, userId }: { list: ListRow; userId: number }) {
     const destroy = useControllerMutation(destroyList, {

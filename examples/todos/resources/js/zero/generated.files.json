@@ -2,5 +2,5 @@
     "App/Http/Controllers/ShareListController.ts",
     "App/Http/Controllers/TodoController.ts",
     "App/Http/Controllers/TodoListController.ts",
-    "pages.d.ts"
+    "App/Http/Controllers/DashboardController.ts"
 ]

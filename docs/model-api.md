@@ -92,8 +92,10 @@ the same discipline, including events on a losing unique insert attempt.
 
 ## React and Inertia own presentation, not transport
 
-Generated `Inertia.Pages` types follow component paths and include ordinary props and injected live
-results. The page resolver adapter removes the need for per-prop query hooks.
+Consumers own page types; no global page namespace is generated. Named query exports
+support native Zero requests and optional decoded live selections. Infer input and
+results with `InferQueryInput`, `InferQueryResult`, and `InferLiveQueryResult`.
+The page resolver adapter removes the need for per-prop query hooks.
 `useLiveProps` exposes the same contract below the page; native Inertia `usePage`
 continues to expose serializable props. No Zero rows enter page history or SSR props.
 
@@ -104,6 +106,6 @@ updates, not already-enqueued writes. A result decode error after commit must no
 cause automatic resubmission.
 
 Deploy generated PHP registrations, schema, query bindings, mutation bindings, and
-page types together. `zero:generate --check` detects drift. Unknown stale action
+controller exports together. `zero:generate --check` detects drift. Unknown stale action
 identities reject explicitly; retaining old queued operation versions is an
 application deployment policy, not silent best-effort execution.
