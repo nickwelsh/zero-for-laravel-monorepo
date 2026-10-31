@@ -24,7 +24,7 @@
         "waku": "1.0.0-rc.3"
     },
     "devDependencies": {
-        "@cloudflare/vite-plugin": "2.0.0-beta.v.1",
+        "@cloudflare/vite-plugin": "2.0.0-beta.v.6",
         "@nickwelsh/refquill": "0.1.0",
         "@types/node": "^26.6.5",
         "cf": "1.0.0-beta.17",
