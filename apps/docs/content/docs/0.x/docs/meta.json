@@ -4,6 +4,7 @@
     "pages": [
         "index",
         "getting-started",
+        "upgrading",
         "models",
         "authorization",
         "queries",

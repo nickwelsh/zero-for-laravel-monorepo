@@ -19,6 +19,24 @@
             "name": "react",
             "tsconfig": "../../tsconfig.json",
             "entryPoints": ["../../packages/client/src/react/index.ts"]
+        },
+        {
+            "language": "typescript",
+            "name": "inertia",
+            "tsconfig": "../../tsconfig.json",
+            "entryPoints": ["../../packages/client/src/react/inertia.tsx"]
+        },
+        {
+            "language": "typescript",
+            "name": "search",
+            "tsconfig": "../../tsconfig.json",
+            "entryPoints": ["../../packages/client/src/search/index.ts"]
+        },
+        {
+            "language": "typescript",
+            "name": "react-search",
+            "tsconfig": "../../tsconfig.json",
+            "entryPoints": ["../../packages/client/src/react/search.tsx"]
         }
     ]
 }

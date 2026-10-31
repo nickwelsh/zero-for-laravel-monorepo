@@ -1,10 +1,16 @@
 # Zero for Laravel: Query Design
 
-Status: agreed architectural direction; implementation has not started.
+Status: historical design baseline, implemented in the v0.5 controller-first release.
 
 This document specifies the query side of the proposed controller-first Zero integration. It records the intended developer experience, ownership boundaries, generated contracts, runtime behavior, and requirements for proving compatibility.
 
-Examples describe the target API. Methods such as `zeroQuery()`, generated imports, helper names, metadata field names, and generated type namespaces are illustrative unless explicitly identified as an existing upstream API. They are not claims that this sketch application currently implements them. Example model fields and relationships describe a representative application, not the current database schema.
+This document records the original design, not the current API reference. Examples
+and acceptance requirements below retain their original proposed spellings.
+In particular, Zero does not generate a global page namespace: applications own
+their types, or opt into Wayfinder's page generator. Current native query factories,
+decoded `QueryData` props, editable FormRequest inputs, URL synchronization, and
+supported constraints are documented in [the contract guide](model-api.md) and
+[the React guide](../apps/docs/content/docs/0.x/docs/react.mdx).
 
 ## 1. Agreed decisions
 

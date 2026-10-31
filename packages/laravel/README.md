@@ -2,15 +2,21 @@
 
 Controller-first live queries and mutations for Rocicorp Zero **1.11.3**.
 
-This is an unreleased pre-alpha rewrite. Use the matching Composer path and pnpm
-workspace revisions; registry releases do not contain this code. PHP 8.3+, Laravel
-12/13, and PostgreSQL with logical replication are required targets.
+Use **v0.5.0** with the matching npm package. This is a breaking replacement for
+the v0.4 model-centric API; migrate controllers and regenerate all contracts before
+deploying. PHP 8.3+, Laravel 12/13, and PostgreSQL 15+ with logical replication are
+required targets. Automatic live page props require Inertia Laravel 3 and the
+optional JavaScript Inertia adapter.
 
 Controllers declare immutable `Model::zeroQuery()` live props and explicitly opt
 actions into `#[ZeroMutation]`. Ranger/Surveyor-backed generation emits coordinated
-PHP registrations, native ZQL/mutators, validation schemas, result codecs, and page
-types. Laravel retains real binding, middleware, FormRequests, Gates, and Eloquent.
+PHP registrations, native ZQL/mutators, validation schemas, result codecs, and
+named controller modules. Laravel retains real binding, middleware, FormRequests, Gates, and Eloquent.
 Zero retains replication, optimistic replay, ordering, and durable mutation results.
+
+Zero does not generate global page types. Optionally register
+`ZeroForLaravel\WayfinderServiceProvider` with Wayfinder `dev-next` to specialize
+its own generated live props; run Zero generation before Wayfinder generation.
 
 ```sh
 php artisan vendor:publish --tag=zero-config

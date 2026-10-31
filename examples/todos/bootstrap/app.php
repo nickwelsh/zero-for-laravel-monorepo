@@ -15,11 +15,6 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware): void {
-        // The orb's single-origin proxy forwards HTTPS to the local HTTP server.
-        if (env('APP_ENV') === 'local' && env('TODOS_ORB_PROXY', false)) {
-            $middleware->trustProxies(at: ['127.0.0.1', '::1']);
-        }
-
         $middleware->validateCsrfTokens(except: ['zero/query', 'zero/mutate']);
         $middleware->encryptCookies(except: ['appearance', 'sidebar_state']);
 

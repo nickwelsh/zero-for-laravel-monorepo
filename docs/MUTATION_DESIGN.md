@@ -1,10 +1,16 @@
 # Zero for Laravel: Mutation Design
 
-Status: architectural design baseline; implementation has not started. Public API spellings and the implementation questions in section 17 remain open.
+Status: historical design baseline, implemented in the v0.5 controller-first release.
 
 This document specifies controller-first mutations for the proposed Zero integration. It complements [QUERY_DESIGN.md](QUERY_DESIGN.md) and incorporates the discussion of simple person creation, conditional related writes, and the transactional issue-assignment example from Zero's zbugs application.
 
-Examples describe target behavior. Attributes such as `ZeroMutation` and `ZeroShared`, mutation context methods, generated imports, and configuration syntax are illustrative, not existing APIs in this sketch application. Example models, fields, enum cases, policies, and relationships describe representative application code. They are not assertions about this application's current schema.
+This document preserves the original proposals and acceptance requirements, not
+the current API spellings or an unfinished implementation checklist. See
+[the contract guide](model-api.md) and
+[the mutation guide](../apps/docs/content/docs/0.x/docs/mutations.mdx) for the shipped
+attributes, prepared-field overrides, named controller imports, bounded keyed
+loops, result contracts, and transaction limitations. Examples below use
+representative application models rather than the todos schema.
 
 ## 1. Decisions and scope
 

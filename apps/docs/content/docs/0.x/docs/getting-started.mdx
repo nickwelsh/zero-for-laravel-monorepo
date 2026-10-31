@@ -1,21 +1,36 @@
 ---
 title: Getting started
-description: Run the controller-first pre-alpha packages and example.
+description: Install v0.5 and generate controller-first queries and mutations.
 ---
 
-This is an **unreleased, breaking pre-alpha rewrite**. Published v0.4 packages
-do not contain this design. Use matching Composer path and pnpm workspace
-revisions from the monorepo, as configured in `examples/todos`.
+**v0.5.0 replaces the v0.4 model-centric API.** Read the
+[upgrade guide](./upgrading.mdx) before updating an existing application.
+Use matching Composer and npm versions and deploy their generated output together.
 
 - PHP 8.3+, Laravel 12/13, PDO PostgreSQL, and PostgreSQL 15+ with logical replication.
 - Native Zero client and cache **1.11.3**, pinned together.
-- React 18/19 and Inertia for automatic live page props.
+- React 18/19, Inertia Laravel 3, and `@inertiajs/react` ^3.8.0 for automatic live page props.
+- Node 22.18+ on the 22.x line or 24.11+, and a TypeScript 7-compatible toolchain.
+
+In an existing Laravel application:
+
+```sh
+composer require nickwelsh/zero-for-laravel:^0.5.0
+pnpm add @nickwelsh/zero-for-laravel@^0.5.0 @rocicorp/zero@1.11.3
+```
+
+For Inertia pages, install `inertiajs/inertia-laravel:^3.0` and
+`@inertiajs/react@^3.8.0` if they are not already present. Native Zero queries and
+mutations do not require the Inertia adapter. Wayfinder is optional; its
+`dev-next` integration is not a dependency of the production Composer package.
 
 The [shared todos example](https://github.com/nickwelsh/zero-for-laravel-monorepo/tree/main/examples/todos)
 contains installation commands, migrations, authentication, sharing, and the local
 Composer/pnpm wiring. Its application requires PHP 8.4.1+.
 
-In an application using these workspace packages:
+Configure Laravel's PostgreSQL connection and migrate the application's tables.
+Define each participating model's visibility and add `HasZeroQueries`, then declare
+queries and mutations on registered controller routes. Generate against that database:
 
 ```sh
 php artisan vendor:publish --tag=zero-config
@@ -25,6 +40,11 @@ php artisan zero:sync-publication --dry-run
 
 Review the publication before applying it. Never expose the private cache API key
 to the browser. Authenticate end users independently of the cache.
+
+Apply the reviewed publication with `php artisan zero:sync-publication`, configure
+the [cache and authentication boundary](./replication.mdx#configure-zero-cache),
+and set the public cache URL in the generated editable `zero.config.ts`.
+For local startup and diagnostics, see [local development](./local-development.mdx).
 
 Define [model visibility](./models.mdx), declare [controller queries](./queries.mdx),
 and register [controller mutations](./mutations.mdx). Install the

@@ -115,6 +115,13 @@ controller actions are imported from `@/wayfinder/routes` and `@/wayfinder/App/.
 The Vite plugin generates Zero contracts before Wayfinder; `pnpm zero:generate`
 does the same with a fresh Wayfinder analysis.
 
+The generated dashboard live prop uses `QueryData<typeof index.lists>` from the
+Zero controller module. Its `inputs.values.status` and `inputs.options.status`
+come from `DashboardRequest` and `TodoStatus`. Changing the status filter calls
+`lists.inputs.set` and resubscribes without an Inertia server visit; the adapter
+maps that field to the URL with replace-history semantics. The filter changes
+related todos while keeping lists visible, including lists with no matching todos.
+
 Dashboard, profile, and security use `Inertia.Pages` from `@/wayfinder/types`.
 Shared props and user models also come from Wayfinder, without handwritten global
 page overrides. Authenticated pages assert the user guaranteed by their route
@@ -191,7 +198,7 @@ Revocation/invitations and richer sharing management are outside this example.
 From `examples/todos`:
 
 ```sh
-php artisan test --compact
+APP_KEY="$(php -r 'echo "base64:".base64_encode(random_bytes(32));')" php artisan test --compact
 php vendor/bin/phpstan analyse --no-progress
 php vendor/bin/pint --test
 pnpm check
@@ -200,6 +207,8 @@ pnpm build
 php artisan zero:generate --check
 ```
 
+The test command supplies an ephemeral encryption key without changing `.env` or
+the demo's separate launcher credentials. A configured local `APP_KEY` also works.
 Tests use in-memory SQLite, never the local application database. PHP tests cover
 shared CRUD, owner-only list deletion/sharing, outsiders, validation, destination
 access, duplicate shares, cascade deletion, and generated query authorization.

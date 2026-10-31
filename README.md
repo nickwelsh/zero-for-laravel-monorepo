@@ -4,11 +4,18 @@ Controller-first live queries and mutations for [Rocicorp Zero](https://zero.roc
 Laravel owns validation, binding, authorization, and authoritative writes. Zero owns
 replication, subscriptions, optimistic transactions, replay, and mutation outcomes.
 
-**Pre-alpha, unreleased, and intentionally breaking.** Use matching revisions of
-`packages/laravel` and `packages/client` through Composer path and pnpm workspace
-dependencies. Registry releases do not contain this rewrite. Both the client and
-zero-cache must use **1.11.3**. PHP 8.3+, Laravel 12/13, PostgreSQL 15+ with logical
-replication, and React 18/19 are supported targets.
+**v0.5.0 is a breaking controller-first release.** Install matching versions of
+`nickwelsh/zero-for-laravel` and `@nickwelsh/zero-for-laravel`. Both the Zero client
+and zero-cache must use **1.11.3**. PHP 8.3+, Laravel 12/13, PostgreSQL 15+ with
+logical replication, and React 18/19 are supported targets. Automatic live page
+props require Inertia 3 (the React adapter requires `@inertiajs/react` ^3.8.0).
+See the [upgrade guide](apps/docs/content/docs/0.x/docs/upgrading.mdx) before
+upgrading a v0.4 application; this is not a drop-in update.
+
+```sh
+composer require nickwelsh/zero-for-laravel:^0.5.0
+pnpm add @nickwelsh/zero-for-laravel@^0.5.0 @rocicorp/zero@1.11.3
+```
 
 The [shared todos example](examples/todos/README.md) is a complete application with
 authentication, shared/private lists, controller mutations, and live Inertia props.
@@ -150,10 +157,9 @@ replaces the client and clears identity-scoped results.
 ```tsx
 import { store } from '@/zero/App/Http/Controllers/TaskController';
 import type { index } from '@/zero/App/Http/Controllers/TaskController';
-import { useControllerMutation, type Data } from '@nickwelsh/zero-for-laravel/react';
-import type { InferLiveQueryResult } from '@nickwelsh/zero-for-laravel';
+import { useControllerMutation, type QueryData } from '@nickwelsh/zero-for-laravel/react';
 
-export default function Tasks({ tasks }: { tasks: Data<InferLiveQueryResult<typeof index.tasks>> }) {
+export default function Tasks({ tasks }: { tasks: QueryData<typeof index.tasks> }) {
     const create = useControllerMutation(store);
     // Await create(input) for validated authoritative result data.
     return tasks.data.map((task) => <p key={task.id}>{task.title}</p>);
@@ -165,6 +171,12 @@ cursor values retain storage precision rather than being reconstructed from date
 `useLiveProps<YourPage>()` exposes injected props to descendants; upstream `usePage()`
 continues to describe serializable Inertia props. Live status distinguishes idle,
 loading, refreshing, success, stale, and failure. Connection state is separate.
+
+Live props expose `inputs.values`, finite `inputs.options`, `inputs.set(partial)`,
+and `inputs.reset()` for their FormRequest fields. Changes validate and resubscribe
+without a server visit, resetting pagination. Route bindings and trusted context
+are not editable. URL/history synchronization is opt-in; see the
+[React guide](apps/docs/content/docs/0.x/docs/react.mdx#editable-live-inputs).
 
 For native reads, call `zero.run(index.tasks(input))` or pass that same request to
 Zero's `useQuery`. For the optional decoded-data adapter, call
@@ -206,11 +218,14 @@ development. `zero.sync_publication_on_migrate` can synchronize successful migra
 batches. Ordinary migrations do not require deleting the cache replica. Full database
 resets require stopping the cache and rebuilding its disposable replica.
 
-## Verification
+## Development and verification
 
 ```sh
 composer --working-dir=packages/laravel install
+composer --working-dir=examples/todos install
 pnpm install --frozen-lockfile
+php examples/todos/artisan wayfinder:generate --fresh
+pnpm --filter @nickwelsh/zero-for-laravel build
 pnpm check
 ZERO_TEST_PG_DATABASE=laravel_zero_test pnpm php:test
 pnpm test:integration
@@ -219,6 +234,9 @@ pnpm test:integration
 PostgreSQL tests require a disposable test database. The native integration suite
 starts a real cache and tests replication, optimistic reconciliation, authorization,
 identity changes, and persisted-result recovery after a deliberately lost response.
-See [architecture](docs/architecture.md) and [contract details](docs/model-api.md).
+The example and its tools require PHP 8.4.1+; use PHP 8.5 for the full workspace.
+See [workspace tooling](docs/tooling.md) for database setup, supervised orb services,
+API regeneration, and release procedures, and [contract details](docs/model-api.md)
+for the public runtime boundary.
 
 MIT licensed.

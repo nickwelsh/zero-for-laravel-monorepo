@@ -24,8 +24,9 @@ pnpm docs:start
 Production preview: [localhost:8080/zero-for-laravel/](http://localhost:8080/zero-for-laravel/).
 Build and dev regenerate the API reference automatically. Commit
 `generated/api.json` after API source changes; never edit or reformat it manually.
-Refquill reads PHP from `packages/laravel/src` and TypeScript from the public core
-and React entry points. All paths in `refquill.json` resolve relative to this directory.
+Refquill reads PHP from `packages/laravel/src` and TypeScript from the public core,
+React, Inertia, and optional search entry points. All paths in `refquill.json` resolve
+relative to this directory.
 
 Authored guides live under `content/docs/0.x/docs`. Version and section navigation
 come from `meta.json`. The generated reference is mounted at

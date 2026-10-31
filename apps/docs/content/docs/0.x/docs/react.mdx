@@ -25,11 +25,10 @@ changes isolate subscriptions and local storage; native Zero owns construction
 and cleanup.
 
 ```tsx
-import type { InferLiveQueryResult } from '@nickwelsh/zero-for-laravel';
-import type { Data } from '@nickwelsh/zero-for-laravel/react';
+import type { QueryData } from '@nickwelsh/zero-for-laravel/react';
 import type { index } from '@/zero/App/Http/Controllers/TaskController';
 
-export default function Tasks({ tasks }: { tasks: Data<InferLiveQueryResult<typeof index.tasks>> }) {
+export default function Tasks({ tasks }: { tasks: QueryData<typeof index.tasks> }) {
     if (tasks.status === 'loading') return <p role="status">Loading tasks…</p>;
     if (tasks.status === 'failure') return <p role="alert">Unable to load tasks.</p>;
     return tasks.data.map((task) => <p key={task.id}>{task.title}</p>);
@@ -61,10 +60,8 @@ props, and output file. There is no second declaration or global type override.
 For example, its dashboard prop becomes:
 
 ```typescript
-lists: import('@nickwelsh/zero-for-laravel/react').Data<
-    import('@nickwelsh/zero-for-laravel').InferLiveQueryResult<
-        (typeof import('@/zero/App/Http/Controllers/DashboardController'))['index']['lists']
-    >
+lists: import('@nickwelsh/zero-for-laravel/react').QueryData<
+    (typeof import('@/zero/App/Http/Controllers/DashboardController'))['index']['lists']
 >;
 ```
 
@@ -80,6 +77,60 @@ Relative module roots resolve from Wayfinder's generated `types.d.ts`, not from
 your PHP configuration file. Regenerate Zero whenever declarations change, and use
 `zero:generate --check` in CI to catch stale registrations. This integration uses
 the current `dev-next` converter API; an upstream breaking change may require an update.
+
+## Editable live inputs
+
+The page adapter adds `inputs` to each injected live prop. Its `values` are the
+controller FormRequest's validated fields, not route bindings or trusted context:
+
+```tsx
+import type { QueryData } from '@nickwelsh/zero-for-laravel/react';
+import type { index } from '@/zero/App/Http/Controllers/DashboardController';
+
+export default function Dashboard({ lists }: { lists: QueryData<typeof index.lists> }) {
+    return (
+        <select
+            value={lists.inputs.values.status ?? 'all'}
+            onChange={(event) => {
+                const status = lists.inputs.options.status.find((value) => value === event.target.value);
+                if (status !== undefined) lists.inputs.set({ status });
+            }}
+        >
+            {lists.inputs.options.status.map((status) => (
+                <option key={status}>{status}</option>
+            ))}
+        </select>
+    );
+}
+```
+
+This example assumes the status rule shown in [query inputs](./queries.mdx#formrequest-inputs).
+`set(partial)` shallow-merges; `set(current => partial)` uses the latest values.
+Undefined removes an optional field; null requires a nullable rule. Invalid patches
+throw before changing the subscription. Input changes reset pagination, and
+`reset()` restores the page's initial inputs. Partial visits omitting a live
+binding preserve local inputs; a replacement binding supplies new inputs.
+Queries without a FormRequest have empty inputs and reject nonempty patches.
+Date inputs use canonical JSON strings.
+
+Resubscription does not make an Inertia request or change the URL by default.
+To preserve chosen scalar filters in client-side history, opt in per component,
+prop, and field (component names match `Inertia::render`):
+
+```ts
+const livePages = createInertiaAdapter(bindings, {
+    url: { dashboard: { lists: { status: 'status' } } },
+    history: 'replace', // Use 'push' for back/forward filter navigation.
+});
+```
+
+Only mapped fields enter the URL: undefined removes the parameter, null becomes
+an empty value, and booleans use `1`/`0`. Nested objects/lists cannot be mapped.
+Inertia history stores serializable bindings, never live rows. Reloads go through
+Laravel's FormRequest again; normalize numeric and boolean URL strings there.
+`InferLiveQueryInputs` and `InferLiveQueryOptions` infer individual contracts.
+`QueryData` includes both decoded rows and editable inputs; `Data` alone describes
+the read-only `useData` result. Native calls still pass their inputs explicitly.
 
 ## Native Zero access
 

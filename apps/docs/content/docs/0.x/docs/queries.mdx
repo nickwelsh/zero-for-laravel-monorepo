@@ -42,3 +42,40 @@ injects its live value into the component; ordinary props remain ordinary props.
 Generation supports a checked PHP subset around query declarations. Unknown calls,
 unsupported control flow, or ambiguous output fail with source diagnostics. It
 does not run arbitrary controllers to guess what queries they might return.
+
+## FormRequest inputs
+
+Use a FormRequest for editable filters. A finite rule becomes both a literal
+TypeScript union and a readonly options list on the injected live prop:
+
+```php
+// DashboardRequest
+public function rules(): array
+{
+    return ['status' => ['sometimes', 'string', \Illuminate\Validation\Rule::in(['all', 'active', 'completed'])]];
+}
+
+// DashboardController
+public function index(DashboardRequest $request): \Inertia\Response
+{
+    $values = $request->validated();
+    $lists = TodoList::zeroQuery()->related('todos');
+    if (isset($values['status']) && $values['status'] !== 'all') {
+        $lists = TodoList::zeroQuery()->related('todos', fn ($todos) => $todos
+            ->where('completed', $values['status'] === 'completed'));
+    }
+
+    return \Inertia\Inertia::render('dashboard', ['lists' => $lists->orderBy('name', 'asc')->infinite(25)]);
+}
+```
+
+Direct `Rule::enum(BackedEnum::class)`, static `Rule::in([...])`, and string `in:`
+rules supply finite options. Chained enum restrictions and dynamic option lists
+are not inferred; use an explicit static list when needed. Options are values,
+not translated labels. Laravel remains authoritative for authorization, validation,
+and request preparation on each transform.
+
+The [React adapter](./react.mdx#editable-live-inputs) exposes `inputs.values`,
+`inputs.options`, `inputs.set`, and `inputs.reset`. Only FormRequest business
+inputs are editable; route bindings and identity context remain fixed. Generated
+native requests still accept the full declared route/request input contract.

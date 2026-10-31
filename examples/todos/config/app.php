@@ -28,6 +28,9 @@ return [
 
     'env' => env('APP_ENV', 'production'),
 
+    // Trust the loopback demo proxy only when explicitly enabled in a local app.
+    'orb_proxy' => (bool) env('TODOS_ORB_PROXY', false),
+
     /*
     |--------------------------------------------------------------------------
     | Application Debug Mode

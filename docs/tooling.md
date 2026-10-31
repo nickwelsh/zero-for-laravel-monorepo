@@ -1,249 +1,192 @@
-# Workspace tooling
+# Workspace development and releases
 
-The repository root owns workspace tooling and cross-language contract tests.
-`packages/laravel` owns the `nickwelsh/zero-for-laravel` Composer package, its source,
-configuration, tests and PHP tools. `packages/client` owns the
-`@nickwelsh/zero-for-laravel` npm package and its core and React exports.
+The monorepo is the source of truth. `packages/laravel` owns the Composer library,
+PHP generation/runtime, and Pest tests. `packages/client` owns the native Zero,
+React, and Inertia exports. `tests/interop` checks PHP/TypeScript agreement;
+`tests/integration` runs a real cache. `examples/todos` is the shared application.
+`apps/docs` owns authored MDX, site configuration, and generated API JSON; docs-base
+owns the Waku/Fumadocs rendering application.
 
-`apps/docs` uses [`@nickwelsh/docs-base`](https://github.com/nickwelsh/docs-base)
-for the shared Waku/Fumadocs application. It owns site configuration, v0.x guides,
-and Refquill-generated PHP and TypeScript references. Run `pnpm docs:dev` at
-`http://localhost:3000/zero-for-laravel/`, or `pnpm docs:build` followed by
-`pnpm docs:start` for a production preview at `http://localhost:8080/zero-for-laravel/`.
-Both dev and build regenerate the API reference. `pnpm docs:generate` regenerates
-it independently; commit `apps/docs/generated/api.json` after source changes.
-The Waku patch supplied by docs-base is registered in the root workspace config.
-See [the site README](../apps/docs/README.md) for content and hosting configuration.
+## Install the full workspace
 
-## npm releases
+Use PHP **8.5** for development across both Composer projects. The library supports
+PHP 8.3+ and Laravel 12/13, with its Composer platform pinned to PHP 8.3. The example
+requires PHP 8.4.1+ and Pest 5. Use Node 22.18+ on the 22.x line or 24.11+, the
+`packageManager` version of pnpm (**11.24.0**), and the locked TypeScript 7 toolchain.
+Pin Zero client and cache to **1.11.3**.
 
-`Publish npm` (`.github/workflows/publish-npm.yml`) stages the client when a
-GitHub Release is published. It runs CI, builds the package, checks exports, and
-uses `npm stage publish` with npm provenance and OIDC. No `NPM_TOKEN` or
-`NODE_AUTH_TOKEN` secret is required.
-
-The bootstrap package `@nickwelsh/zero-for-laravel@0.0.0-placeholder.0` contains only
-`package.json` and uses the `bootstrap` dist-tag. It reserves the package name for
-trusted publishing and is not an installable client release. Stable releases use
-the `latest` tag, starting with **0.1.0**; installation guides use the unversioned
-package name to select that tag.
-
-Create the GitHub environment `npm`. In the npm package's trusted-publisher
-settings, choose GitHub Actions and use these exact values:
-
-| Field                | Value                       |
-| -------------------- | --------------------------- |
-| Organization or user | `nickwelsh`                 |
-| Repository           | `zero-for-laravel-monorepo` |
-| Workflow filename    | `publish-npm.yml`           |
-| Environment name     | `npm`                       |
-| Allowed action       | Allow `npm stage publish`   |
-
-Allow staged publishing only; disable direct publishing for this trusted
-publisher. See [npm trusted publishing](https://docs.npmjs.com/trusted-publishers/).
-The publishing job declares `contents: read` and `id-token: write`; the repository's
-default workflow permissions can remain read-only. Repository Admin access is
-needed for initial environment and secret setup; package-owner access is used to
-configure npm. Do not grant an admin token to the publish job.
-
-The client package version is `0.4.0`. To release, set the version in
-`packages/client/package.json` and publish a matching GitHub Release tagged
-`v<version>` (for example `v0.4.0`) from `main`. Stable releases
-publish to `latest`; prerelease versions (for example `0.2.0-beta.1`) must be marked
-as GitHub prereleases and use `next`.
-
-After CI stages a version, review it in npm and approve it with your package-owner
-account and 2FA. From an authenticated local npm CLI, use
-`npm stage list @nickwelsh/zero-for-laravel`, `npm stage view <stage-id>` (or
-`npm stage download <stage-id>`), then `npm stage approve <stage-id>`. CI never
-approves staged packages. The PHP mirror tag is published after CI; docs wait
-until the approved stable version is publicly available as npm's `latest`.
-If approval takes longer than one hour, use **Re-run failed jobs** on the release
-workflow after approval. Successful staging and mirror jobs are not rerun.
-Prereleases do not replace production docs. Main-branch CI continues validating
-the docs build without deploying it.
-
-## Dependency maintenance
-
-`.github/dependabot.yml` schedules weekly updates for the complete pnpm workspace,
-both Composer projects, and GitHub Actions. Vite tooling and the docs framework
-dependencies are grouped for compatibility review. Dependabot security updates
-are enabled on the source repository; dependency PRs still require review and CI.
-
-`pnpm-workspace.yaml` contains targeted security overrides where upstream
-dependencies still pin vulnerable releases. Remove each override once its owner
-adopts a fixed version. These overrides protect this workspace; npm consumers
-manage their own Zero peer dependency and its transitive dependencies.
-
-The library's Composer manifest excludes PHPStan 2.3.4: with Rector 2.8.2,
-its PHPDoc parser passes a `FullyQualifiedNameNode` to a constructor expecting
-`IdentifierTypeNode`, crashing `rector:check`. PHPStan 2.3.3 passes the same check.
-This exact-version conflict also applies to CI's fresh Composer updates; remove
-it after verifying a compatible upstream release.
-
-Run `pnpm audit` and `composer audit` in both Composer directories when reviewing
-updates. The npm audit also reports GHSA-vfj7-8cjw-p6xm in `braces` 3.0.3, which
-has no published fix and no upstream fix planned. It affects deeply nested glob
-patterns in development lint tooling. This repository supplies checked-in glob
-patterns, without taking patterns from application users. This is an accepted
-development-tooling risk for that trusted input; reassess if glob patterns ever
-come from untrusted sources.
-
-## Composer distribution
-
-The PHP package is named `nickwelsh/zero-for-laravel`. Its current `composer.json` is
-under `packages/laravel`; Packagist.org requires it at the repository root.
-See [Packagist's package requirements](https://packagist.org/about).
-
-The source of truth is `nickwelsh/zero-for-laravel-monorepo`. The public
-`nickwelsh/zero-for-laravel` repository is an automated subtree split of
-`packages/laravel`; never edit the mirror directly. Its README sends contributors
-and issues back to the monorepo.
-
-`Sync PHP mirror` (`.github/workflows/sync-php.yml`) updates the mirror's `main`
-branch after CI passes on the latest monorepo `main`. It can also be run manually.
-The npm release workflow calls the same workflow after CI passes to publish the
-matching release tag to the mirror. Pushes never force-update branches or tags.
-
-The repository secret `PHP_MIRROR_SSH_KEY` contains a deploy key with write access
-only to the PHP mirror. The normal `GITHUB_TOKEN` cannot push to another repository.
-Development files and the lockfile remain in mirror history but are excluded from
-Composer distribution archives by `packages/laravel/.gitattributes`.
-
-Submit `https://github.com/nickwelsh/zero-for-laravel` to Packagist.org as
-`nickwelsh/zero-for-laravel`, then enable Packagist's GitHub hook for that mirror.
-Packagist discovers versions from its tags; do not add a Composer `version` field.
-The PHP package and npm package share release tags from the monorepo. Neither
-publishing workflow changes package versions automatically.
-
-## Development checks
-
-Use PHP 8.3+, Composer, Node 22.18+ (22.x) or 24.11+, and the pinned pnpm version. The
-Composer platform is pinned to PHP 8.3 so development dependencies remain usable
-on the minimum supported runtime. Laravel 12 and 13 are tested in CI.
+From the repository root:
 
 ```sh
 composer --working-dir=packages/laravel install
+composer --working-dir=examples/todos install
 pnpm install --frozen-lockfile
+php examples/todos/artisan wayfinder:generate --fresh
+pnpm --filter @nickwelsh/zero-for-laravel build
 pnpm check
 ```
 
-`pnpm check` checks formatting, lint, PHPStan, Rector, spelling, TypeScript, Pest,
-frontend tests, generated-contract drift, the build, and package export isolation.
-Set `ZERO_TEST_PG_DATABASE=laravel_zero_test` to include PostgreSQL tests. The
-database must be empty and disposable. CI always supplies it. Do not run two PHP
-test suites against the same database concurrently.
+The example's ignored Wayfinder imports must exist before root TypeScript checks.
+Its Vite plugin generates Zero before Wayfinder during app builds. After changing
+controllers/models, regenerate Zero against the migrated application database
+before generating Wayfinder; see [the example](../examples/todos/README.md).
+Do not reformat generated Zero or Wayfinder files.
 
-| Command                        | Purpose                                                          |
-| ------------------------------ | ---------------------------------------------------------------- |
-| `pnpm format` / `format:check` | Oxfmt for workspace files and Pint for PHP                       |
-| `pnpm lint`                    | Apply frontend fixes and Markdown fixes                          |
-| `pnpm lint:check`              | Frontend, Markdown, PHPStan, Rector dry run and Peck             |
-| `pnpm typecheck`               | Strict TypeScript checking for package contracts and docs        |
-| `pnpm test`                    | Vite+ tests, including React and PHP/native Zero AST comparisons |
-| `pnpm php:test`                | Pest with Testbench and optional PostgreSQL integration tests    |
-| `pnpm php:rector`              | Apply PHP 8.3 / Laravel 12-compatible Rector changes             |
-| `pnpm build`                   | Vite+ library packaging and Waku documentation build             |
-| `pnpm contracts:check`         | Verify generated TypeScript matches PHP model metadata           |
-| `pnpm package:check`           | Verify built exports and load the core with React blocked        |
+## Checks and cross-language fixtures
 
-Coverage is opt-in locally:
+`pnpm check` runs workflow validation, formatting, frontend/Markdown lint, PHPStan
+level 10, Rector dry run, Peck, TypeScript, Pest, frontend tests, generated-contract
+drift, library/docs builds, and package-export isolation. CI runs PHP 8.3/Laravel 12,
+PHP 8.3/Laravel 13, and PHP 8.5/Laravel 13. The PHP 8.3/Laravel 13 job also runs the
+real-cache integration suite, coverage, and the docs deployment dry run.
+
+| Command                             | Purpose                                                        |
+| ----------------------------------- | -------------------------------------------------------------- |
+| `pnpm format` / `pnpm format:check` | Oxfmt and Pint                                                 |
+| `pnpm lint:check`                   | Frontend/Markdown lint, PHPStan, Rector, Peck                  |
+| `pnpm typecheck`                    | Package, example, interop, and docs TypeScript contracts       |
+| `pnpm php:test`                     | Testbench/Pest and optional PostgreSQL scenarios               |
+| `pnpm test`                         | Native ZQL comparisons, mutations, React, Inertia, and interop |
+| `pnpm contracts:check`              | Exact generated PHP/TypeScript fixture agreement               |
+| `pnpm test:integration`             | Disposable PostgreSQL/Laravel/Zero integration                 |
+| `pnpm build`                        | Client package and production docs                             |
+| `pnpm package:check`                | Built exports, optional-peer isolation, native entry points    |
+
+When deliberately changing a generated contract, regenerate its fixture from PHP.
+`scripts/check-generated.mjs` lists the authoritative exporters and destinations;
+never hand-edit expected generated bytes. The public controller modules and native
+mutator/query fixtures are checked as well as model metadata. Keep regression tests
+at the public runtime boundary, not compiler implementation details.
+
+PostgreSQL feature tests are opt-in outside CI. Create an empty disposable database
+named `laravel_zero_test` or `laravel_zero_test_*` and set `ZERO_TEST_PG_DATABASE`.
+Optional `ZERO_TEST_PG_HOST`, `ZERO_TEST_PG_PORT`, `ZERO_TEST_PG_USER`, and
+`ZERO_TEST_PG_PASSWORD` select the connection. Install `pdo_pgsql`, `psql`, and
+`lsof`. The feature harness refuses an existing application schema. Run PHP suites
+serially; they own fixtures in the same test database.
+
+The live suite additionally needs logical replication and a PostgreSQL role able to
+create/drop its uniquely named disposable database. It owns its app ID, publication,
+ports, and temporary replica. It checks callback authentication, large transform
+batches, visibility, upstream updates, sorting, identity changes, optimistic
+reconciliation, and persisted result recovery after a committed response is lost.
+It never resets the example database or a shared application cache.
+
+Coverage is separate from the regular check:
 
 ```sh
 pnpm test:coverage
 XDEBUG_MODE=coverage pnpm php:test:coverage
 ```
 
-Frontend reports go to `coverage/client`; PHP reports go to
-`packages/laravel/coverage`. PHP needs Xdebug or PCOV. Include PostgreSQL when
-measuring the full suite. CI saves both reports. There is no artificial 100%
-coverage or type-coverage gate; behavior tests and level-10 analysis are required.
+Reports live in `coverage/client` and `packages/laravel/coverage`. PHP coverage
+needs Xdebug or PCOV. Include PostgreSQL to measure its integration branches.
 
-## Amp orbs
+## Docs and API generation
 
-The executable `.agents/setup` installs PHP 8.5 and its extensions, Composer,
-the pinned pnpm version, both Composer projects (including development tools),
-and the locked pnpm workspace. It keeps a compatible preinstalled Node runtime
-or installs Node 24. It also generates the example's ignored Wayfinder imports
-and builds the client package so workspace exports resolve immediately.
-Amp snapshots these dependencies; warm setup checks the lockfiles without
-redownloading unchanged packages. Setup can be rerun from the repository root.
+Edit guides under `apps/docs/content/docs/0.x/docs` and list new guides in its
+`meta.json`. Historical query/mutation design documents record proposals; the
+authored guides and generated reference describe the released API.
 
-PostgreSQL runs under systemd, with logical replication enabled and durability
-disabled for disposable orb data. Only loopback connections as the `postgres`
-test role use passwordless authentication. Repository-scoped login shells default
-`ZERO_TEST_PG_DATABASE` to `laravel_zero_test`, `ZERO_TEST_PG_HOST` to `127.0.0.1`,
-and `ZERO_TEST_PG_USER` to `postgres`, enabling the PostgreSQL tests in `pnpm check`.
-Existing environment overrides are preserved. `.agents/resume` checks database
-readiness and starts a stopped cluster; it never installs dependencies.
+```sh
+pnpm docs:generate
+pnpm --filter @zero-for-laravel/docs api:validate
+pnpm docs:typecheck
+pnpm docs:build
+pnpm --filter @zero-for-laravel/docs deploy:check
+pnpm docs:start
+```
 
-Setup copies the todos environment template only when `.env` is absent. It does
-not migrate or seed the example, generate shared application secrets, authenticate
-deployment tools, or start web servers. Configure the example's database, app key,
-cache key, and public URLs per thread before running it. Use supervised orb
-services and portals rather than the template's developer-specific Herd URLs.
-Do not use the orb PostgreSQL configuration for production or durable data.
+`apps/docs/refquill.json` selects PHP source and all public TypeScript entry points:
+core, React, Inertia, and optional search. Paths resolve from `apps/docs`.
+Commit `apps/docs/generated/api.json`
+after source changes, never edit or format it by hand. Both `docs:dev` and
+`docs:build` regenerate it automatically. The generated reference owns
+`/zero-for-laravel/docs/0.x/api`; do not put authored pages under that prefix.
+Dev uses port 3000; the production preview uses 8080. Inspect affected guides and
+reference pages in the browser after building. See [the site README](../apps/docs/README.md)
+for Waku configuration and Cloudflare packaging.
 
-## Adaptations from the application configs
+## Amp orbs and the example portal
 
-- **Vite+ replaces direct Vitest, Prettier and tsup tooling.** `vp pack` builds the
-  library; an application bundle, dev server, SSR build and Laravel Vite plugin
-  are unnecessary. Export paths and the optional React peer remain unchanged.
-- **Application integrations are omitted:** Inertia, Wayfinder, Tailwind,
-  auto-imports, icons, application aliases and application dependency prebundling.
-  React Compiler transformation and its blanket compiler lint rules are omitted;
-  consumers control compilation. Standard hook rules and dependency checks remain.
-- **Stylelint and Tailwind sorting are omitted:** there is no CSS or Tailwind
-  stylesheet. Browser-compatibility and HTML baseline plugins are omitted until
-  supported browser targets are defined; JSX accessibility checks remain enabled.
-- **Lint categories:** correctness and suspicious rules are enabled. Blanket
-  nursery, pedantic, performance, restriction and style presets are omitted.
-  Regex rules, focused-test detection, native-prototype protection, type imports,
-  and type-aware checking are enabled explicitly. Automatic JSX runtime disables
-  `react-in-jsx-scope`. The official hook plugin replaces duplicate native memo
-  dependency diagnostics. Compiler `refs`, `immutability` and `globals` rules are
-  disabled only in files containing the existing mutation identity guard, external store
-  factories and test harnesses. Unsafe-assertion and redundant-generic-argument
-  bans are disabled because generated registry bridges require mapped-type
-  assertions. A documented exception preserves the public filter tuple generic.
-  Compile-only fixtures permit unused values and expressions; tests
-  permit locally scoped harness functions. One documented hook dependency exception
-  preserves filter store identity when equivalent names/options are recreated.
-- **Generated fixtures** are excluded from formatting and lint transformations;
-  `contracts:check` verifies their exact bytes, TypeScript checks their contracts,
-  and integration tests execute them. Vendor, build output and lockfile formatting
-  are excluded. Markdown keeps the reference's disabled line-length rule.
-- **Pint keeps the Laravel preset and extra strict rules**, except automatic
-  finalization (`final_class`, `final_internal_class`,
-  `final_public_method_for_abstract_class`) and `protected_to_private`, which would
-  obstruct package extension, Eloquent fixtures and Testbench overrides.
-  `mb_str_functions` is disabled because filesystem offsets and protocol lengths
-  intentionally use byte semantics. TestCase is formatted instead of excluded.
-- **PHPStan runs at level 10 on source and tests without a baseline.** PHPDoc types
-  are not assumed certain, preserving runtime validation for untyped consumers.
-  Pest 4 closure bindings are explicitly documented in the tests.
-- **Pest 5 PHPStan/Rector plugins are omitted:** their available releases require
-  PHP 8.4 and Pest 5. Pest 4 and its bundled PHPStan extension preserve PHP 8.3
-  support. Browser/stress testing plugins and application-only Composer hooks are
-  unnecessary for this library. Tests run serially because PostgreSQL fixtures own
-  a shared disposable schema; the reference's parallel flag is omitted.
-- **Rector targets PHP 8.3 and Laravel 12**, rather than PHP 8.5 / Laravel 13.
-  Naming, privatization, Carbon and blanket PHPDoc rewrite sets are omitted to
-  preserve public APIs, framework overrides and date behavior. Laravel exception
-  helper rewrites are omitted to retain explicit guards and type narrowing.
-  Three rule exceptions preserve exception codes, property initialization checks,
-  and Pint's import/trait formatting; their exact names are in `rector.php`.
-- **Peck checks package source.** Pest feature files execute test registration
-  when reflected by Peck, so they are covered by Pest, Pint and PHPStan instead.
-  The spelling allowlist contains project/protocol terms rather than application
-  business names. Vendor and caches are ignored.
+`.agents/setup` installs PHP extensions, Composer, pnpm, both Composer projects,
+and the locked JavaScript workspace. It builds the client and prepares the example:
+copy `.env.example` only if absent, create ignored local demo keys, migrate/seed the
+demo idempotently, and build its generated imports and assets. Existing accounts,
+keys, and todos are preserved. No deployment credentials are required.
 
-The Vite+ core alias uses its wrapper version, so pnpm permits that exact version
-for Vitest's Vite peer requirements. Vite+ and its core alias are pinned together.
+Setup initializes an isolated PostgreSQL cluster under `.test-database/postgres`
+on **55433**, with logical replication and disposable-data durability settings.
+It starts PostgreSQL temporarily while preparing the database, then stops the
+process it started. It needs no systemd. Login shells default test settings to
+`laravel_zero_test`, host `127.0.0.1`, port `55433`, user `postgres`, preserving
+existing overrides. Do not use this passwordless loopback cluster for durable or
+production data.
 
-## Publishing
+After setup, start supervised services with:
 
-Publish releases from the source monorepo. npm publishes `packages/client` as
-`@nickwelsh/zero-for-laravel`; Packagist indexes the generated PHP mirror as
-`nickwelsh/zero-for-laravel`. See the release setup above and
-[the docs deployment guide](../apps/docs/README.md#cloudflare-workers-deployment).
+```sh
+amp orb services ensure
+amp orb service list
+amp orb service logs todos-cache
+```
+
+`.amp/services.yaml` owns PostgreSQL, Laravel (**8090**), Zero (**4858**), and the
+single-origin demo proxy (**8091**). Use the exact public portal URL printed by
+`services ensure`; browser sessions and `/sync/` WebSockets share that origin.
+The portal starts the declared services on demand, so no resume hook is needed.
+Sign in with the local-only accounts documented in the example README.
+Never commit portal hostnames, local credentials, replicas, or database files.
+Use a supervised one-off docs service with `--portal` when previewing docs in an orb.
+
+## Release v0.5 and later minors
+
+The Composer and npm packages share tags; no Composer `version` field is needed.
+Before tagging, update `packages/client/package.json`, current-version docs, and
+`CHANGELOG.md`; regenerate the API and run `pnpm check`, `pnpm test:integration`,
+the example checks, and `deploy:check`. Inspect `npm pack --dry-run` from
+`packages/client`. Push the tested `main` commit and matching annotated `v<version>`
+tag, then publish a GitHub Release for that tag. For this release the version is
+**0.5.0** and tag **v0.5.0**. Stable releases use `latest`; prerelease versions must
+be marked as GitHub prereleases and use `next`.
+
+`Publish npm` runs reusable CI, verifies the tag/version, and calls
+`npm stage publish --access public --provenance --tag <dist-tag>` from the client
+package. It uses npm trusted publishing/OIDC in environment `npm`, with
+`id-token: write`, not an npm token. The trusted publisher must name owner
+`nickwelsh`, repository `zero-for-laravel-monorepo`, workflow `publish-npm.yml`,
+environment `npm`, and allow **staged publishing only**. CI never approves npm.
+
+The owner reviews and approves with an authenticated package-owner account and 2FA:
+
+```sh
+npm stage list @nickwelsh/zero-for-laravel
+npm stage view <stage-id>
+npm stage approve <stage-id>
+```
+
+The release workflow also tags the PHP subtree mirror after CI. Stable docs wait
+until npm's public `latest` equals the approved release, then build/deploy the exact
+release commit to Cloudflare. They recheck `latest` before deploying. Main pushes
+and prereleases do not deploy docs. If approval takes more than one hour, approve
+npm then **Re-run failed jobs**; successful staging/mirror jobs are not repeated.
+Manual docs redeployment takes an existing stable tag and applies the same checks.
+See [deployment configuration](../apps/docs/README.md#cloudflare-workers-deployment).
+
+## Composer distribution and dependency maintenance
+
+`nickwelsh/zero-for-laravel` is an automated `packages/laravel` subtree mirror;
+never edit it directly. `Sync PHP mirror` advances its `main` after successful
+monorepo main-push CI and publishes matching release tags from the release workflow.
+The repository's `PHP_MIRROR_SSH_KEY` is a mirror-scoped write deploy key; the normal
+GitHub token cannot write to another repository. Packagist indexes mirror tags.
+`.gitattributes` excludes development files from Composer distribution archives.
+
+Dependabot covers pnpm, both Composer projects, and Actions. CI uses fresh Composer
+updates for its Laravel/Testbench matrix, so verify dependency constraints, not only
+the local lockfile. PHPStan 2.3.4 is excluded because it crashes Rector's PHPDoc
+parsing; remove the conflict only after verifying compatibility. Preserve targeted
+workspace overrides until their upstream dependencies adopt fixed versions.
+Use `pnpm audit` and `composer audit` in each Composer directory during dependency
+reviews. The accepted `braces` 3.0.3 development-tooling risk concerns trusted
+checked-in glob patterns; reassess if those inputs become untrusted.

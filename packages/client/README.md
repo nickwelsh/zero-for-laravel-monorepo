@@ -1,8 +1,10 @@
 # @nickwelsh/zero-for-laravel
 
 Controller-first Laravel queries and mutations on native Rocicorp Zero **1.11.3**.
-This is an unreleased pre-alpha rewrite. Use matching workspace/path revisions of
-this package and `nickwelsh/zero-for-laravel`; backwards compatibility is not a goal.
+Use **v0.5.0** with the matching `nickwelsh/zero-for-laravel` Composer package.
+This release breaks the v0.4 model-centric API; regenerate all contracts and migrate
+callers using the repository's upgrade guide. React and Inertia are optional peers;
+the `/inertia` adapter requires Inertia 3 and `@inertiajs/react` ^3.8.0.
 
 Laravel owns controller discovery, FormRequests, binding, authorization, and
 authoritative writes. Zero owns replication, subscriptions, optimistic transactions,
@@ -29,18 +31,25 @@ The adapter injects declared live props; pages do not call `useQuery` for them.
 Rows are plain decoded data, not model snapshots:
 
 ```tsx
-import type { InferLiveQueryResult } from '@nickwelsh/zero-for-laravel';
-import type { Data } from '@nickwelsh/zero-for-laravel/react';
+import type { QueryData } from '@nickwelsh/zero-for-laravel/react';
 import type { index } from '@/zero/App/Http/Controllers/DashboardController';
 
-export default function Dashboard({ lists }: { lists: Data<InferLiveQueryResult<typeof index.lists>> }) {
+export default function Dashboard({ lists }: { lists: QueryData<typeof index.lists> }) {
     return lists.data.map((list) => <p key={list.id}>{list.name}</p>);
 }
 ```
 
-Live props distinguish loading, success, refreshing, stale, failure, and disabled
+Live props distinguish loading, success, refreshing, stale, failure, and idle
 states. Connection status is separate from query completion. Infinite queries grow
 one live window; cursor pages keep raw ordering values to avoid rounding timestamps.
+
+For editable FormRequest inputs, type injected props as `QueryData<typeof index.lists>`
+from `/react`. `lists.inputs.values` holds current inputs; `options` holds finite
+enum/`in` choices; `set(partial)` validates and resubscribes; `reset()` restores the
+page's inputs. Route arguments and trusted context are not editable. URL updates
+are opt-in through `createInertiaAdapter`'s `url` mapping and `history` option.
+The optional `ZeroForLaravel\WayfinderServiceProvider` customizes Wayfinder
+`dev-next` page types with `QueryData`; Zero itself emits no global namespace.
 
 No global page types are generated. The same named query works with native Zero:
 `zero.run(index.lists(input))` or `useQuery(index.lists(input))`. For decoded live

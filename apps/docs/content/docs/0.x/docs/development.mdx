@@ -1,25 +1,44 @@
 ---
-title: Development
-description: Develop the workspace and regenerate versioned documentation with Refquill.
+title: Workspace development
+description: Develop controller-first contracts, run cross-language checks, and regenerate the API reference.
 ---
 
-The repository contains the Composer package in `packages/laravel`, the
-framework-independent client and React exports in `packages/client`, a shared
-todos application in `examples/todos`, and this site in `apps/docs`.
+The workspace contains `packages/laravel` (PHP declarations, generation, runtime),
+`packages/client` (native Zero, React, Inertia), `tests/interop` (cross-language
+contracts), `tests/integration` (real cache), `examples/todos` (shared app), and
+`apps/docs` (this site). The monorepo is authoritative; the Composer repository is
+an automated subtree mirror, not a place to submit patches.
 
-Use PHP 8.3+, Composer, Node 22.18+ (22.x) or 24.11+, and pnpm 11.24.0.
-The Composer platform targets PHP 8.3; CI covers Laravel 12 and 13.
+## Install and generate
+
+Use **PHP 8.5** for the full workspace: the example's PHP 8.4.1+/Pest 5 tools need
+more than the library's supported PHP 8.3 minimum. CI checks Laravel 12 and 13.
+Use Node 22.18+ on 22.x or 24.11+, pnpm **11.24.0**, and the locked TypeScript 7
+toolchain. Zero client and cache must both be **1.11.3**.
+
+From the repository root:
 
 ```sh
 composer --working-dir=packages/laravel install
+composer --working-dir=examples/todos install
 pnpm install --frozen-lockfile
+php examples/todos/artisan wayfinder:generate --fresh
+pnpm --filter @nickwelsh/zero-for-laravel build
 pnpm check
 ```
 
-## Library checks
+Root TypeScript checks include the example, whose ignored Wayfinder imports must
+exist first. The example's Vite plugin generates Zero before Wayfinder during
+builds. For declaration changes, migrate the app database and regenerate Zero
+before Wayfinder. Keep generated PHP registrations, schema, query/mutation
+modules, controller exports, and owned-file manifests together. Exclude generated
+files from formatters. Preserve application-owned `zero.config.ts`.
 
-`pnpm check` checks formatting, lint, PHPStan, Rector, spelling, TypeScript,
-Pest, frontend tests, generated-contract drift, builds, and package exports.
+## Validate the runtime boundaries
+
+`pnpm check` runs workflow checks, formatting, lint, PHPStan level 10, Rector,
+spelling, TypeScript, Pest, frontend tests, generated-contract drift, builds, and
+package isolation. Run targeted checks during development:
 
 ```sh
 pnpm test
@@ -30,70 +49,83 @@ pnpm build
 pnpm package:check
 ```
 
-PostgreSQL tests are optional locally. Set `ZERO_TEST_PG_DATABASE` to an empty,
-disposable database named `laravel_zero_test` or `laravel_zero_test_*` and supply
-optional `ZERO_TEST_PG_HOST`, `ZERO_TEST_PG_PORT`, `ZERO_TEST_PG_USER`, and
-`ZERO_TEST_PG_PASSWORD`. The harness refuses an existing application schema and
-removes only its owned fixtures. Do not run two suites on the same database concurrently.
+`scripts/check-generated.mjs` identifies PHP exporters for the model, controller
+query/mutation, React, and public API fixtures. Regenerate from those exporters
+instead of editing expected TypeScript. Native Zero supplies the query AST and
+optimistic transaction behavior used by the interop tests.
 
-## Documentation site
+PostgreSQL tests require an empty disposable database named `laravel_zero_test` or
+`laravel_zero_test_*`. Set `ZERO_TEST_PG_DATABASE` and, if needed,
+`ZERO_TEST_PG_HOST`, `ZERO_TEST_PG_PORT`, `ZERO_TEST_PG_USER`, and
+`ZERO_TEST_PG_PASSWORD`. The harness refuses application schemas. Run PHP suites
+serially, never concurrently against the same database.
 
-This site uses [`@nickwelsh/docs-base`](https://github.com/nickwelsh/docs-base),
-which owns the application, styles, MDX, search, Markdown exports, and reference
-rendering. This repository owns the configuration, written guides, and generated
-API JSON. There are no copied application components or route handlers to maintain.
+`pnpm test:integration` starts a disposable Laravel callback server and real Zero
+cache. The PostgreSQL role needs database creation and logical replication
+privileges. The suite owns a unique database, app ID, publication, ports, and
+replica. It exercises callback authentication, large query batches, replication,
+authorization, identity changes, live sorting, optimistic reconciliation, and
+recovery of a persisted result after losing a committed response. It never resets
+the example application. CI runs it on PHP 8.3/Laravel 13.
+
+For coverage use `pnpm test:coverage` and
+`XDEBUG_MODE=coverage pnpm php:test:coverage`. Include PostgreSQL and Xdebug/PCOV
+for the PHP integration branches. CI saves both reports.
+
+## Run the example in an Amp orb
+
+`.agents/setup` installs dependencies, prepares PostgreSQL on port **55433**,
+migrates/seeds an isolated local demo, generates imports, and builds assets.
+It preserves existing demo data and keys. `.amp/services.yaml` supervises the
+database, Laravel, cache, and single-origin proxy:
 
 ```sh
-pnpm docs:dev
-pnpm docs:typecheck
-pnpm docs:build
-pnpm docs:start
+amp orb services ensure
+amp orb service logs todos-cache
 ```
 
-The development site opens at
-[localhost:3000/zero-for-laravel/](http://localhost:3000/zero-for-laravel/).
-The production preview uses port 8080. `apps/docs/waku.config.ts` configures the
-public origin `https://docs.nickwelsh.me` and base path `/zero-for-laravel`. Change
-those values and rebuild if hosting elsewhere. These commands build and preview;
-they do not deploy the site.
+Open the exact portal URL printed by the command; the local-only demo accounts
+are in the example README. The portal also starts declared services on demand.
+No systemd or resume hook is required. Never commit local credentials, database
+files, cache replicas, or generated portal URLs. Outside an orb, follow the
+example README or [local cache commands](./local-development.mdx).
 
-## Regenerate v0.x API docs
+## Write guides and regenerate reference docs
+
+Edit MDX in `apps/docs/content/docs/0.x/docs` and register new pages in `meta.json`.
+docs-base owns rendering, navigation, search, and Markdown exports; this repository
+does not maintain copied route handlers or UI components.
 
 ```sh
 pnpm docs:generate
 pnpm --filter @zero-for-laravel/docs api:validate
+pnpm docs:typecheck
+pnpm docs:build
+pnpm --filter @zero-for-laravel/docs deploy:check
+pnpm docs:start
 ```
 
-`apps/docs/refquill.json` selects the PHP package source and the TypeScript
-core and React entry points. Refquill writes `apps/docs/generated/api.json`,
-which is committed so changes to API docs are reviewable. Development and
-production builds regenerate it before starting the shared app.
+`apps/docs/refquill.json` reads PHP source and all public TypeScript entry points:
+core, React, Inertia, and optional search. Paths resolve from `apps/docs`. Commit
+`apps/docs/generated/api.json`; never edit or format it manually. Both
+`pnpm docs:dev` and `pnpm docs:build` regenerate it. The generated reference owns
+`/zero-for-laravel/docs/0.x/api`; avoid authored route collisions. Update source
+declarations/comments to change reference content. A failed analysis preserves
+the previous output.
 
-The reference appears at `/zero-for-laravel/docs/0.x/api` and includes source links
-relative to the repository root. Do not edit or format the generated JSON by hand.
-Update source declarations/comments and regenerate instead. Refquill preserves
-the previous output if analysis fails.
+The development server uses port 3000; production preview uses 8080.
+`apps/docs/waku.config.ts` sets the public origin and `/zero-for-laravel` base path.
+In an orb use a supervised service and its portal for review. Inspect the changed
+guides and reference pages in the rendered site, not just generated JSON.
 
-## Add or update guides
+## Release and deployment
 
-Edit MDX under `apps/docs/content/docs/0.x/docs` and list pages in its
-`meta.json`. Relative `.mdx` links are resolved by the shared app. Keep generated
-API routes separate from authored pages: docs-base rejects route collisions.
-
-For a future release line, add a version folder and version metadata, then give
-its generated API input a separate file and route. The current configuration
-tracks the v0.x source in this checkout.
-
-## Live integration boundary
-
-`pnpm test:integration` starts a disposable Laravel callback server and the installed
-Zero 1.11.3 cache. The PostgreSQL role supplied through `ZERO_TEST_PG_*` must be able
-to create databases and use logical replication. The suite creates a unique empty
-database, app ID, publication, ports, and temporary replica directory. It exercises
-fresh migrations, contract checks, exact private publication columns, callback
-authentication, 257-query transforms, upstream-to-client updates, identity isolation,
-retained sorting, unmounting, and authoritative optimistic-mutation rejection.
-Cleanup targets only that generated database and its exact recorded artifacts.
-
-The live suite is opt-in locally and runs in CI on the PHP 8.3/Laravel 13 job.
-It does not reuse, migrate, or reset the example application's database or cache.
+Update the client version, changelog, guides, and generated API together. Publish a
+matching `v<version>` GitHub Release only after checks and live integration pass.
+The release workflow verifies the version and stages npm with provenance/OIDC;
+the owner reviews and approves the staged package. CI does not approve it.
+The matching PHP mirror tag is created after CI. Stable docs wait for the approved
+version to become npm `latest`, then deploy that exact release commit. Main pushes
+and prereleases never replace production docs. If approval takes over an hour,
+approve npm then rerun failed jobs. Full maintainer and deployment procedures are
+in `docs/tooling.md` and `apps/docs/README.md` in the source repository.

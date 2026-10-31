@@ -12,9 +12,10 @@ Laravel authenticates reads and authorizes writes. Zero owns replication, local
 subscriptions, optimistic replay, and reconciliation. One resolved model contract
 controls queries, mutation inputs, and the PostgreSQL publication's columns.
 
-These docs cover the **unreleased pre-alpha rewrite**, with **Zero 1.11.3**,
-**Laravel 12 or 13**, and **PHP 8.3+**. Published v0.4 packages are not this rewrite.
-[Use the matching workspace packages](./docs/getting-started.mdx) to get started.
+These docs cover **v0.5.0**, with **Zero 1.11.3**, **Laravel 12 or 13**, and
+**PHP 8.3+**. This is a breaking replacement for the v0.4 API.
+[Install matching packages](./docs/getting-started.mdx) or follow the
+[v0.4 upgrade guide](./docs/upgrading.mdx).
 
 ## Start building
 
@@ -27,8 +28,8 @@ These docs cover the **unreleased pre-alpha rewrite**, with **Zero 1.11.3**,
 ## How data moves
 
 1. Eloquent models declare visibility and column rules; controllers declare operations.
-2. `zero:generate` analyzes registered actions and emits schema, row/page types,
-   native queries/mutators, and matching PHP registrations.
+2. `zero:generate` analyzes registered actions and emits schema, row types,
+   named controller modules, native queries/mutators, and matching PHP registrations.
 3. `zero:sync-publication` limits replication to approved tables and columns.
 4. The browser subscribes through Zero; Laravel rebuilds queries using trusted
    authentication context.

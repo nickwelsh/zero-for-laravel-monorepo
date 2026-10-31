@@ -5,8 +5,9 @@ description: Consume plain typed rows and explicit input/result codecs.
 
 Live props contain plain decoded rows: `task.title`, `task.list?.name`, and
 `task.comments`. There are no model snapshot wrappers, lazy model methods, or
-bound CRUD methods. Generated `TaskRow` describes model columns; generated page
-types add the exact selected relationship shape.
+bound CRUD methods. Generated `TaskRow` describes model columns;
+`InferLiveQueryResult<typeof index.tasks>` adds the selected relationship shape.
+`QueryData<typeof index.tasks>` also includes live status, pagination, and inputs.
 
 Only resolved database columns replicate. Accessors, encrypted casts, appended
 properties, and arbitrary DTO methods do not execute in JavaScript. Supported
