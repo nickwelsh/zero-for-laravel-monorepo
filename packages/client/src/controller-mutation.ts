@@ -84,6 +84,18 @@ export type ControllerMutationWire = {
 export interface MutationCodec<T> {
     parse(value: unknown): T;
 }
+/** Prepared once before enqueueing; replay never calls these generators. */
+export interface MutationPreparation {
+    uuid?: () => string;
+    ulid?: () => string;
+    now?: () => Date;
+}
+/** A generated, typed reference resolved against the current provider's bindings. */
+export interface ControllerMutationAction<Input, Result> {
+    readonly action: string;
+    readonly inputSchema: MutationCodec<Input>;
+    readonly serverResultSchema: MutationCodec<Result>;
+}
 export interface ControllerMutationOptions<Input, ServerResult, ClientResult> {
     readonly input: MutationCodec<Input>;
     /** Runs before native request creation, e.g. Date -> epoch milliseconds. */
@@ -459,22 +471,40 @@ export function createControllerMutations<S extends Schema>(
             return {
                 serverResultSchema: config.serverResult,
                 clientResultSchema: config.clientResult,
-                prepare(input: Input, route: ControllerMutationWire['route'] = {}) {
+                prepare(
+                    input: Input,
+                    route: ControllerMutationWire['route'] = {},
+                    preparation: MutationPreparation = {},
+                ) {
                     const encoded = config.encode(config.input.parse(input));
                     json(encoded);
                     json(route);
                     const ids = Object.fromEntries(
                         Object.entries(contract.sites).map(([site, generator]) => [
                             site,
-                            generator === 'uuid' ? uuid() : ulid(),
+                            generator === 'uuid' ? (preparation.uuid ?? uuid)() : (preparation.ulid ?? ulid)(),
                         ]),
                     );
+                    for (const [site, generator] of Object.entries(contract.sites)) {
+                        const pattern =
+                            generator === 'uuid'
+                                ? /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+                                : /^[0-7][0-9A-HJKMNP-TV-Z]{25}$/;
+                        const id = ids[site]!;
+                        if (id.length !== (generator === 'uuid' ? 36 : 26) || !pattern.test(id))
+                            throw new Error('Invalid prepared identity.');
+                    }
+                    if (new Set(Object.values(ids)).size !== Object.keys(ids).length)
+                        throw new Error('Creation identities must be distinct.');
+                    const timestamp = preparation.now ? preparation.now().getTime() : Date.now();
+                    if (!Number.isSafeInteger(timestamp) || timestamp < 0 || timestamp > 8640000000000000)
+                        throw new Error('Invalid prepared timestamp.');
                     const wire = freeze(
                         structuredClone({
                             version: contract.version,
                             input: encoded,
                             route,
-                            prepared: { ids, timestamp: Date.now() },
+                            prepared: { ids, timestamp },
                         }),
                     );
                     return mutator(wire);
@@ -483,8 +513,9 @@ export function createControllerMutations<S extends Schema>(
                     client: MutationClient<S>,
                     input: Input,
                     route: ControllerMutationWire['route'] = {},
+                    preparation: MutationPreparation = {},
                 ): Promise<ServerResult> {
-                    const data = await completeMutation(client.mutate(this.prepare(input, route)));
+                    const data = await completeMutation(client.mutate(this.prepare(input, route, preparation)));
                     try {
                         return config.serverResult.parse(data);
                     } catch (error) {

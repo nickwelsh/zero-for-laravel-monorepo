@@ -1,9 +1,8 @@
 import { Head, usePage } from '@inertiajs/react';
 import { TodosWorkspace } from '@/components/todos/todos-workspace';
 import { dashboard } from '@/routes';
-import type { Pages } from '@/zero/generated.queries';
 
-export default function Dashboard({ lists }: Pages['App\\Http\\Controllers\\DashboardController@index']) {
+export default function Dashboard({ lists }: Inertia.Pages.Dashboard) {
     const { auth } = usePage().props;
 
     return (

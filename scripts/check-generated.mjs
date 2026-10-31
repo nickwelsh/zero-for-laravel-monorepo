@@ -24,3 +24,14 @@ for (const [mode, path] of [
     }
 }
 console.log('Generated controller fixtures match their PHP actions.');
+
+const publicFiles = JSON.parse(
+    execFileSync('php', ['packages/laravel/tests/Fixtures/export-controller-mutations.php', 'public'], {
+        encoding: 'utf8',
+    }),
+);
+for (const [path, source] of Object.entries(publicFiles)) {
+    if (source !== readFileSync(`tests/interop/controller-api/${path}`, 'utf8')) {
+        throw new Error(`Generated public API fixture is stale: ${path}`);
+    }
+}

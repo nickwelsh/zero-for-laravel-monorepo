@@ -1,7 +1,8 @@
-import { createContext, useCallback, useMemo, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useMemo, useState, type ContextType, type ReactNode } from 'react';
 import { ZeroProvider as NativeProvider } from '@rocicorp/zero/react';
 import type { AnyMutatorRegistry, Schema, ZeroOptions } from '@rocicorp/zero';
 import type { ClientContext } from '../contract';
+import { ControllerMutations } from './controller-mutation';
 
 export type ProviderOptions = Omit<
     ZeroOptions<Schema, undefined, ClientContext>,
@@ -22,6 +23,7 @@ export function createZeroProvider(
     mutators: AnyMutatorRegistry,
     options: ProviderOptions,
     inertiaShell = false,
+    controllers: ContextType<typeof ControllerMutations> = { actions: {}, preparation: {} },
 ) {
     function Session({ userID, context, auth, children }: ProviderProps) {
         const [ready, setReady] = useState(false);
@@ -54,9 +56,16 @@ export function createZeroProvider(
         );
         const identity = JSON.stringify([userID, contextKey]);
         return (
-            <Session {...(auth === undefined ? {} : { auth })} key={identity} userID={userID} context={stableContext}>
-                {children}
-            </Session>
+            <ControllerMutations.Provider value={controllers}>
+                <Session
+                    {...(auth === undefined ? {} : { auth })}
+                    key={identity}
+                    userID={userID}
+                    context={stableContext}
+                >
+                    {children}
+                </Session>
+            </ControllerMutations.Provider>
         );
     };
 }

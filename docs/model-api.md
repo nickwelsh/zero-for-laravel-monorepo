@@ -92,7 +92,7 @@ the same discipline, including events on a losing unique insert attempt.
 
 ## React and Inertia own presentation, not transport
 
-Generated `Pages['Controller@method']` types include ordinary props and injected live
+Generated `Inertia.Pages` types follow component paths and include ordinary props and injected live
 results. The page resolver adapter removes the need for per-prop query hooks.
 `useLiveProps` exposes the same contract below the page; native Inertia `usePage`
 continues to expose serializable props. No Zero rows enter page history or SSR props.

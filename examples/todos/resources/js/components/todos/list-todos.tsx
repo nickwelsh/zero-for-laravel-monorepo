@@ -3,13 +3,13 @@ import { useState } from 'react';
 import InputError from '@/components/input-error';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { actions } from '@/zero/generated.react';
+import { store as create } from '@/zero/App/Http/Controllers/TodoController';
 import type { ListRow } from './list-panel';
 import { commitMutation } from './mutations';
 import { TodoRow } from './todo-row';
 
 export function ListTodos({ listId, todos }: { listId: string; todos: ListRow['todos'] }) {
-    const create = useControllerMutation(actions['App\\Http\\Controllers\\TodoController@store']);
+    const createTodo = useControllerMutation(create);
     const [title, setTitle] = useState('');
 
     return (
@@ -19,7 +19,7 @@ export function ListTodos({ listId, todos }: { listId: string; todos: ListRow['t
                 onSubmit={(event) => {
                     event.preventDefault();
                     void commitMutation(
-                        () => create({ list_id: listId, title }),
+                        () => createTodo({ list_id: listId, title }),
                         () => setTitle(''),
                     );
                 }}
@@ -32,9 +32,9 @@ export function ListTodos({ listId, todos }: { listId: string; todos: ListRow['t
                     required
                     maxLength={200}
                 />
-                <Button disabled={create.state.status === 'pending'}>Add todo</Button>
+                <Button disabled={createTodo.state.status === 'pending'}>Add todo</Button>
             </form>
-            <InputError message={create.state.fields.title?.join(' ')} />
+            <InputError message={createTodo.state.fields.title?.join(' ')} />
             {todos.length === 0 && (
                 <p className="py-8 text-center text-sm text-muted-foreground">
                     Nothing to do yet. Add the first todo above.

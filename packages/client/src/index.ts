@@ -5,6 +5,8 @@ export type {
     ControllerMutationContract,
     ControllerMutationOptions,
     ControllerMutationWire,
+    ControllerMutationAction,
+    MutationPreparation,
 } from './controller-mutation';
 export { InputError, encodeDate } from './validation';
 export type {

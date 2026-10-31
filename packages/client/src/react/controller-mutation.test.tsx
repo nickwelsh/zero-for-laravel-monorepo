@@ -3,7 +3,13 @@ import { act, cleanup, renderHook } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vite-plus/test';
 import { schema, definitions } from '../../../../tests/interop/generated';
 import { createControllerMutationBindings } from '../controller-mutation.fixture';
-import { useControllerMutation } from './controller-mutation';
+import {
+    store as create,
+    type StoreInput,
+    type StoreResult,
+} from '../../../../tests/interop/controller-api/ZeroForLaravel/Tests/Fixtures/ControllerMutationController';
+import { ControllerMutations, useControllerMutation } from './controller-mutation';
+import type { ReactNode } from 'react';
 
 function deferred<T>() {
     let resolve!: (value: T) => void;
@@ -22,6 +28,35 @@ afterEach(() => {
 const binding = createControllerMutationBindings(schema, definitions, {
     'ZeroForLaravel\\Tests\\Fixtures\\ControllerMutationController@projected': async () => ({ pending: true }),
 }).actions['ZeroForLaravel\\Tests\\Fixtures\\ControllerMutationController@store'];
+
+it('submits a named generated action with provider defaults and per-hook prepared-field overrides', async () => {
+    const id = '784949de-4dd0-4fd1-9297-b9e43e7a9fb7';
+    const secondId = 'f98c89a8-9d9c-4ecf-8454-5d150d260bd2';
+    const uuid = vi.fn().mockReturnValueOnce(id).mockReturnValueOnce(secondId);
+    const date = new Date('2026-10-31T12:34:56.789Z');
+    const wrapper = ({ children }: { children: ReactNode }) => (
+        <ControllerMutations.Provider
+            value={{ actions: { [create.action]: binding }, preparation: { now: () => date } }}
+        >
+            {children}
+        </ControllerMutations.Provider>
+    );
+    native.mutate.mockImplementation((request) => {
+        expect(request.args.input).toEqual({ title: 'Named action' });
+        expect(request.args.prepared).toEqual({ ids: { s0: id, s1: secondId }, timestamp: date.getTime() });
+        return {
+            client: Promise.resolve({ type: 'success' }),
+            server: Promise.resolve({ type: 'success', data: { id } }),
+        };
+    });
+    const { result } = renderHook(() => useControllerMutation(create, {}, { uuid }), { wrapper });
+    const input: StoreInput = { title: 'Named action' };
+    await act(async () => {
+        const saved: StoreResult = await result.current(input);
+        expect(saved).toEqual({ id });
+    });
+    expect(result.current.state.status).toBe('success');
+});
 
 it('distinguishes local application from server acceptance without resubmitting on rerender', async () => {
     const client = deferred<unknown>();

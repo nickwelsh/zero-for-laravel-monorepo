@@ -29,9 +29,7 @@ The adapter injects declared live props; pages do not call `useQuery` for them.
 Rows are plain decoded data, not model snapshots:
 
 ```tsx
-import type { Pages } from '@/zero/generated.queries';
-
-export default function Dashboard({ lists }: Pages['App\\Http\\Controllers\\DashboardController@index']) {
+export default function Dashboard({ lists }: Inertia.Pages.Dashboard) {
     return lists.data.map((list) => <p key={list.id}>{list.name}</p>);
 }
 ```
@@ -44,10 +42,10 @@ one live window; cursor pages keep raw ordering values to avoid rounding timesta
 
 ```tsx
 import { useControllerMutation } from '@nickwelsh/zero-for-laravel/react';
-import { actions } from '@/zero/generated.react';
+import { store as create } from '@/zero/App/Http/Controllers/TodoController';
 
-const create = useControllerMutation(actions['App\\Http\\Controllers\\TodoController@store']);
-const saved = await create({ list_id: list.id, title: 'A new task' });
+const createTodo = useControllerMutation(create);
+const saved = await createTodo({ list_id: list.id, title: 'A new task' });
 console.log(saved.id); // Validated authoritative result, not just local prediction.
 ```
 
@@ -55,10 +53,17 @@ Use a bound route argument map for update/delete actions. The hook exposes pendi
 local application, server acceptance, field errors, and committed-result decoding
 errors separately. Unmounting does not cancel or undo an enqueued native mutation.
 
-For native lifecycle control, call `action.prepare(input, routeArguments)`, then
+For native lifecycle control, obtain a binding from the generated binding factory
+and call `binding.prepare(input, routeArguments, preparation)`, then
 `zero.mutate(request)`. Await `.client` for local prediction and `.server` for the
 authoritative outcome. Parse data with `clientResultSchema` or `serverResultSchema`;
 the two contracts can intentionally differ. Preparation captures IDs and time once.
+
+These **prepared fields** are separate from required form input. Model traits select
+UUID/ULID generation and Eloquent timestamp settings select the time columns.
+Override `uuid`, `ulid`, and `now` globally through `createZeroBindings(preparation)`
+or per hook with `useControllerMutation(create, route, preparation)`. Custom-optimism
+apps pass projections first: `createZeroBindings(projections, preparation)`.
 
 Custom optimism is passed to the generated binding factory; disabled optimism is
 an explicit no-op client recipe using the same native protocol. Unsupported code

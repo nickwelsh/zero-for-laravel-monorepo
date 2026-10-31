@@ -6,21 +6,21 @@ import InputError from '@/components/input-error';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { actions } from '@/zero/generated.react';
-import type { Pages } from '@/zero/generated.queries';
+import { destroy as destroyList, update as updateList } from '@/zero/App/Http/Controllers/TodoListController';
+import { __invoke as shareList } from '@/zero/App/Http/Controllers/ShareListController';
 import { ListTodos } from './list-todos';
 import { commitMutation } from './mutations';
 
-export type ListRow = Pages['App\\Http\\Controllers\\DashboardController@index']['lists']['data'][number];
+export type ListRow = Inertia.Pages.Dashboard['lists']['data'][number];
 
 export function ListPanel({ list, userId }: { list: ListRow; userId: number }) {
-    const destroy = useControllerMutation(actions['App\\Http\\Controllers\\TodoListController@destroy'], {
+    const destroy = useControllerMutation(destroyList, {
         list: list.id,
     });
-    const update = useControllerMutation(actions['App\\Http\\Controllers\\TodoListController@update'], {
+    const update = useControllerMutation(updateList, {
         list: list.id,
     });
-    const share = useControllerMutation(actions['App\\Http\\Controllers\\ShareListController@__invoke'], {
+    const share = useControllerMutation(shareList, {
         list: list.id,
     });
     const [email, setEmail] = useState('');

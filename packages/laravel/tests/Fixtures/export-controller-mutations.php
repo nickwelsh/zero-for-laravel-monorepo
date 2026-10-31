@@ -10,6 +10,8 @@ use ZeroForLaravel\Generation\ControllerQueryCompiler;
 use ZeroForLaravel\Generation\ControllerQueryGenerator;
 use ZeroForLaravel\Generation\Mutations\ControllerMutationCompiler;
 use ZeroForLaravel\Generation\Mutations\ControllerMutationGenerator;
+use ZeroForLaravel\Generation\Mutations\MutationProgram;
+use ZeroForLaravel\Generation\PublicApiGenerator;
 use ZeroForLaravel\Generation\TypeScriptGenerator;
 use ZeroForLaravel\Generation\ZodSchemaDriver;
 use ZeroForLaravel\Metadata\ModelRegistry;
@@ -58,7 +60,16 @@ $fixture = new class('export') extends TestCase
         }
 
         $compiler = new ControllerMutationCompiler((new ParserFactory)->createForNewestSupportedVersion(), new ModelRegistry($this->models()));
-        $programs = array_map(fn (string $method): ZeroForLaravel\Generation\Mutations\MutationProgram => $compiler->compile(ControllerMutationController::class, $method), ['store', 'complete', 'authoritative', 'noResult', 'explicit', 'structured', 'projected', 'bulk']);
+        $programs = array_map(fn (string $method): MutationProgram => $compiler->compile(ControllerMutationController::class, $method), ['store', 'complete', 'authoritative', 'noResult', 'explicit', 'structured', 'projected', 'bulk']);
+
+        if ($mode === 'public') {
+            $queries = (new ControllerQueryCompiler((new ParserFactory)->createForNewestSupportedVersion(), new ModelRegistry($this->models())))->compile(QueryController::class, 'index');
+            $files = (new PublicApiGenerator)->generate($programs, $queries, 'generated');
+            $files['generated.mutations.ts'] = "export * from '../../../packages/client/src/controller-mutation.fixture';\n";
+            $files['generated.queries.ts'] = (new ControllerQueryGenerator(new ZodSchemaDriver))->typescript($queries, '../generated');
+
+            return json_encode($files, JSON_THROW_ON_ERROR | JSON_PRETTY_PRINT);
+        }
 
         // Standalone process owns this in-memory DB, not a PHPUnit runner lifecycle.
         return (new ControllerMutationGenerator)->typescript($programs);

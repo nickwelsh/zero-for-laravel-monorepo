@@ -25,14 +25,17 @@ changes isolate subscriptions and local storage; native Zero owns construction
 and cleanup.
 
 ```tsx
-import type { Pages } from '@/zero/generated.queries';
-
-export default function Tasks({ tasks }: Pages['App\\Http\\Controllers\\TaskController@index']) {
+export default function Tasks({ tasks }: Inertia.Pages.Tasks.Index) {
     if (tasks.status === 'loading') return <p role="status">Loading tasks…</p>;
     if (tasks.status === 'failure') return <p role="alert">Unable to load tasks.</p>;
     return tasks.data.map((task) => <p key={task.id}>{task.title}</p>);
 }
 ```
+
+`pages.d.ts` declares the global `Inertia.Pages` namespace. Names follow the Inertia
+component path, not the controller: `tasks/index` becomes `Inertia.Pages.Tasks.Index`,
+and `settings/profile` becomes `Inertia.Pages.Settings.Profile`. Include the generated
+directory in your TypeScript project. Normalized name collisions fail generation.
 
 No per-prop `useQuery` is necessary. Rows and related rows are plain decoded data,
 without a `.data` wrapper or mutation methods. Live objects distinguish loading,

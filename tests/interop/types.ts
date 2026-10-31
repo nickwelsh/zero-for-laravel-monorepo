@@ -245,3 +245,11 @@ domain.actions.unregistered({});
 // A scalar JSON field named data must never be mistaken for a snapshot type.
 const scalarProjection = toPlain({ data: { data: 'scalar' } } as const);
 const scalarData: 'scalar' = scalarProjection.data.data;
+
+function generatedPageTypes(page: Inertia.Pages.Tasks.Index) {
+    const title: string = page.tasks.data[0]!.title;
+    const heading: string = page.heading;
+    // @ts-expect-error Page names come from Inertia components, and props remain typed.
+    const missing = page.unknown;
+    return { title, heading };
+}

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { Zero, createBuilder } from '@rocicorp/zero';
-import { expect, it } from 'vite-plus/test';
+import { expect, it, vi } from 'vite-plus/test';
 import { z } from 'zod';
 import { schema, definitions } from '../../../tests/interop/generated';
 import { createControllerMutations, mutationTruthy, type ControllerMutationContract } from './controller-mutation';
@@ -54,6 +54,12 @@ it('prepares stable identities outside replay and executes generated operations 
     input.title = 'Changed';
     expect(request.args.input.title).toBe('Prepared');
     expect(Object.isFrozen(request.args)).toBe(true);
+    const fixedId = '784949de-4dd0-4fd1-9297-b9e43e7a9fb7';
+    const now = new Date('2026-10-31T12:34:56.789Z');
+    const preparation = { uuid: vi.fn(() => fixedId), now: vi.fn(() => now) };
+    const prepared = action.prepare({ title: 'Overridden' }, {}, preparation);
+    expect(prepared.args.prepared).toEqual({ ids: { s0: fixedId }, timestamp: now.getTime() });
+    now.setFullYear(2030);
     const zero = new Zero<typeof schema, undefined, ClientContext>({
         schema,
         mutators: layer.mutators,
@@ -71,8 +77,37 @@ it('prepares stable identities outside replay and executes generated operations 
         expect(row?.created_at).toBe(request.args.prepared.timestamp);
         expect(row?.user_id).toBe('alice');
         expect(action.prepare({ title: 'Another' }).args.prepared.ids.s0).not.toBe(request.args.prepared.ids.s0);
+        await zero.mutate(prepared).client;
+        const overridden = await zero.run(createBuilder(schema).tasks.where('id', fixedId).one());
+        expect(overridden?.created_at).toBe(Date.parse('2026-10-31T12:34:56.789Z'));
+        expect(overridden?.updated_at).toBe(overridden?.created_at);
+        expect(preparation.uuid).toHaveBeenCalledOnce();
+        expect(preparation.now).toHaveBeenCalledOnce();
     } finally {
         await zero.close();
+    }
+});
+
+it('validates prepared UUID and ULID overrides before native request creation', () => {
+    for (const generator of ['uuid', 'ulid'] as const) {
+        const layer = createControllerMutations(
+            schema,
+            definitions,
+            { [name]: { ...contract, sites: { s0: generator } } },
+            { [name]: codecs },
+        );
+        const action = layer.bind(name, codecs);
+        const id = generator === 'uuid' ? '784949de-4dd0-4fd1-9297-b9e43e7a9fb7' : '01K8VBQ37R3H2MXJP9DDX85XY7';
+        expect(action.prepare({ title: 'Valid' }, {}, { [generator]: () => id }).args.prepared.ids.s0).toBe(id);
+        expect(action.prepare({ title: 'Default' }).args.prepared.ids.s0).toHaveLength(generator === 'uuid' ? 36 : 26);
+        for (const invalid of ['123', id + '\n']) {
+            expect(() => action.prepare({ title: 'Invalid' }, {}, { [generator]: () => invalid })).toThrow(
+                'Invalid prepared identity',
+            );
+        }
+        expect(() => action.prepare({ title: 'Invalid time' }, {}, { now: () => new Date(NaN) })).toThrow(
+            'Invalid prepared timestamp',
+        );
     }
 });
 

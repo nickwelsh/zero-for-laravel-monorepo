@@ -5,10 +5,11 @@ import { schema, definitions } from '../../../tests/interop/generated';
 import { createControllerMutationBindings } from './controller-mutation.fixture';
 import type { ClientContext } from './contract';
 import { createZeroBindings } from '../../../tests/interop/controller-react.generated';
+import { projected as projectedAction } from '../../../tests/interop/controller-api/ZeroForLaravel/Tests/Fixtures/ControllerMutationController';
 
 const prefix = 'ZeroForLaravel\\Tests\\Fixtures\\ControllerMutationController@' as const;
 const projections = {
-    'ZeroForLaravel\\Tests\\Fixtures\\ControllerMutationController@projected': async () => ({ pending: true }),
+    [projectedAction.action]: async () => ({ pending: true }),
 };
 
 it('executes the PHP-generated typed bindings without application-authored codecs', async () => {

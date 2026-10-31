@@ -3,13 +3,13 @@ import { Pencil, Trash2 } from 'lucide-react';
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { actions } from '@/zero/generated.react';
+import { update as updateTodo, destroy as destroyTodo } from '@/zero/App/Http/Controllers/TodoController';
 import type { ListRow } from './list-panel';
 import { commitMutation } from './mutations';
 
 export function TodoRow({ todo }: { todo: ListRow['todos'][number] }) {
-    const update = useControllerMutation(actions['App\\Http\\Controllers\\TodoController@update'], { todo: todo.id });
-    const destroy = useControllerMutation(actions['App\\Http\\Controllers\\TodoController@destroy'], { todo: todo.id });
+    const update = useControllerMutation(updateTodo, { todo: todo.id });
+    const destroy = useControllerMutation(destroyTodo, { todo: todo.id });
     const [editing, setEditing] = useState(false);
     const [title, setTitle] = useState(todo.title);
     const pending = update.state.status === 'pending' || destroy.state.status === 'pending';

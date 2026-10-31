@@ -3,19 +3,12 @@ import { useState } from 'react';
 import InputError from '@/components/input-error';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { actions } from '@/zero/generated.react';
-import type { Pages } from '@/zero/generated.queries';
+import { store } from '@/zero/App/Http/Controllers/TodoListController';
 import { ListPanel } from './list-panel';
 import { commitMutation } from './mutations';
 
-export function TodosWorkspace({
-    userId,
-    lists,
-}: {
-    userId: number;
-    lists: Pages['App\\Http\\Controllers\\DashboardController@index']['lists'];
-}) {
-    const create = useControllerMutation(actions['App\\Http\\Controllers\\TodoListController@store']);
+export function TodosWorkspace({ userId, lists }: { userId: number; lists: Inertia.Pages.Dashboard['lists'] }) {
+    const create = useControllerMutation(store);
     const [name, setName] = useState('');
     const [selectedId, setSelectedId] = useState<string | undefined>();
     const selected = lists.data.find((list) => list.id === selectedId) ?? lists.data[0];

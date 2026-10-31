@@ -1,8 +1,13 @@
 import type { MutateRequest, Schema, Zero } from '@rocicorp/zero';
 import { ZeroContext } from '@rocicorp/zero/react';
-import { useContext, useEffect, useRef, useState } from 'react';
+import { createContext, useContext, useEffect, useRef, useState } from 'react';
 import type { ClientContext } from '../contract';
-import type { ControllerMutationWire, MutationCodec } from '../controller-mutation';
+import type {
+    ControllerMutationAction,
+    ControllerMutationWire,
+    MutationCodec,
+    MutationPreparation,
+} from '../controller-mutation';
 import { completeMutation, MutationResultError } from '../operation';
 import { selectionKey } from '../query';
 
@@ -10,9 +15,14 @@ interface Binding<Input, Result, S extends Schema> {
     prepare(
         input: Input,
         route?: ControllerMutationWire['route'],
+        preparation?: MutationPreparation,
     ): MutateRequest<ControllerMutationWire, S, ClientContext>;
     serverResultSchema: MutationCodec<Result>;
 }
+export const ControllerMutations = createContext<{
+    actions: Readonly<Record<string, unknown>>;
+    preparation: MutationPreparation;
+}>({ actions: {}, preparation: {} });
 export interface ControllerMutationState {
     status: 'idle' | 'pending' | 'success' | 'failure' | 'result-error';
     locallyApplied: boolean;
@@ -57,10 +67,12 @@ function validationFields(error: unknown): ControllerMutationState['fields'] {
 
 /** One native submission. Disposing observation never cancels an enqueued write. */
 export function useControllerMutation<Input, Result, S extends Schema>(
-    binding: Binding<Input, Result, S>,
+    binding: Binding<Input, Result, S> | ControllerMutationAction<Input, Result>,
     route: ControllerMutationWire['route'] = {},
+    preparation?: MutationPreparation,
 ) {
     const zero = useContext(ZeroContext) as Zero<S, undefined, ClientContext> | undefined;
+    const registered = useContext(ControllerMutations);
     const key = selectionKey(route);
     const identity = useRef({ zero, binding, key, version: 0, mounted: true });
     const [snapshot, setSnapshot] = useState({ identity: identity.current, state: idle });
@@ -84,7 +96,14 @@ export function useControllerMutation<Input, Result, S extends Schema>(
         update({ ...idle, status: 'pending' });
         try {
             if (!zero) throw new Error('Zero is still initializing.');
-            const call = zero.mutate(binding.prepare(input, route));
+            // React context erases the application's schema; generated references and
+            // the provider registry restore the same binding by controller identity.
+            const action = ('action' in binding ? registered.actions[binding.action] : binding) as
+                | Binding<Input, Result, S>
+                | undefined;
+            if (!action) throw new Error('The controller action is not registered with this Zero provider.');
+            const parsed = 'inputSchema' in binding ? binding.inputSchema.parse(input) : input;
+            const call = zero.mutate(action.prepare(parsed, route, { ...registered.preparation, ...preparation }));
             void call.client.then(
                 (result) => {
                     if (!completed && result.type === 'success') {

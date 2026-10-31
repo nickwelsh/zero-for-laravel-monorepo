@@ -42,6 +42,9 @@ custom projections to the generated `createControllerMutationBindings` factory.
 When a custom action exists, the React module exports `createZeroBindings(projections)`
 instead of constructing a provider without the required projections. Call it once
 in an application-owned module and export its `ZeroProvider` and `actions`.
+Key each projection by the imported action's literal `action` property, for example
+`createZeroBindings({ [notify.action]: async ({ tx, args }) => ... })`, rather than
+typing a PHP controller path by hand.
 Declare their client result independently when it differs from the server result.
 Missing required bound rows produce the declared pre-write no-op prediction;
 the valid intent still reaches Laravel.
@@ -50,15 +53,53 @@ the valid intent still reaches Laravel.
 
 ```tsx
 import { useControllerMutation } from '@nickwelsh/zero-for-laravel/react';
-import { actions } from '@/zero/generated.react';
+import { store as create } from '@/zero/App/Http/Controllers/TaskController';
 
-const create = useControllerMutation(actions['App\\Http\\Controllers\\TaskController@store']);
-const saved = await create({ title: 'A task' });
+const createTask = useControllerMutation(create);
+const saved = await createTask({ title: 'A task' });
 console.log(saved.id);
 ```
 
+Exports follow the PHP namespace and method name. Each controller module also
+exports named input and result types, such as `StoreInput` and `StoreResult`.
+The same imports work with custom optimism: the hook uses the bindings installed
+by the current generated `ZeroProvider`, including its custom projections.
+
+## Prepared fields
+
+Generated creates prepare identities and time **before** calling `zero.mutate`.
+`HasUuids` selects UUID generation; `HasUlids` selects ULID generation. Eloquent's
+timestamp settings determine the created/updated columns, including renamed
+`CREATED_AT` and `UPDATED_AT` columns. Auto-incrementing keys are not supported
+for generated creation. These values stay outside FormRequest business input:
+forms send fields such as `title`, not required IDs or timestamps.
+
+Preparation runs once per submission. The frozen native arguments carry the same
+values through optimistic execution, replay, and authoritative PHP execution.
+Updates preserve creation time and use the prepared time for the updated column.
+Server authorization and format validation still apply; client time is not a
+trusted audit clock. Arbitrary server-only Eloquent creates in custom/disabled
+actions are not automatically transformed into client-prepared creates.
+
+Override generators globally when constructing the generated provider:
+
+```ts
+import { v7 as uuid } from 'uuid';
+import { createZeroBindings } from '@/zero/generated.react';
+
+export const { ZeroProvider } = createZeroBindings({ uuid, now: () => new Date() });
+// With custom optimism: createZeroBindings(projections, { uuid, now: () => new Date() }).
+```
+
+Or pass overrides as the hook's third argument:
+`useControllerMutation(create, {}, { uuid, now: () => new Date() })`.
+The supported generators are `uuid`, `ulid`, and `now`. Overrides must return valid,
+distinct identities and a valid nonnegative date. Never generate values inside an
+optimistic projection: Zero can replay it more than once.
+
 Supply route arguments for bound actions. For direct native control, prepare once
-with `action.prepare(input, routeArguments)`, then call `zero.mutate(request)`.
+with a binding from `createControllerMutationBindings`, using
+`binding.prepare(input, routeArguments, preparation)`, then call `zero.mutate(request)`.
 `.client` means local application; `.server` means authoritative outcome. Parse
 result data with the generated client/server result schemas. `void`, explicit
 null, and structured JSON remain distinct. Model and HTTP-response serialization

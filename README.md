@@ -127,6 +127,10 @@ php artisan zero:sync-publication
 
 Generation writes the native schema/metadata, sibling `.queries.ts`, `.mutations.ts`,
 optional `.react.ts`, and matching `bootstrap/zero-{queries,mutations}.php` registries.
+It also writes one module per controller, with named action exports and types such
+as `StoreInput`/`StoreResult`, plus `pages.d.ts` for `Inertia.Pages` types. Page names
+follow component paths: `settings/profile` becomes `Inertia.Pages.Settings.Profile`.
+The generated file manifest tracks obsolete controller modules for safe removal.
 Deploy these together. `zero:generate --check` detects drift. The editable
 `zero.config.ts` holds public connection options and is never overwritten.
 
@@ -137,12 +141,11 @@ the wrapped page. Pass `userID` and `context={{ user_id: user.id }}`. Changing i
 replaces the client and clears identity-scoped results.
 
 ```tsx
-import type { Pages } from '@/zero/generated.queries';
-import { actions } from '@/zero/generated.react';
+import { store } from '@/zero/App/Http/Controllers/TaskController';
 import { useControllerMutation } from '@nickwelsh/zero-for-laravel/react';
 
-export default function Tasks({ tasks }: Pages['App\\Http\\Controllers\\TaskController@index']) {
-    const create = useControllerMutation(actions['App\\Http\\Controllers\\TaskController@store']);
+export default function Tasks({ tasks }: Inertia.Pages.Tasks.Index) {
+    const create = useControllerMutation(store);
     // Await create(input) for validated authoritative result data.
     return tasks.data.map((task) => <p key={task.id}>{task.title}</p>);
 }
@@ -156,9 +159,17 @@ loading, refreshing, success, stale, and failure. Connection state is separate.
 
 For non-Inertia reads, use generated query `actions` with typed public arguments
 and `useData()`. Internal `bindings` consume wire arguments from page metadata.
-For native mutation lifecycle access, call `action.prepare(input, routeArguments)`
+For native mutation lifecycle access, obtain a binding from the generated binding
+factory and call `binding.prepare(input, routeArguments)`
 and `zero.mutate(request)`, then observe `.client` and `.server`. A committed result
 decode failure is not a rolled-back write and must not trigger resubmission.
+
+Generated creates use **prepared fields**: UUIDs/ULIDs inferred from Eloquent traits,
+plus timestamps inferred from the model's timestamp settings. The client captures
+them before enqueueing, separately from form input, and replay/server execution reuse
+them. Override `uuid`, `ulid`, or `now` through `createZeroBindings(preparation)`
+(`createZeroBindings(projections, preparation)` for custom optimism), or the hook's
+third argument. Overrides run before native mutation creation, never during replay.
 
 ## Configure the trusted cache boundary
 
