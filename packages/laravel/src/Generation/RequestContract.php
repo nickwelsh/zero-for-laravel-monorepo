@@ -30,6 +30,7 @@ final class RequestContract
             throw new LogicException($class.': rules() must have a statically known field shape.');
         }
 
+        $choices = RequestChoices::forRequest($class);
         $fields = [];
         foreach ($type->value as $field => $rules) {
             if (! is_string($field)) {
@@ -42,6 +43,15 @@ final class RequestContract
                 if ($rule instanceof StringType && $rule->value !== null) {
                     array_push($fields[$field], ...explode('|', $rule->value));
                 }
+            }
+
+            if (isset($choices[$field])) {
+                if ($choices[$field] === []) {
+                    throw new LogicException('Finite input choices cannot be empty.');
+                }
+
+                $fields[$field][] = 'choices:'.json_encode($choices[$field], JSON_THROW_ON_ERROR);
+                $fields[$field][] = is_int($choices[$field][0]) ? 'integer' : 'string';
             }
 
             self::type($fields[$field]);

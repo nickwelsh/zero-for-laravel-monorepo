@@ -4,8 +4,10 @@ import { afterEach, beforeEach, expect, it, vi } from 'vite-plus/test';
 import { createBuilder, defineQueries, defineQuery } from '@rocicorp/zero';
 import { Task, schema, definitions } from '../../../../tests/interop/generated';
 import { createZeroForLaravel } from '../runtime';
-import { liveQuery } from '../live-query';
-import { useData, type Data } from './data';
+import { liveQuery, withQueryInputs } from '../live-query';
+import { z } from 'zod';
+import { router } from '@inertiajs/react';
+import { useData, type Data, type QueryInputs } from './data';
 import { createInertiaAdapter, useLiveProps } from './inertia';
 
 const native = vi.hoisted(() => ({
@@ -307,6 +309,94 @@ it('navigates live cursor windows using raw values and ignores stale or repeated
     act(previousScopeNext);
     expect(result.current.hasPreviousPage).toBe(false);
     expect(result.current.data).toEqual([]);
+});
+
+it('edits validated query inputs without changing route identity, and restores initial inputs', () => {
+    const input = z.strictObject({
+        list: z.string(),
+        input: z.strictObject({
+            status: z.enum(['active', 'completed']).nullable().optional(),
+            title: z.string().optional(),
+        }),
+    });
+    const queries = defineQueries({
+        tasks: defineQuery(({ args }: { args: z.infer<typeof input> }) =>
+            createBuilder(schema).tasks.where('title', args.input.title ?? ''),
+        ),
+    });
+    const factory = (args: z.infer<typeof input>) =>
+        withQueryInputs(
+            liveQuery(queries.tasks, args, definitions, 'Task', false),
+            args,
+            'input',
+            { status: ['active', 'completed'] as const },
+            (value) => input.parse(value),
+        );
+    let live: Data<unknown> & {
+        inputs: QueryInputs<z.infer<typeof input>['input'], { status: readonly ['active', 'completed'] }>;
+    };
+    const Page = (props: { tasks: typeof live }) => {
+        live = props.tasks;
+        return <p>{JSON.stringify(props.tasks.inputs.values)}</p>;
+    };
+    const args = { list: 'fixed', input: { status: 'active' as const, title: 'Seed' } };
+    const page = {
+        component: 'tasks',
+        props: { __zero: { version: 1, mode: 'replace', bindings: { tasks: { query: 'tasks', args } } } },
+    };
+    const replace = vi.spyOn(router, 'replace').mockImplementation(() => {});
+    const adapter = createInertiaAdapter({ tasks: factory }, { url: { tasks: { tasks: { status: 'status' } } } });
+    put(args, [{ id: 'a', title: 'Seed' }]);
+    put({ list: 'fixed', input: { status: 'completed', title: 'Changed' } }, [{ id: 'b', title: 'Changed' }]);
+    try {
+        const Wrapped = adapter.wrap(Page, page);
+        const view = render(<Wrapped {...(page.props as unknown as { tasks: typeof live })} />);
+        expect(live!.inputs.options.status).toEqual(['active', 'completed']);
+        act(() => {
+            live.inputs.set({ status: 'completed' });
+            live.inputs.set((current) => ({ title: current.status === 'completed' ? 'Changed' : 'Wrong' }));
+        });
+        expect(live!.data).toEqual([{ id: 'b', title: 'Changed' }]);
+        expect(replace.mock.lastCall?.[0].url).toBe('/?status=completed');
+        for (const [visit] of replace.mock.calls.slice(0, 2)) {
+            if (typeof visit.props !== 'function') throw new Error('Expected serializable history update.');
+            const acknowledgement = { ...page, url: visit.url, props: visit.props(page.props, {}) };
+            document.dispatchEvent(new CustomEvent('inertia:navigate', { detail: { page: acknowledgement } }));
+            view.rerender(<Wrapped {...(acknowledgement.props as unknown as { tasks: typeof live })} />);
+            expect(live!.inputs.values).toEqual({ status: 'completed', title: 'Changed' });
+        }
+        expect(() => act(() => live.inputs.set(JSON.parse('{"status":"invalid"}')))).toThrow();
+        expect(() => act(() => live.inputs.set(JSON.parse('{"list":"other"}')))).toThrow();
+        expect(live!.inputs.values).toEqual({ status: 'completed', title: 'Changed' });
+        act(() => live.inputs.set({ status: null }));
+        expect(live!.inputs.values.status).toBeNull();
+        act(() => live.inputs.set({ status: undefined }));
+        expect(live!.inputs.values).not.toHaveProperty('status');
+        act(() => live.inputs.reset());
+        expect(live!.inputs.values).toEqual(args.input);
+        const partial = { component: 'tasks', props: { __zero: { version: 1, mode: 'patch', bindings: {} } } };
+        act(() => live.inputs.set({ title: 'Local' }));
+        document.dispatchEvent(new CustomEvent('inertia:beforeUpdate', { detail: { page: partial } }));
+        view.rerender(<Wrapped {...(partial.props as unknown as { tasks: typeof live })} />);
+        expect(live!.inputs.values.title).toBe('Local');
+        const next = {
+            ...page.props,
+            __zero: {
+                ...page.props['__zero'],
+                bindings: { tasks: { query: 'tasks', args: { list: 'different', input: {} } } },
+            },
+        };
+        view.rerender(<Wrapped {...(next as unknown as { tasks: typeof live })} />);
+        expect(live!.inputs.values).toEqual({});
+        const detached = live!.inputs.set;
+        view.unmount();
+        replace.mockClear();
+        act(() => detached({ status: 'active' }));
+        expect(replace).not.toHaveBeenCalled();
+    } finally {
+        adapter.dispose();
+        replace.mockRestore();
+    }
 });
 
 it('injects live Inertia props and stores complete binding metadata across partial visits', () => {

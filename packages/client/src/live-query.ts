@@ -15,6 +15,36 @@ export type InferQueryResult<Q extends (...args: never[]) => ReturnType<AnyCusto
 export type InferLiveQueryResult<Q extends { live: (...args: never[]) => { decode: (...args: never[]) => unknown } }> =
     ReturnType<ReturnType<Q['live']>['decode']>;
 
+export type InferLiveQueryInputs<Q extends { live: (...args: never[]) => { input: { values: object } } }> = ReturnType<
+    Q['live']
+>['input']['values'];
+
+export type InferLiveQueryOptions<Q extends { live: (...args: never[]) => { input: { options: object } } }> =
+    ReturnType<Q['live']>['input']['options'];
+
+/** Generated input metadata exposes only the FormRequest, never route or identity arguments. */
+export function withQueryInputs<
+    S extends ReadSelection,
+    A extends object,
+    K extends keyof A | null,
+    O extends Record<string, readonly (string | number)[]>,
+>(selection: S, args: A, field: K, options: O, parse: (value: unknown) => A) {
+    type Values = K extends keyof A ? Extract<A[K], object> : Record<string, never>;
+    const values = freeze(structuredClone(field === null ? {} : args[field])) as Readonly<Values>;
+    return Object.freeze({
+        ...selection,
+        input: {
+            values,
+            options: freeze(options),
+            apply(value: object): A {
+                if (field === null && Object.keys(value).length) fail('inputs', 'This query has no editable inputs.');
+                const { __cursor: _cursor, __window: _window, ...base } = object(args, 'args');
+                return parse(field === null ? base : { ...base, [field]: value });
+            },
+        },
+    });
+}
+
 type DecodedRow<D extends ContractMap, N extends keyof D & string, R> = R extends undefined
     ? undefined
     : {

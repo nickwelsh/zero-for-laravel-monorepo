@@ -16,6 +16,7 @@ import {
     index,
     show,
     dated,
+    choices,
 } from '../../../tests/interop/controller-api/ZeroForLaravel/Tests/Fixtures/QueryController';
 import type {
     InferQueryInput,
@@ -81,6 +82,19 @@ it('executes the PHP-generated typed bindings without application-authored codec
         expect(rows.map((row) => row.id)).toEqual([id]);
         expectTypeOf(rows[0]!.created_at).toEqualTypeOf<number | null>();
         expectTypeOf<InferLiveQueryResult<typeof index.tasks>[number]['created_at']>().toEqualTypeOf<Date | null>();
+        expectTypeOf<InferQueryInput<typeof choices.tasks>['input']['status']>().toEqualTypeOf<
+            'active' | 'completed' | undefined
+        >();
+        const filtered = choices.tasks.live({ input: { status: 'active', priority: 7 }, __window: 8 });
+        expect(filtered.input.options).toEqual({
+            direction: ['asc', 'desc'],
+            priority: [2, 7],
+            status: ['active', 'completed'],
+        });
+        expect(filtered.input.apply({ status: 'completed' })).toEqual({ input: { status: 'completed' } });
+        expect(() => filtered.input.apply({ status: 'invalid' })).toThrow();
+        expect(() => filtered.input.apply({ priority: 3 })).toThrow();
+        expect(() => index.tasks.live(queryInput).input.apply({ title: 'other' })).toThrow();
         expectTypeOf<InferMutationInput<typeof storeAction>['title']>().toEqualTypeOf<string>();
         expectTypeOf<InferMutationResult<typeof storeAction>>().toEqualTypeOf<{ id: string }>();
         const single: InferQueryResult<typeof show.task> = await zero.run(show.task({ task: id }));

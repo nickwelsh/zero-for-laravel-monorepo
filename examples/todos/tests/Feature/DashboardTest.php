@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Inertia\Testing\AssertableInertia;
 use Tests\TestCase;
 
 class DashboardTest extends TestCase
@@ -23,5 +24,13 @@ class DashboardTest extends TestCase
 
         $response = $this->get(route('dashboard'));
         $response->assertOk();
+
+        $this->get(route('dashboard', ['status' => 'completed']))
+            ->assertOk()
+            ->assertInertia(fn (AssertableInertia $page) => $page
+                ->where('__zero.bindings.lists.args.input.status', 'completed'));
+        $this->getJson(route('dashboard', ['status' => 'unknown']))
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('status');
     }
 }

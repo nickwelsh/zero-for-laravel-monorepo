@@ -63,6 +63,10 @@ final readonly class ZodMutationSchemaDriver implements MutationSchemaDriver
             }
         }
 
+        if (($choices = $contract->choices()) !== null) {
+            $schema .= '.and(z.union(['.implode(', ', array_map(fn (string|int $value): string => 'z.literal('.json_encode($value, JSON_THROW_ON_ERROR).')', $choices)).']))';
+        }
+
         return $schema.($contract->nullable && $contract->kind !== 'null' ? '.nullable()' : '').($contract->optional ? '.optional()' : '');
     }
 }

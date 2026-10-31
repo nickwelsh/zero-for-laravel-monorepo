@@ -36,6 +36,11 @@ final class QueryController
         return Inertia::render('tasks/dated', ['tasks' => Task::zeroQuery()->where('completed_at', '>=', $validated['after'])]);
     }
 
+    public function choices(ChoiceQueryRequest $input): Response
+    {
+        return Inertia::render('tasks/choices', ['tasks' => Task::zeroQuery()->orderBy('id', 'asc')->infinite(2)]);
+    }
+
     public function search(QueryRequest $input): Response
     {
         $validated = $input->validated();

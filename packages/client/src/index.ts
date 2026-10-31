@@ -1,6 +1,12 @@
-export { liveQuery } from './live-query';
+export { liveQuery, withQueryInputs } from './live-query';
 export type { LiveQueryResult } from './live-query';
-export type { InferQueryInput, InferQueryResult, InferLiveQueryResult } from './live-query';
+export type {
+    InferQueryInput,
+    InferQueryResult,
+    InferLiveQueryResult,
+    InferLiveQueryInputs,
+    InferLiveQueryOptions,
+} from './live-query';
 export { createControllerMutations, runControllerMutation } from './controller-mutation';
 export type {
     ControllerMutationContract,

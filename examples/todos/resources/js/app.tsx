@@ -11,7 +11,9 @@ import { bindings } from '@/zero/generated.queries';
 
 const appName = import.meta.env.VITE_APP_NAME || 'Laravel';
 const pages = import.meta.glob<{ default: ComponentType }>('./pages/**/*.tsx');
-const livePages = createInertiaAdapter(bindings);
+const livePages = createInertiaAdapter(bindings, {
+    url: { dashboard: { lists: { status: 'status' } } },
+});
 
 void createInertiaApp({
     title: (title) => (title ? `${title} - ${appName}` : appName),

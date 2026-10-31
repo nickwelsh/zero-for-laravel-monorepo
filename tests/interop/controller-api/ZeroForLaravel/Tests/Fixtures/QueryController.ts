@@ -6,3 +6,5 @@ const query1 = {["task"]: Object.assign((input: Parameters<typeof liveQueries["Z
 export {query1 as show};
 const query2 = {["tasks"]: Object.assign((input: Parameters<typeof liveQueries["ZeroForLaravel\\Tests\\Fixtures\\QueryController@dated.tasks"]>[0]) => liveQueries["ZeroForLaravel\\Tests\\Fixtures\\QueryController@dated.tasks"](input).request(), {live: liveQueries["ZeroForLaravel\\Tests\\Fixtures\\QueryController@dated.tasks"]})};
 export {query2 as dated};
+const query3 = {["tasks"]: Object.assign((input: Parameters<typeof liveQueries["ZeroForLaravel\\Tests\\Fixtures\\QueryController@choices.tasks"]>[0]) => liveQueries["ZeroForLaravel\\Tests\\Fixtures\\QueryController@choices.tasks"](input).request(), {live: liveQueries["ZeroForLaravel\\Tests\\Fixtures\\QueryController@choices.tasks"]})};
+export {query3 as choices};

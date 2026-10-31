@@ -25,6 +25,29 @@ export function TodosWorkspace({ userId, lists }: { userId: number; lists: Inert
                     </output>
                 </div>
                 <p className="mt-1 text-sm text-muted-foreground">A few things to do, together.</p>
+                <div className="mt-4 flex items-center gap-2">
+                    <label htmlFor="todo-status" className="text-sm font-medium">
+                        Status
+                    </label>
+                    <select
+                        id="todo-status"
+                        className="rounded-md border bg-background px-3 py-2 text-sm"
+                        value={lists.inputs.values.status ?? 'all'}
+                        onChange={(event) => {
+                            const status = lists.inputs.options.status.find((option) => option === event.target.value);
+                            if (status) lists.inputs.set({ status });
+                        }}
+                    >
+                        {lists.inputs.options.status.map((status) => (
+                            <option key={status} value={status}>
+                                {status[0].toUpperCase() + status.slice(1)}
+                            </option>
+                        ))}
+                    </select>
+                    <Button variant="ghost" onClick={() => lists.inputs.reset()}>
+                        Reset filter
+                    </Button>
+                </div>
             </header>
             {lists.error && (
                 <div role="alert" className="rounded-lg border border-destructive p-3 text-sm text-destructive">

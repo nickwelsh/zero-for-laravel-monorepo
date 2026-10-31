@@ -48,6 +48,55 @@ final readonly class ValueContract
         return $this->kind === 'void' || array_filter($this->members, fn (self $member): bool => $member->includesVoid()) !== [];
     }
 
+    /** @return list<string|int>|null */
+    public function choices(): ?array
+    {
+        $choices = null;
+        foreach ($this->rules as $rule) {
+            $values = null;
+            if (str_starts_with($rule, 'choices:')) {
+                $decoded = json_decode(substr($rule, 8), true, flags: JSON_THROW_ON_ERROR);
+                if (! is_array($decoded) || ! array_is_list($decoded)) {
+                    throw new LogicException('Invalid finite input choices.');
+                }
+
+                $values = [];
+                foreach ($decoded as $value) {
+                    if (! is_string($value) && ! is_int($value)) {
+                        throw new LogicException('Choices must be strings or integers.');
+                    }
+
+                    $values[] = $value;
+                }
+            } elseif (str_starts_with($rule, 'in:') && in_array($this->kind, ['string', 'int'], true)) {
+                $values = [];
+                foreach (str_getcsv(substr($rule, 3), escape: '') as $value) {
+                    if ($value === null || ($this->kind === 'int' && filter_var($value, FILTER_VALIDATE_INT) === false)) {
+                        throw new LogicException('Invalid finite input choice.');
+                    }
+
+                    $values[] = $this->kind === 'int' ? (int) $value : $value;
+                }
+            }
+
+            if ($values !== null) {
+                foreach ($values as $value) {
+                    if (($this->kind === 'string' && ! is_string($value)) || ($this->kind === 'int' && ! is_int($value))) {
+                        throw new LogicException('Finite choices must match the declared input scalar type.');
+                    }
+                }
+
+                $choices = $choices === null ? $values : array_values(array_filter($choices, fn (string|int $choice): bool => in_array($choice, $values, true)));
+            }
+        }
+
+        if ($choices === []) {
+            throw new LogicException('Finite input choices cannot be empty.');
+        }
+
+        return $choices;
+    }
+
     /** Validate and preserve JSON object/list identity before committing a result. */
     public function normalize(mixed $value): mixed
     {
@@ -120,6 +169,10 @@ final readonly class ValueContract
             'union' => implode(' | ', array_map(fn (self $item): string => '('.$item->typescript().')', $this->members)),
             default => throw new LogicException('Unsupported mutation value contract '.$this->kind),
         };
+
+        if (($choices = $this->choices()) !== null) {
+            $base = implode(' | ', array_map(fn (string|int $value): string => json_encode($value, JSON_THROW_ON_ERROR), $choices));
+        }
 
         return $base.($this->nullable && $this->kind !== 'null' ? ' | null' : '');
     }

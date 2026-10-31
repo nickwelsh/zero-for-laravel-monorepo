@@ -22,6 +22,20 @@ use ZeroForLaravel\ZeroContext;
 
 uses(TestCase::class);
 
+test('finite FormRequest choices generate literal unions and runtime options without requiring optional fields', function (): void {
+    app()->register(SurveyorServiceProvider::class);
+    // QueryDirection is declared alongside this fixture controller.
+    class_exists(QueryController::class);
+    $contract = \ZeroForLaravel\Generation\RequestContract::value(\ZeroForLaravel\Tests\Fixtures\ChoiceQueryRequest::class);
+    expect($contract->fields['direction']->choices())->toBe(['asc', 'desc'])
+        ->and($contract->fields['priority']->choices())->toBe([2, 7])
+        ->and($contract->fields['status']->choices())->toBe(['active', 'completed'])
+        ->and($contract->fields['direction']->typescript())->toBe('"asc" | "desc" | null')
+        ->and($contract->fields['direction']->optional)->toBeTrue();
+    $schema = (new ZodSchemaDriver)->object(['input' => 'request:'.\ZeroForLaravel\Tests\Fixtures\ChoiceQueryRequest::class]);
+    expect($schema)->toContain('z.literal(2)', 'z.literal(7)', 'z.literal("active")', '.nullable().optional()');
+});
+
 test('registered controller queries preserve input branches without executing the HTTP action', function (): void {
     /** @var TestCase $this */
     app()->register(SurveyorServiceProvider::class);

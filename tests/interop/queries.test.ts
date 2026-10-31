@@ -10,7 +10,7 @@ import { transformSync } from 'esbuild';
 // order before returning an AST. PHP emits the equivalent unnormalized wire AST.
 import { normalizeAST } from '../../node_modules/@rocicorp/zero/out/zero-protocol/src/ast.js';
 import { schema, queries, definitions } from './generated';
-import { liveQuery } from '../../packages/client/src/live-query';
+import { liveQuery, withQueryInputs } from '../../packages/client/src/live-query';
 import type { QueryArgs } from '@nickwelsh/zero-for-laravel';
 
 it('executes both generated controller definitions with empty, zero-string, and ordinary inputs', () => {
@@ -88,7 +88,7 @@ it('executes both generated controller definitions with empty, zero-string, and 
     const compiled = transformSync(source, { loader: 'ts', format: 'cjs', target: 'es2022' });
     const modules: Record<string, unknown> = {
         '@rocicorp/zero': { createBuilder, defineQueriesWithType, defineQueryWithType },
-        '@nickwelsh/zero-for-laravel': { liveQuery },
+        '@nickwelsh/zero-for-laravel': { liveQuery, withQueryInputs },
         zod: { z },
         './generated': { schema, definitions },
     };
@@ -114,7 +114,7 @@ it('encodes public Date arguments before constructing native named query request
     const compiled = transformSync(source, { loader: 'ts', format: 'cjs', target: 'es2022' });
     const modules: Record<string, unknown> = {
         '@rocicorp/zero': { createBuilder, defineQueriesWithType, defineQueryWithType },
-        '@nickwelsh/zero-for-laravel': { liveQuery },
+        '@nickwelsh/zero-for-laravel': { liveQuery, withQueryInputs },
         zod: { z },
         './generated': { schema, definitions },
     };

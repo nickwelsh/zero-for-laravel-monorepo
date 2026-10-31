@@ -58,12 +58,30 @@ export interface ReadSelection {
     readonly queries?: unknown;
     readonly mutators?: unknown;
     readonly defaults?: unknown;
+    readonly input?: {
+        readonly values: object;
+        readonly options: Readonly<Record<string, readonly (string | number)[]>>;
+        apply(values: object): object;
+    };
     request(): unknown;
     decode(raw: unknown): unknown;
     limit?(limit: number): ReadSelection;
     page?(cursor: Readonly<Record<string, unknown>> | undefined): ReadSelection;
     cursor?(raw: unknown): Readonly<Record<string, unknown>>;
 }
+
+export interface QueryInputs<I extends object, O extends object> {
+    readonly values: Readonly<I>;
+    readonly options: Readonly<O>;
+    set(this: void, patch: Partial<I> | ((current: Readonly<I>) => Partial<I>)): void;
+    reset(this: void): void;
+}
+
+export type QueryData<
+    Q extends { live: (...args: never[]) => ReadSelection & { input: { values: object; options: object } } },
+> = Data<SelectionData<ReturnType<Q['live']>>> & {
+    readonly inputs: QueryInputs<ReturnType<Q['live']>['input']['values'], ReturnType<Q['live']>['input']['options']>;
+};
 
 // Stable semantics keep decoding local to this hook and its authorization identity.
 function useSelection<Q extends ReadSelection>(selection: Q, identity: unknown, context: string): Q {

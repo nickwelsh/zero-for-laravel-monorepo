@@ -99,6 +99,56 @@ The page resolver adapter removes the need for per-prop query hooks.
 `useLiveProps` exposes the same contract below the page; native Inertia `usePage`
 continues to expose serializable props. No Zero rows enter page history or SSR props.
 
+### Editable query inputs
+
+A controller's FormRequest defines its editable query inputs. Laravel seeds them
+from the request URL and validates them again on every Zero transform. Route-model
+bindings, route selectors, and authorization context are not editable filters.
+
+```tsx
+function Dashboard({ lists }: Inertia.Pages.Dashboard) {
+    const { values, options, set, reset } = lists.inputs;
+    // values.status: 'all' | 'active' | 'completed' | undefined
+    // options.status: readonly ['all', 'active', 'completed']
+    return <button onClick={() => set({ status: 'active' })}>Active</button>;
+}
+```
+
+`set(partial)` shallow-merges fields; `set(current => partial)` uses the latest
+values even during rapid updates. Set an optional field to `undefined` to remove
+it; `null` is a distinct value and requires a nullable rule. Invalid inputs throw
+before changing the subscription. Changed inputs reset pagination. `reset()`
+restores the inputs supplied by the page, not a hard-coded default. Partial visits
+that omit the live binding preserve local inputs; a new binding replaces them.
+Queries without a FormRequest expose empty inputs and reject nonempty patches.
+Date inputs here use canonical JSON strings, matching native Zero query arguments.
+
+Finite options are inferred from direct `Rule::enum(BackedEnum::class)`, static
+`Rule::in([...])`, and string `in:` validation rules. Values are also literal
+unions in generated types. Options contain values, not presentation labels;
+applications own labels and translations. Chained enum restrictions are not
+supported; use an explicit static `Rule::in` list instead. Laravel remains
+authoritative for validation and authorization, including dynamic rules.
+
+Input changes only resubscribe to Zero by default; no Inertia request is needed.
+Opt into URL synchronization explicitly:
+
+```ts
+const livePages = createInertiaAdapter(bindings, {
+    url: { dashboard: { lists: { status: 'status' } } },
+    history: 'replace', // or 'push' for navigable filter history
+});
+```
+
+Only mapped scalar fields enter the URL. Undefined removes a parameter, null
+becomes an empty value, and booleans use `1`/`0`. Inertia's client-side history API
+stores serializable bindings, never live rows. Reloads use Laravel's normal
+FormRequest parsing; use matching normalization for numeric/boolean URL inputs.
+Native query exports still work with `zero.run`, `useQuery`, or `zero.materialize`.
+Use `InferLiveQueryInputs`, `InferLiveQueryOptions`, and React's `QueryData<typeof
+index.lists>` to derive types without a global namespace. The opt-in Wayfinder
+integration uses `QueryData` in its own generated page declarations.
+
 `useControllerMutation(action, routeArguments)` exposes local application,
 authoritative acceptance, validation fields, and committed-result decoding errors.
 Await its call for authoritative data. Identity changes and unmounts stop stale UI
