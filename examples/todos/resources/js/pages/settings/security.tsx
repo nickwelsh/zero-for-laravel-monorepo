@@ -1,24 +1,17 @@
 import { Form, Head } from '@inertiajs/react';
 import { useRef } from 'react';
-import { update } from '@/actions/App/Http/Controllers/Settings/SecurityController';
+import { update } from '@/wayfinder/App/Http/Controllers/Settings/SecurityController';
 import Heading from '@/components/heading';
 import InputError from '@/components/input-error';
 import PasswordInput from '@/components/password-input';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
-import { edit } from '@/routes/security';
-import type { Props as ManagePasskeysProps } from '@/components/manage-passkeys';
+import { edit } from '@/wayfinder/routes/security';
 import ManagePasskeys from '@/components/manage-passkeys';
-import type { Props as ManageTwoFactorProps } from '@/components/manage-two-factor';
 import ManageTwoFactor from '@/components/manage-two-factor';
+import type { Inertia } from '@/wayfinder/types';
 
-// oxfmt-ignore
-type Props = {
-    passwordRules: string;
-} & ManagePasskeysProps &
-    ManageTwoFactorProps;
-
-export default function Security(props: Props) {
+export default function Security(props: Inertia.Pages.Settings.Security) {
     const passwordInput = useRef<HTMLInputElement>(null);
     const currentPasswordInput = useRef<HTMLInputElement>(null);
 

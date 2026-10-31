@@ -10,7 +10,7 @@
         "check": "pnpm --workspace-root exec vp check examples/todos",
         "check:fix": "pnpm --workspace-root exec vp check --fix examples/todos",
         "types:check": "tsc --noEmit",
-        "zero:generate": "php artisan zero:generate",
+        "zero:generate": "php artisan zero:generate --react && php artisan wayfinder:generate --fresh",
         "zero:dev": "node scripts/start-zero.mjs",
         "zero:check": "php artisan zero:generate --check"
     },

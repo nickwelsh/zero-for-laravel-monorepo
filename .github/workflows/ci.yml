@@ -19,14 +19,11 @@ jobs:
           extensions: pdo_sqlite, mbstring
           coverage: none
       - run: composer --working-dir=examples/todos install --no-dev --no-interaction --prefer-dist
-      - run: php examples/todos/artisan wayfinder:generate --with-form
+      - run: php examples/todos/artisan wayfinder:generate --fresh
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: example-imports
-          path: |
-            examples/todos/resources/js/actions
-            examples/todos/resources/js/routes
-            examples/todos/resources/js/wayfinder
+          path: examples/todos/resources/js/wayfinder
 
   verify:
     needs: example-imports
@@ -97,7 +94,7 @@ jobs:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: example-imports
-          path: examples/todos/resources/js
+          path: examples/todos/resources/js/wayfinder
       - run: pnpm --filter @nickwelsh/zero-for-laravel build
       - run: pnpm check
       - run: pnpm test:integration

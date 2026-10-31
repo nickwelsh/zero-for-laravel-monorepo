@@ -1,6 +1,6 @@
 import { Head, Link, usePage } from '@inertiajs/react';
-import { dashboard, login } from '@/routes';
-import { register } from '@/routes';
+import { dashboard, login } from '@/wayfinder/routes';
+import { register } from '@/wayfinder/routes';
 
 export default function Welcome() {
     const { auth } = usePage().props;

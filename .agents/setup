@@ -94,7 +94,7 @@ fi
 step composer --working-dir=packages/laravel install --no-interaction --prefer-dist
 step composer --working-dir=examples/todos install --no-interaction --prefer-dist
 step pnpm install --frozen-lockfile
-step php examples/todos/artisan wayfinder:generate --with-form
+step php examples/todos/artisan wayfinder:generate --fresh
 step pnpm --filter @nickwelsh/zero-for-laravel build
 [[ -f examples/todos/.env ]] || cp -- examples/todos/.env.example examples/todos/.env
 printf '\nOrb dependencies ready: Node %s, pnpm %s, PHP %s\n' \

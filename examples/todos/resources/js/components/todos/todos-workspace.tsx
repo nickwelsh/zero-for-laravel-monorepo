@@ -1,21 +1,14 @@
-import { useControllerMutation, type Data } from '@nickwelsh/zero-for-laravel/react';
-import type { InferLiveQueryResult } from '@nickwelsh/zero-for-laravel';
+import { useControllerMutation } from '@nickwelsh/zero-for-laravel/react';
 import { useState } from 'react';
 import InputError from '@/components/input-error';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { store } from '@/zero/App/Http/Controllers/TodoListController';
-import type { index } from '@/zero/App/Http/Controllers/DashboardController';
+import type { Inertia } from '@/wayfinder/types';
 import { ListPanel } from './list-panel';
 import { commitMutation } from './mutations';
 
-export function TodosWorkspace({
-    userId,
-    lists,
-}: {
-    userId: number;
-    lists: Data<InferLiveQueryResult<typeof index.lists>>;
-}) {
+export function TodosWorkspace({ userId, lists }: { userId: number; lists: Inertia.Pages.Dashboard['lists'] }) {
     const create = useControllerMutation(store);
     const [name, setName] = useState('');
     const [selectedId, setSelectedId] = useState<string | undefined>();

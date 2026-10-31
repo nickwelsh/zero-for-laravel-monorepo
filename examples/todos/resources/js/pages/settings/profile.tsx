@@ -1,22 +1,18 @@
 import { Form, Head, usePage } from '@inertiajs/react';
 import { Link } from '@inertiajs/react';
-import { update } from '@/actions/App/Http/Controllers/Settings/ProfileController';
+import { update } from '@/wayfinder/App/Http/Controllers/Settings/ProfileController';
 import DeleteUser from '@/components/delete-user';
 import Heading from '@/components/heading';
 import InputError from '@/components/input-error';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { edit } from '@/routes/profile';
-import type { Auth } from '@/types';
-import { send } from '@/routes/verification';
+import { edit } from '@/wayfinder/routes/profile';
+import { send } from '@/wayfinder/routes/verification';
+import type { Inertia } from '@/wayfinder/types';
 
-type PageProps = {
-    auth: Auth;
-};
-
-export default function Profile({ mustVerifyEmail, status }: { mustVerifyEmail: boolean; status?: string }) {
-    const { auth } = usePage<PageProps>().props;
+export default function Profile({ mustVerifyEmail, status }: Inertia.Pages.Settings.Profile) {
+    const { auth } = usePage<Inertia.Pages.Settings.Profile>().props;
 
     return (
         <>
@@ -42,7 +38,7 @@ export default function Profile({ mustVerifyEmail, status }: { mustVerifyEmail: 
                                 <Input
                                     id="name"
                                     className="mt-1 block w-full"
-                                    defaultValue={auth.user.name}
+                                    defaultValue={auth.user!.name}
                                     name="name"
                                     required
                                     autoComplete="name"
@@ -59,7 +55,7 @@ export default function Profile({ mustVerifyEmail, status }: { mustVerifyEmail: 
                                     id="email"
                                     type="email"
                                     className="mt-1 block w-full"
-                                    defaultValue={auth.user.email}
+                                    defaultValue={auth.user!.email}
                                     name="email"
                                     required
                                     autoComplete="username"
@@ -69,7 +65,7 @@ export default function Profile({ mustVerifyEmail, status }: { mustVerifyEmail: 
                                 <InputError className="mt-2" message={errors.email} />
                             </div>
 
-                            {mustVerifyEmail && auth.user.email_verified_at === null && (
+                            {mustVerifyEmail && auth.user!.email_verified_at === null && (
                                 <div>
                                     <p className="-mt-4 text-sm text-muted-foreground">
                                         Your email address is unverified.{' '}

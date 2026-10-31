@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "42a46c4ffae27299a86c6c97890d2e41",
+    "content-hash": "493fb8cecbfd80e44cbc3410af5f2da9",
     "packages": [
         {
             "name": "bacon/bacon-qr-code",
@@ -2101,32 +2101,32 @@
         },
         {
             "name": "laravel/wayfinder",
-            "version": "v0.1.23",
+            "version": "dev-next",
             "source": {
                 "type": "git",
                 "url": "https://github.com/laravel/wayfinder.git",
-                "reference": "e7b0914d194201e54ba320ef38137b47a7daca98"
+                "reference": "be273f802dbcc3c9a4a411ab1eea7586b922f7c9"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/laravel/wayfinder/zipball/e7b0914d194201e54ba320ef38137b47a7daca98",
-                "reference": "e7b0914d194201e54ba320ef38137b47a7daca98",
+                "url": "https://api.github.com/repos/laravel/wayfinder/zipball/be273f802dbcc3c9a4a411ab1eea7586b922f7c9",
+                "reference": "be273f802dbcc3c9a4a411ab1eea7586b922f7c9",
                 "shasum": ""
             },
             "require": {
-                "illuminate/console": "^11.0|^12.0|^13.0",
-                "illuminate/filesystem": "^11.0|^12.0|^13.0",
-                "illuminate/routing": "^11.0|^12.0|^13.0",
-                "illuminate/support": "^11.0|^12.0|^13.0",
+                "illuminate/console": "^12.0|^13.0",
+                "illuminate/filesystem": "^12.0|^13.0",
+                "illuminate/routing": "^12.0|^13.0",
+                "illuminate/support": "^12.0|^13.0",
+                "laravel/ranger": "^0.5.1",
+                "laravel/surveyor": "^0.3.0",
                 "php": "^8.2",
                 "phpstan/phpdoc-parser": "^2.3"
             },
-            "conflict": {
-                "laravel/boost": "<2.5.0"
-            },
             "require-dev": {
+                "inertiajs/inertia-laravel": "^3.0",
                 "laravel/pint": "^1.21",
-                "orchestra/testbench": "^11.0|^10.1|^9.0"
+                "orchestra/testbench": "^10.1|^11.0"
             },
             "type": "library",
             "extra": {
@@ -2163,7 +2163,8 @@
                 "issues": "https://github.com/laravel/wayfinder/issues",
                 "source": "https://github.com/laravel/wayfinder"
             },
-            "time": "2026-10-16T14:24:32+00:00"
+            "time": "2026-09-10T13:39:05+00:00",
+            "published-time": "2026-09-10T13:39:09+00:00"
         },
         {
             "name": "league/commonmark",
@@ -3098,17 +3099,18 @@
         },
         {
             "name": "nickwelsh/zero-for-laravel",
-            "version": "dev-main",
+            "version": "dev-rewrite/controller-first-pre-alpha",
             "dist": {
                 "type": "path",
                 "url": "../../packages/laravel",
-                "reference": "14b07a894e2830e44734dd32c0760a43b43d058e"
+                "reference": "68ef4b8ce8a9be5c3a5e737ff80540810532eddb"
             },
             "require": {
                 "laravel/framework": "^12.0|^13.0",
                 "laravel/ranger": "^0.5.1",
                 "laravel/surveyor": "^0.3.0",
-                "php": "^8.3"
+                "php": "^8.3",
+                "phpstan/phpdoc-parser": "^2.3"
             },
             "conflict": {
                 "phpstan/phpstan": "2.3.4"
@@ -3119,6 +3121,7 @@
                 "larastan/larastan": "^3.9",
                 "laravel/pint": "^1.0",
                 "laravel/scout": "^10.0",
+                "laravel/wayfinder": "dev-next",
                 "orchestra/testbench": "^10.0|^11.0",
                 "peckphp/peck": "^0.3.0",
                 "pestphp/pest": "^4.0",
@@ -11878,6 +11881,7 @@
     "aliases": [],
     "minimum-stability": "stable",
     "stability-flags": {
+        "laravel/wayfinder": 20,
         "nickwelsh/zero-for-laravel": 20
     },
     "prefer-stable": true,

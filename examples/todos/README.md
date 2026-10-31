@@ -81,6 +81,22 @@ with separate internal Zero schemas keyed by `todos`; `ZERO_UPSTREAM_SCHEMA=todo
 matches the cache. The replica is stored in ignored `storage/app/zero`.
 The dedicated `laravel_zero_todos` publication contains only the domain tables.
 
+## Generated page types
+
+This example uses Wayfinder `dev-next` with the published `config/wayfinder.php`.
+Inertia component metadata and enum-method generation are enabled. Routes and
+controller actions are imported from `@/wayfinder/routes` and `@/wayfinder/App/...`.
+The Vite plugin generates Zero contracts before Wayfinder; `pnpm zero:generate`
+does the same with a fresh Wayfinder analysis.
+
+Dashboard, profile, and security use `Inertia.Pages` from `@/wayfinder/types`.
+Shared props and user models also come from Wayfinder, without handwritten global
+page overrides. Authenticated pages assert the user guaranteed by their route
+middleware; shared data still correctly permits guests. Security props have an
+explicit PHP return shape, with two-factor flags always boolean (false when disabled).
+Fortify's view callbacks are not discovered by the current Wayfinder analyzer, so
+their auth-page-specific props remain locally typed.
+
 ## Migrations and database resets
 
 `zero.sync_publication_on_migrate` is enabled for this application. Successful

@@ -25,7 +25,8 @@ export default defineConfig({
         }),
         tailwindcss(),
         wayfinder({
-            formVariants: true,
+            command: 'php artisan zero:generate --react && php artisan wayfinder:generate',
+            patterns: ['routes/**/*.php', 'app/**/*.php', 'config/wayfinder.php'],
         }),
     ]),
     resolve: { dedupe: ['react', 'react-dom', '@rocicorp/zero'] },

@@ -6,7 +6,7 @@ import TwoFactorRecoveryCodes from '@/components/two-factor-recovery-codes';
 import TwoFactorSetupModal from '@/components/two-factor-setup-modal';
 import { Button } from '@/components/ui/button';
 import { useTwoFactorAuth } from '@/hooks/use-two-factor-auth';
-import { disable, enable } from '@/routes/two-factor';
+import { disable, enable } from '@/wayfinder/routes/two-factor';
 
 export type Props = {
     canManageTwoFactor?: boolean;

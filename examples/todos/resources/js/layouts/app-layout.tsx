@@ -12,7 +12,7 @@ export default function AppLayout({
 }) {
     const { auth } = usePage().props;
     return (
-        <TodosZeroProvider userId={auth.user.id}>
+        <TodosZeroProvider userId={auth.user!.id}>
             <AppLayoutTemplate breadcrumbs={breadcrumbs}>{children}</AppLayoutTemplate>
         </TodosZeroProvider>
     );
