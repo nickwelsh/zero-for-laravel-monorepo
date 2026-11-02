@@ -10,8 +10,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
-use ZeroForLaravel\ContextField;
-use ZeroForLaravel\Definition\ZeroDefinition;
+use ZeroForLaravel\Attributes\ZeroScopedBy;
 
 /**
  * @property string $id
@@ -22,6 +21,7 @@ use ZeroForLaravel\Definition\ZeroDefinition;
  * @property \Carbon\CarbonImmutable|null $completed_at
  * @property \Illuminate\Support\Carbon $created_at
  */
+#[ZeroScopedBy([OwnedScope::class])]
 class Task extends Model
 {
     use HasUuids, SoftDeletes;
@@ -32,14 +32,6 @@ class Task extends Model
     protected $fillable = ['user_id', 'list_id', 'title', 'done', 'completed_at'];
 
     protected $hidden = ['secret'];
-
-    public static function zero(): ZeroDefinition
-    {
-        return ZeroDefinition::make()
-            ->authorize('user_id', '=', ContextField::UserId)
-            ->fillFromContext('user_id', ContextField::UserId)
-            ->relations('list', 'tags', 'comments');
-    }
 
     /**
      * @return BelongsTo<TaskList, $this>

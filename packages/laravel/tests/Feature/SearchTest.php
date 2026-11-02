@@ -7,10 +7,10 @@ namespace ZeroForLaravel\Tests\Feature;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Validation\ValidationException;
 use LogicException;
+use ZeroForLaravel\ResolvedContext;
 use ZeroForLaravel\Search\ScoutSearch;
 use ZeroForLaravel\Search\TypesenseFilter;
 use ZeroForLaravel\Tests\TestCase;
-use ZeroForLaravel\ZeroContext;
 
 uses(TestCase::class);
 class SearchProjection extends Model
@@ -32,7 +32,7 @@ test('Scout model schema overrides config and public metadata excludes credentia
     $search = ScoutSearch::for(SearchProjection::class)->sorts('created_at:desc');
     $metadata = $search->metadata();
     expect($metadata['facets'])->toBe(['tags'])->and($metadata['index'])->toBe('scoped_records')->and(json_encode($metadata))->not->toContain('private-key');
-    expect(fn (): string => $search->filter(new ZeroContext(['user_id' => 'alice'])))->toThrow(LogicException::class);
+    expect(fn (): string => $search->filter(new ResolvedContext(['user_id' => 'alice'], 'alice')))->toThrow(LogicException::class);
 });
 test('search filter grammar permits facet groups and rejects server scope escape', function (): void {
     $parser = new TypesenseFilter;

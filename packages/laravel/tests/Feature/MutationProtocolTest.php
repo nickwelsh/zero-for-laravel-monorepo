@@ -19,10 +19,10 @@ use ZeroForLaravel\Http\ControllerRouteDispatcher;
 use ZeroForLaravel\Metadata\ModelRegistry;
 use ZeroForLaravel\Mutation\ControllerMutationRegistry;
 use ZeroForLaravel\Mutation\MutationProcessor;
+use ZeroForLaravel\ResolvedContext;
 use ZeroForLaravel\Tests\Fixtures\ControllerMutationController;
 use ZeroForLaravel\Tests\Fixtures\Task;
 use ZeroForLaravel\Tests\PostgresTestCase;
-use ZeroForLaravel\ZeroContext;
 
 uses(PostgresTestCase::class);
 
@@ -68,6 +68,7 @@ function mutationProtocolProgram(string $method): MutationProgram
 function mutationProtocolProcess(array $mutations, ?array $params = null, int $version = 1): array
 {
     $user = (new User)->setKeyType('string')->forceFill(['id' => 'alice']);
+    \Pest\Laravel\actingAs($user);
     $request = \Illuminate\Http\Request::create('/zero/mutate', 'POST');
     $request->setUserResolver(fn (): User => $user);
 
@@ -77,7 +78,7 @@ function mutationProtocolProcess(array $mutations, ?array $params = null, int $v
     return $processor->process([
         'clientGroupID' => 'group-a', 'pushVersion' => $version, 'timestamp' => 1,
         'requestID' => 'request-a', 'mutations' => $mutations,
-    ], $params ?? ['appID' => 'test', 'schema' => 'zero_test_0'], new ZeroContext(['user_id' => 'alice']));
+    ], $params ?? ['appID' => 'test', 'schema' => 'zero_test_0'], new ResolvedContext(['user_id' => 'alice'], 'alice'));
 }
 
 /** @param array<string, mixed> $input

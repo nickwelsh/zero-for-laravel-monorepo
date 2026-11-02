@@ -62,6 +62,8 @@ $app->afterBootstrapping(LoadConfiguration::class, function ($app) use ($root) {
             'charset' => 'utf8', 'prefix' => '', 'search_path' => 'public', 'sslmode' => 'prefer',
         ],
         'zero.models' => [Task::class, TaskList::class, Tag::class, Comment::class],
+        'zero.context' => \ZeroForLaravel\Tests\Fixtures\ZeroContext::class,
+        'zero.context_resolver' => \ZeroForLaravel\Tests\Fixtures\ContextResolver::class,
         'zero.middleware' => [FixtureIdentity::class], 'zero.api_key' => getenv('ZERO_API_KEY'),
         'zero.app_id' => getenv('ZERO_APP_ID'), 'zero.upstream_schema' => getenv('ZERO_APP_ID').'_0',
         'zero.publication' => getenv('ZERO_APP_PUBLICATIONS'), 'zero.output' => $root.'/generated.ts',

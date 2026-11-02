@@ -18,7 +18,11 @@ public function store(StoreTaskRequest $request): array
 }
 ```
 
-The FormRequest retains preparation, authorization, rules, and validation hooks.
+The authoritative FormRequest retains preparation, authorization, rules, and
+validation hooks. Arbitrary FormRequest hooks and Eloquent events do not
+automatically run in optimistic JavaScript. Generated prediction covers only the
+checked portable subset; use custom or disabled optimism when nonportable PHP
+changes the intended local result.
 Annotated actions are native-only: ordinary HTTP requests to their route return
 405 instead of bypassing stable preparation or invoking a second write path.
 Real route middleware and binding run at the authoritative boundary. Call Gates
@@ -114,6 +118,76 @@ Business changes, native progress, and returned data commit atomically. Applicat
 rejections roll back business writes and persist an error outcome. Duplicate
 delivery does not rerun the action; a lost callback response can recover through
 native persisted results. These are not durable JavaScript promises across reloads.
+
+## Creation defaults
+
+Use `withAttributes` on a Zero query or in a Zero scope to supply creation
+defaults. By default it also adds equality conditions to reads:
+
+```php
+use App\Enums\ZeroContext;
+
+$query->withAttributes(['user_id' => ZeroContext::USER_ID]);
+// Read condition: user_id equals the resolved context value.
+// Create default: user_id is that value.
+// Explicit creation data can override it.
+```
+
+For a default without an owner-only read filter, pass `asConditions: false`:
+
+```php
+// Inside TodoList's global scope: filter by membership.
+// Set the creator without an owner-only read condition.
+$query->whereHas('memberships')
+    ->withAttributes(
+        ['user_id' => ZeroContext::USER_ID],
+        asConditions: false,
+    );
+```
+
+Effective creation data merges in this order, with later values winning:
+
+1. Active global scope defaults, in registry order (inherited, attributes, boot).
+2. Root query and local scope defaults, in call order.
+3. Explicit creation data, including a deliberately supplied null when allowed.
+
+For example, an authorized Zero controller action can add root defaults, then
+override a default with explicit data:
+
+```php
+$todo = Todo::zeroQuery()
+    ->withAttributes(['completed' => false])
+    ->create([
+        'list_id' => $data['list_id'],
+        'title' => $data['title'],
+        'completed' => true,
+    ]);
+// completed is true; the explicit creation data wins.
+```
+
+Defaults do not turn arbitrary `where` predicates into creation data. Nested
+predicate callbacks and higher-order OR scopes contribute conditions only, not
+parent defaults. Related queries also keep their defaults separate. Removing a
+global scope removes both its constraints and its defaults.
+
+Global creation defaults apply to Zero creates, including controller
+`Todo::create($request->validated())` lowered by the checked compiler and the create
+branches of mutation helpers such as `insertUnlessExists` and `upsertUnique`.
+An existing-row/update branch is never stamped with creation defaults. Ordinary
+Eloquent creates outside Zero are untouched; Zero scopes are not model events.
+
+A field omitted from FormRequest `$request->validated()` is **not caller input**
+and does not block a default. This is useful for setting a list creator without
+accepting `user_id` from a form. It is not immutable authorization: trusted code
+can explicitly supply a different value, and a default never proves that an actor
+may assign a user or attach a todo to a list. Keep mass-assignment constraints,
+policies, Gates, and FormRequest association checks. Updates never receive these
+defaults, so authorize any explicit ownership changes separately.
+
+Browser defaults use typed provider context; Laravel resolves its own trusted
+context for authoritative defaults. Do not infer additional optimism from arbitrary
+FormRequest normalization, observers, or events. Use explicit portable operations,
+a custom projection, or disabled optimism for nonportable behavior.
 
 Use `conceal: true` for actions that must normalize private-resource errors. Keep
 external effects server-only and use a transactional outbox plus idempotent workers

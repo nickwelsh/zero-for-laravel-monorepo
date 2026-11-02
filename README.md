@@ -29,7 +29,7 @@ public function index(): \Inertia\Response
         'heading' => 'Tasks',
         'tasks' => Task::zeroQuery()
             ->where('done', false)
-            ->related('list')
+            ->with('list')
             ->orderBy('created_at', 'desc')
             ->infinite(25),
     ]);
@@ -37,8 +37,12 @@ public function index(): \Inertia\Response
 ```
 
 Use `ZeroForLaravel\Concerns\HasZeroQueries` on participating Eloquent models.
-`zeroQuery()` returns an immutable declaration, not an Eloquent query or HTTP row
-snapshot. The compiler discovers registered controllers through Ranger, analyzes
+`zeroQuery()` returns a mutable `ZeroForLaravel\Query\ZeroQuery`, not an Eloquent
+builder or HTTP row snapshot. Explicitly clone a base query for independent
+branches. Protected `#[ZeroScope]` methods accept this builder, return void or the
+same builder, and compose through `Todo::completed()` or
+`Todo::zeroQuery()->completed()`, including dynamic arguments and higher-order
+`orWhere` grouping. The compiler discovers registered controllers through Ranger, analyzes
 FormRequest contracts through Surveyor, and emits coordinated PHP/native ZQL.
 Generation never executes an HTTP controller to sample its result.
 
@@ -54,26 +58,72 @@ remain explicit. `infinite()` grows a live window; `paginate()` navigates raw cu
 Neither promises total counts or immutable historical pages. Plain queries acquire
 no hidden limit or ordering.
 
-## Keep visibility on models
+## Define application context and model scopes
 
 ```php
-use ZeroForLaravel\ContextField;
-use ZeroForLaravel\Definition\ZeroDefinition;
+// app/Enums/ZeroContext.php
+namespace App\Enums;
 
-public static function zero(): ZeroDefinition
+enum ZeroContext: string
 {
-    return ZeroDefinition::make()
-        ->authorize('user_id', '=', ContextField::UserId)
-        ->fillFromContext('user_id', ContextField::UserId)
-        ->relations('list');
+    case USER_ID = 'user_id';
 }
 ```
 
-Use `publicReads()` only for intentionally public data. `authorizeRelation()` requires
-a related row visible under its own model's constraints. Visibility applies to roots,
-included rows, and existence predicates. Browser context predicts; the server resolves
-its own authenticated context. Write authorization belongs in FormRequests, route
-middleware, and explicit controller Gates/policies.
+Configure `'context' => App\Enums\ZeroContext::class` and
+`'context_resolver' => App\Zero\ResolveZeroContext::class`. The resolver has exactly
+one public method per enum case, for example
+`#[ResolvesContext(ZeroContext::USER_ID)] public function userId(Request $request): string`.
+Import `ZeroForLaravel\Attributes\ResolvesContext`; native scalar and nullable return
+types define the generated context contract, and `Request`/services use Laravel DI.
+Generation reflects signatures without executing methods. Package runtime values
+are `ResolvedContext`, distinct from the application enum. See the
+[complete resolver example](apps/docs/content/docs/0.x/docs/configuration.mdx#typed-context-and-resolver).
+
+Use enum cases in supported builder value positions for context references;
+`ZeroContext::USER_ID->value` deliberately means the literal string `'user_id'`.
+Other backed domain enum cases remain literals.
+
+Use Zero global scopes for row visibility and creation defaults. For example, a
+shared list scope must require a visible membership, not creator ownership:
+
+```php
+use App\Enums\ZeroContext;
+use Illuminate\Database\Eloquent\Model;
+use ZeroForLaravel\Query\ZeroQuery;
+use ZeroForLaravel\Scopes\ZeroGlobalScope;
+
+final class AccessibleLists implements ZeroGlobalScope
+{
+    public function apply(ZeroQuery $query, Model $model): void
+    {
+        $query->whereHas('memberships')
+            ->withAttributes(['user_id' => ZeroContext::USER_ID], asConditions: false);
+    }
+}
+```
+
+Register with `#[ZeroForLaravel\Attributes\ZeroScopedBy([AccessibleLists::class])]`,
+`static::addZeroGlobalScope(new AccessibleLists)`, or a named portable closure.
+Inherited scopes register before model attributes, then boot registrations.
+`withoutGlobalScope(ClassOrName)` and `withoutGlobalScopes()` remove both the
+scope's conditions and defaults, not related models' scopes.
+
+For shared todos, scope `ListMembership.user_id` to the current context; scope
+`TodoList` with `whereHas('memberships')` as above; scope `Todo` with `whereHas('list')`.
+The creator default must use `asConditions: false` so collaborators still see the
+list. [The membership example](apps/docs/content/docs/0.x/docs/authorization.mdx#membership-based-todo-sharing)
+shows the complete scope chain. Scope removal is a trusted application decision,
+not a browser filter. Write authorization still belongs in FormRequests, route
+middleware, and explicit controller Gates/policies, including association checks.
+
+Relationships come from supported Eloquent relationship methods between opted-in
+models (`HasZeroQueries` discovery or explicit `zero.models`). `with()` includes
+rows; `whereHas()` filters parents. Targets are never silently enrolled, and
+unsupported constraints fail generation. Related global scopes apply independently
+and may be removed inside a callback. Eloquent relations remain Eloquent; a Zero
+scope cannot be called on `$list->todos()`. Optional Scout metadata lives in
+`public static zeroSearch(): ScoutSearch`; Typesense authorization stays separate.
 
 Column privacy uses `$visible`, `$hidden`, `ZeroColumns`, `ZeroExclude`, and
 `ZeroIncludeColumns`. Generation fails if required keys are excluded. Synchronize a
@@ -99,12 +149,23 @@ helpers, and returns to one operation definition. PHP executes real Eloquent wri
 the browser executes native Zero transactions. Prepared IDs and time are reused.
 Actions return void or explicit JSON, never redirects or implicitly serialized models.
 
+`withAttributes([...])` adds equality conditions and creation defaults; pass
+`asConditions: false` for defaults only. Defaults merge in global registry order,
+then root/local call order, then explicit creation data. Nested predicates and
+higher-order OR scopes contribute conditions only, never parent defaults. Global
+defaults apply to Zero creates, including lowered controller `Todo::create(...)`
+and helper create branches, never updates or ordinary Eloquent creates outside Zero.
+Fields omitted from FormRequest `validated()` are not caller input; trusted code
+can override defaults explicitly. Defaults are not immutable authorization.
+
 `#[ZeroMutation(optimism: 'custom')]` requires a declared client projection.
 `optimism: 'disabled'` sends the same typed native intent without speculative writes.
 Unsupported generated code fails with its source location; it never silently changes
 strategy. Declare structured results with `serverResult: 'array{id: string}'` and,
 when different, `clientResult`. Missing bound cache rows are an explicit no-op
 prediction, not a local failure that prevents server execution.
+Arbitrary FormRequest hooks and Eloquent events do not automatically run in
+optimism; use portable checked operations or custom/disabled optimism deliberately.
 
 `Mutation::reloadForUpdate()` locks/rebinds current state before state-dependent
 authorization. `findUnique()`, `insertUnlessExists()`, and `upsertUnique()` use real
@@ -149,8 +210,10 @@ module root is configurable with `zero.wayfinder_import` (default `@/zero`).
 Install `createInertiaAdapter(bindings)` from the `/inertia` export in your
 `createInertiaApp` resolver and call `livePages.wrap(module.default, page)`.
 Put the generated `ZeroProvider` in the authenticated persistent layout, outside
-the wrapped page. Pass `userID` and `context={{ user_id: user.id }}`. Changing identity
-replaces the client and clears identity-scoped results.
+the wrapped page. Pass both native `userID` and typed `context={{ user_id: user.id }}`
+for the single-case enum above. Identity is independent of an application `user_id`
+key; neither infers the other. Laravel independently resolves trusted context.
+Changing identity replaces the client and clears identity-scoped results.
 
 ```tsx
 import { store } from '@/zero/App/Http/Controllers/TaskController';
@@ -236,5 +299,9 @@ The example and its tools require PHP 8.4.1+; use PHP 8.5 for the full workspace
 See [workspace tooling](docs/tooling.md) for database setup, supervised orb services,
 API regeneration, and release procedures, and [contract details](docs/model-api.md)
 for the public runtime boundary.
+
+Existing 0.x applications must use the
+[breaking migration mappings](apps/docs/content/docs/0.x/docs/constraints.mdx#migrating-existing-0x-applications).
+There is no `ZeroDefinition` compatibility path or `related()` alias.
 
 MIT licensed.

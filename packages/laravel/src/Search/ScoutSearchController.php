@@ -6,17 +6,17 @@ namespace ZeroForLaravel\Search;
 
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use ZeroForLaravel\Http\ContextResolver;
+use ZeroForLaravel\Context\ContextDefinition;
 use ZeroForLaravel\Metadata\ModelRegistry;
 
 /** Register behind the application's session authentication middleware. */
 final class ScoutSearchController
 {
-    public function __invoke(Request $request, ModelRegistry $registry, ContextResolver $resolver): JsonResponse
+    public function __invoke(Request $request, ModelRegistry $registry): JsonResponse
     {
         abort_unless($request->user() !== null, 401);
         $input = $request->validate(['searches' => ['required', 'array', 'min:1', 'max:10'], 'searches.*' => ['required', 'array']]);
-        $context = $resolver($request);
+        $context = ContextDefinition::configured()->resolve($request);
         $searches = [];
         $body = \ZeroForLaravel\Support\Input::object($input, 'search');
         if (! is_array($body['searches'])) {
@@ -30,11 +30,11 @@ final class ScoutSearchController
             $search = null;
             $sort = null;
             foreach ($registry->all() as $model) {
-                if ($model->definition->search === null) {
+                if ($model->search === null) {
                     continue;
                 }
 
-                $candidate = $model->definition->search;
+                $candidate = $model->search;
                 $meta = $candidate->metadata();
                 if ($index === $meta['index']) {
                     $search = $candidate;

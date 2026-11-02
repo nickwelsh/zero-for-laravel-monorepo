@@ -8,7 +8,7 @@ use LogicException;
 use ZeroForLaravel\Metadata\ModelMetadata;
 
 /** Checked, portable query construction. Both emitters consume this same tree. */
-final readonly class QueryExpression
+final class QueryExpression
 {
     /** @param list<self> $children */
     public function __construct(
@@ -20,13 +20,46 @@ final readonly class QueryExpression
         public bool $singular = false,
     ) {}
 
+    public static function reference(self $query): self
+    {
+        return new self('reference', children: [$query], model: $query->model, type: $query->type, singular: $query->singular);
+    }
+
+    public function snapshot(): self
+    {
+        if ($this->kind === 'reference') {
+            return $this->children[0]->snapshot();
+        }
+
+        return new self($this->kind, $this->value, array_map(fn (self $child): self => $child->snapshot(), $this->children), $this->model, $this->type, $this->singular);
+    }
+
+    public function queryModel(): ModelMetadata
+    {
+        return $this->model ?? throw new LogicException('A query expression requires model metadata.');
+    }
+
+    public function stringValue(): string
+    {
+        return is_string($this->value) ? $this->value : throw new LogicException('Expected a literal name or context field.');
+    }
+
     public function emit(bool $typescript): string
     {
+        if ($this->kind === 'reference') {
+            return $this->snapshot()->emit($typescript);
+        }
+
+        if ($typescript && $this->type === 'query') {
+            return (new NativeQueryEmitter)->emit($this);
+        }
+
         $child = fn (int $index): string => $this->children[$index]->emit($typescript);
         $literal = $typescript ? json_encode($this->value, JSON_THROW_ON_ERROR) : var_export($this->value, true);
 
         return match ($this->kind) {
             'literal' => $literal,
+            'context' => $typescript ? 'ctx['.$literal.']' : 'new \\ZeroForLaravel\\Context\\ContextReference('.$literal.')',
             'argument', 'enum', 'validated' => $typescript ? 'args['.$literal.']' : '$args['.$literal.']',
             'field' => $child(0).'['.$literal.']',
             'dateOperand' => $typescript
@@ -36,6 +69,7 @@ final readonly class QueryExpression
             'has' => $typescript ? 'Object.hasOwn('.$child(1).', '.$child(0).')' : 'array_key_exists('.$child(0).', '.$child(1).')',
             'local' => ($typescript ? '' : '$').$this->value,
             'callback' => ($typescript ? '('.$this->value.') => ' : 'static fn ($'.$this->value.') => ').$child(0),
+            'scope' => $child(0).'->'.$this->value.'('.implode(', ', array_map(fn (self $arg): string => $arg->emit(false), array_slice($this->children, 2))).')',
             'list' => '['.implode(', ', array_map(fn (self $arg): string => $arg->emit($typescript), $this->children)).']',
             'object' => ($typescript ? '{' : '[').implode(', ', array_map(fn (self $arg): string => $arg->emit($typescript), $this->children)).($typescript ? '}' : ']'),
             'property' => $literal.($typescript ? ': ' : ' => ').$child(0),
@@ -53,6 +87,10 @@ final readonly class QueryExpression
 
     public function ordersKey(): bool
     {
+        if ($this->kind === 'reference') {
+            return $this->children[0]->ordersKey();
+        }
+
         if ($this->kind === 'conditional') {
             return $this->children[1]->ordersKey() && $this->children[2]->ordersKey();
         }
@@ -63,6 +101,10 @@ final readonly class QueryExpression
     /** @return list<string> */
     public function cursorFields(): array
     {
+        if ($this->kind === 'reference') {
+            return $this->children[0]->cursorFields();
+        }
+
         if ($this->kind === 'conditional') {
             if ($this->children[1]->cursorFields() !== $this->children[2]->cursorFields()) {
                 throw new LogicException('Cursor pagination requires the same ordering fields on every branch.');
@@ -85,6 +127,10 @@ final readonly class QueryExpression
 
     public function hasBounds(): bool
     {
+        if ($this->kind === 'reference') {
+            return $this->children[0]->hasBounds();
+        }
+
         if ($this->kind === 'conditional') {
             return $this->children[1]->hasBounds() || $this->children[2]->hasBounds();
         }

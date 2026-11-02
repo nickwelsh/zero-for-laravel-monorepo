@@ -5,21 +5,23 @@ declare(strict_types=1);
 namespace ZeroForLaravel\Tests\Feature;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
 use LogicException;
 use ZeroForLaravel\Attributes\ZeroExclude;
-use ZeroForLaravel\ContextField;
-use ZeroForLaravel\Definition\ZeroDefinition;
+use ZeroForLaravel\Concerns\HasZeroQueries;
+use ZeroForLaravel\Context\ContextReference;
 use ZeroForLaravel\Metadata\ModelRegistry;
 use ZeroForLaravel\Mutation\Mutation;
-use ZeroForLaravel\Query\Query;
+use ZeroForLaravel\Query\ZeroQuery;
+use ZeroForLaravel\ResolvedContext;
 use ZeroForLaravel\Tests\Fixtures\Comment;
 use ZeroForLaravel\Tests\Fixtures\Tag;
 use ZeroForLaravel\Tests\Fixtures\Task;
 use ZeroForLaravel\Tests\Fixtures\TaskList;
+use ZeroForLaravel\Tests\Fixtures\ZeroContext;
 use ZeroForLaravel\Tests\TestCase;
-use ZeroForLaravel\ZeroContext;
 
 uses(TestCase::class);
 
@@ -47,15 +49,18 @@ test('resolves one column plan and separate public mutation inputs', function ()
     $this->assertTrue($task->columns['completed_at']['date']);
     $this->assertSame('boolean', $task->columns['done']['type']);
     $this->assertSame(false, $task->columns['done']['default']);
-    $this->assertSame(['list_id', 'title', 'done', 'completed_at'], $task->writable);
-    $this->assertSame(['user_id' => 'user_id'], $task->serverFill);
+    $this->assertSame(['user_id', 'list_id', 'title', 'done', 'completed_at'], $task->writable);
+    $defaults = (new ZeroQuery($task, $registry))->pendingAttributes();
+    $this->assertInstanceOf(ContextReference::class, $defaults['user_id']);
+    $this->assertSame('user_id', $defaults['user_id']->field);
     $this->assertSame('TaskList', $task->relations['list']['model']);
     $this->assertSame('one', $task->relations['list']['cardinality']);
 });
 
-test('reads fail closed without an explicit visibility declaration', function (): void {
-    new ModelRegistry([UnprotectedTask::class]);
-})->throws(LogicException::class, 'visibility');
+test('explicitly registered models do not require a legacy visibility declaration', function (): void {
+    $registry = new ModelRegistry([UnprotectedTask::class]);
+    expect((new ZeroQuery($registry->get('UnprotectedTask'), $registry))->ast())->toBe(['table' => 'tasks']);
+});
 
 test('hidden relation keys are not silently republished', function (): void {
     new ModelRegistry([HiddenRelationTask::class, TaskList::class, Tag::class, Comment::class]);
@@ -70,12 +75,9 @@ test('exclusions are additive to eloquent hidden columns', function (): void {
 
 class Calendar extends Model
 {
-    public $timestamps = false;
+    use HasZeroQueries;
 
-    public static function zero(): ZeroDefinition
-    {
-        return ZeroDefinition::make()->publicReads();
-    }
+    public $timestamps = false;
 
     protected function casts(): array
     {
@@ -86,11 +88,6 @@ class Calendar extends Model
 class WrongKeyTask extends Task
 {
     protected $primaryKey = 'title';
-
-    public static function zero(): ZeroDefinition
-    {
-        return ZeroDefinition::make()->publicReads();
-    }
 }
 
 class UnprotectedTask extends Model
@@ -106,14 +103,11 @@ class HiddenRelationTask extends Task
 #[ZeroExclude(['completed_at'])]
 class ExcludedTask extends Model
 {
+    use HasZeroQueries;
+
     protected $table = 'tasks';
 
     protected $hidden = ['secret'];
-
-    public static function zero(): ZeroDefinition
-    {
-        return ZeroDefinition::make()->publicReads();
-    }
 }
 
 class InvalidDefinitionTask extends Model
@@ -128,24 +122,45 @@ class InvalidDefinitionTask extends Model
 
 class InvalidRelationTask extends Task
 {
-    public static function zero(): ZeroDefinition
-    {
-        return ZeroDefinition::make()->publicReads()->relations('invalidRelation');
-    }
-
     public function invalidRelation(): string
     {
         return 'invalid';
     }
 }
 
-test('model definitions must return ZeroDefinition', function (): void {
+test('legacy model definitions are rejected regardless of return type', function (): void {
     new ModelRegistry([InvalidDefinitionTask::class]);
-})->throws(LogicException::class, 'zero() must return ZeroDefinition');
+})->throws(LogicException::class, 'legacy zero()/ZeroDefinition is unsupported');
 
-test('included methods must return an Eloquent relation', function (): void {
-    new ModelRegistry([InvalidRelationTask::class]);
-})->throws(LogicException::class, 'method must return an Eloquent relation');
+test('ordinary methods are not discovered as Eloquent relations', function (): void {
+    $registry = new ModelRegistry([InvalidRelationTask::class, TaskList::class, Tag::class, Comment::class]);
+    expect($registry->get('InvalidRelationTask')->relations)->toHaveKeys(['list', 'tags', 'comments']);
+    expect($registry->get('InvalidRelationTask')->relations)->not->toHaveKey('invalidRelation');
+});
+
+class ParentDependentTask extends Task
+{
+    /** @return HasMany<Comment, $this> */
+    public function comments(): HasMany
+    {
+        return $this->hasMany(Comment::class, 'task_id')->where('user_id', $this->user_id);
+    }
+}
+
+class ParentAccessorTask extends Task
+{
+    /** @return HasMany<Comment, $this> */
+    public function comments(): HasMany
+    {
+        return $this->hasMany(Comment::class, 'task_id')->where('user_id', $this->getAttribute('user_id'));
+    }
+}
+
+test('relationship discovery rejects parent values instead of freezing a blank instance', function (): void {
+    foreach ([ParentDependentTask::class, ParentAccessorTask::class] as $class) {
+        expect(fn (): ModelRegistry => new ModelRegistry([$class, Comment::class]))->toThrow(LogicException::class, 'nonportable parent-instance relationship logic');
+    }
+});
 
 enum CastStatus: string
 {
@@ -153,13 +168,31 @@ enum CastStatus: string
     case Published = 'published';
 }
 
-class CastTask extends Task
+/**
+ * @property string $id
+ * @property string $user_id
+ * @property string $title
+ * @property bool $done
+ * @property \Carbon\CarbonImmutable|null $completed_at
+ * @property \Illuminate\Support\Carbon $created_at
+ */
+class CastTask extends Model
 {
-    protected $fillable = ['title', 'options', 'status', 'completed_at', 'scheduled_at'];
+    use HasZeroQueries;
+    use \Illuminate\Database\Eloquent\Concerns\HasUuids;
+    use \Illuminate\Database\Eloquent\SoftDeletes;
 
-    public static function zero(): ZeroDefinition
+    protected $table = 'tasks';
+
+    protected $hidden = ['secret'];
+
+    protected $fillable = ['user_id', 'title', 'options', 'status', 'completed_at', 'scheduled_at'];
+
+    protected static function booted(): void
     {
-        return ZeroDefinition::make()->publicReads()->fillFromContext('user_id', ContextField::UserId);
+        static::addZeroGlobalScope('creation-defaults', function (ZeroQuery $query): void {
+            $query->withAttributes(['user_id' => ZeroContext::USER_ID], asConditions: false);
+        });
     }
 
     /** @return array<string, string> */
@@ -184,7 +217,7 @@ test('exports native cast metadata including implicit timestamps and backed enum
     expect($model->columns['done']['cast'] ?? null)->toBe('boolean');
     expect($model->columns['scheduled_at']['dateFormat'] ?? null)->toBe('Y-m-d H:i:s');
 
-    $query = new Query($model, new ModelRegistry([CastTask::class]));
+    $query = (new ZeroQuery($model, new ModelRegistry([CastTask::class])))->withoutGlobalScopes();
     expect(data_get($query->where('scheduled_at', '2026-10-30T20:31:45+02:00')->ast(), 'where.right.value'))->toBe('2026-10-30 18:31:45');
 });
 
@@ -196,7 +229,7 @@ test('controller mutation primitives preserve JSON enum date casts and patch sem
     });
     $registry = new ModelRegistry([CastTask::class]);
     $id = '019a0000-0000-7000-8000-000000000001';
-    $mutation = new Mutation($registry, ['timestamp' => 1700000000123, 'ids' => ['key:cast' => $id]], new ZeroContext(['user_id' => 'alice']));
+    $mutation = new Mutation($registry, ['timestamp' => 1700000000123, 'ids' => ['key:cast' => $id]], new ResolvedContext(['user_id' => 'alice'], 'alice'));
     $registry->connection()->transaction(function () use ($mutation, $id): void {
         $task = $mutation->create(CastTask::class, [
             'title' => 'Casts', 'options' => ['theme' => 'dark'], 'status' => 'published',

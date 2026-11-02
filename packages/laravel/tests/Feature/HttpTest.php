@@ -15,7 +15,7 @@ use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Testing\PendingCommand;
 use LogicException;
-use ZeroForLaravel\Http\ContextResolver;
+use ZeroForLaravel\Context\ContextDefinition;
 use ZeroForLaravel\Metadata\ModelRegistry;
 use ZeroForLaravel\Query\RegisteredQueries;
 use ZeroForLaravel\Query\RegisteredQuery;
@@ -30,7 +30,7 @@ function registerHttpQuery(): void
 {
     Route::get('/http-query', [QueryController::class, 'window']);
     app()->instance(RegisteredQueries::class, new RegisteredQueries([
-        'q_http' => new RegisteredQuery(QueryController::class.'@window', 'tasks/window', 'tasks', [], static fn (): \ZeroForLaravel\Query\Query => Task::zeroQuery()),
+        'q_http' => new RegisteredQuery(QueryController::class.'@window', 'tasks/window', 'tasks', [], static fn (): \ZeroForLaravel\Query\ZeroQuery => Task::zeroQuery()),
     ]));
 }
 
@@ -42,14 +42,14 @@ test('annotated mutations cannot bypass native preparation through ordinary HTTP
     expect(Task::count())->toBe(0);
 });
 
-test('context preserves numeric identifiers while protocol user id is a string', function (): void {
+test('application context and protocol identity normalize numeric authenticated identifiers to strings', function (): void {
     /** @var HttpTestCase $this */
     $user = (new User)->forceFill(['id' => 42]);
     $request = Request::create('/zero/query', 'POST');
     $request->setUserResolver(fn () => $user);
 
-    $context = (new ContextResolver)($request);
-    $this->assertSame(42, $context->get('user_id'));
+    $context = ContextDefinition::configured()->resolve($request);
+    $this->assertSame('42', $context->get('user_id'));
     $this->assertSame('42', $context->userId());
 });
 
@@ -165,13 +165,14 @@ class InvalidContextResolver
     }
 }
 
-test('configured context resolvers must return trusted context', function (): void {
+test('configured context resolvers must map every application context field', function (): void {
     /** @var HttpTestCase $this */
+    registerHttpQuery();
     config()->set('zero.context_resolver', InvalidContextResolver::class);
     \Pest\Laravel\withoutExceptionHandling();
     $this->withHeader('X-Api-Key', 'private-test-secret')
-        ->postJson('/zero/query', ['transform', []]);
-})->throws(LogicException::class, 'must return ZeroContext');
+        ->postJson('/zero/query', ['transform', [['id' => 'q', 'name' => 'q_http', 'args' => [(object) []]]]]);
+})->throws(LogicException::class, 'Missing #[ResolvesContext] mapping');
 
 test('automatic publication synchronization skips SQLite migrations', function (): void {
     /** @var HttpTestCase $this */
@@ -188,7 +189,7 @@ test('react generation binds the contracts and preserves editable connection con
         $command = $this->artisan('zero:generate', ['--output' => $path, '--react' => true]);
         $this->assertInstanceOf(PendingCommand::class, $command);
         $command->assertSuccessful()->run();
-        expect(file_get_contents($directory.'/generated.react.ts'))->toContain('createZeroProvider(schema, mutators, options, true, {actions, preparation})', '"./generated"');
+        expect(file_get_contents($directory.'/generated.react.ts'))->toContain('createZeroProvider<Context>(schema, mutators, options, true, {actions, preparation}, contextContract)', '"./generated"');
         file_put_contents($directory.'/zero.config.ts', '// Application-owned options');
         $command = $this->artisan('zero:generate', ['--output' => $path, '--react' => true]);
         $this->assertInstanceOf(PendingCommand::class, $command);
@@ -223,7 +224,8 @@ test('exposure reports reflect the same private column and authorization metadat
     /** @var HttpTestCase $this */
     $command = $this->artisan('zero:exposure');
     $this->assertInstanceOf(PendingCommand::class, $command);
-    $command->expectsOutputToContain('Published:')->expectsOutputToContain('Owner rules:')->assertSuccessful()->run();
+    $command->expectsOutputToContain('Published:')->expectsOutputToContain('Global Zero scopes:')
+        ->expectsOutputToContain('Creation defaults:')->assertSuccessful()->run();
 });
 
 test('mutation results are not exposed through a second read endpoint', function (): void {

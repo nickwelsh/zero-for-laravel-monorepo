@@ -117,6 +117,12 @@ final class MutationContracts
             });
         }
 
+        if ($op === 'context') {
+            $contract = \ZeroForLaravel\Context\ContextDefinition::configured()->fields[$node->string('field')];
+
+            return new ValueContract($contract['type'] === 'float' ? 'number' : $contract['type'], nullable: $contract['nullable']);
+        }
+
         if ($op === 'validated') {
             return $input;
         }

@@ -87,6 +87,15 @@ final readonly class ControllerMutationRuntime
         $e = fn (OperationNode $node): mixed => $this->expression($node, $locals);
         switch ($op->string('op')) {
             case 'literal': return $op->value('value');
+            case 'context': return $this->mutation->context($op->string('field'));
+            case 'conditional': return $e($op->node($e($op->node('condition')) ? 'yes' : 'no'));
+            case 'merge':
+                $merged = [];
+                foreach ($op->nodes('values') as $value) {
+                    $merged = [...$merged, ...Input::object($e($value), 'attributes')];
+                }
+
+                return $merged;
             case 'local': return $locals[$op->string('name')];
             case 'get':
                 $base = $e($op->node('base'));
@@ -130,7 +139,7 @@ final readonly class ControllerMutationRuntime
             case 'findUnique': return $this->mutation->findUnique($this->mutation->metadata($op->string('class'))->class, Input::object($e($op->node('unique')), 'unique'));
             case 'insertUnlessExists': return $this->mutation->insertUnlessExists($this->mutation->metadata($op->string('class'))->class, Input::object($e($op->node('unique')), 'unique'), Input::object($e($op->node('data')), 'data'), $op->string('site'));
             case 'upsertUnique': return $this->mutation->upsertUnique($this->mutation->metadata($op->string('class'))->class, Input::object($e($op->node('unique')), 'unique'), Input::object($e($op->node('data')), 'data'), $op->string('site'));
-            case 'create': return $this->mutation->create($this->mutation->metadata($op->string('class'))->class, Input::object($e($op->node('data')), 'data'), $op->string('site'));
+            case 'create': return $this->mutation->create($this->mutation->metadata($op->string('class'))->class, Input::object($e($op->node('data')), 'data'), $op->string('site'), $op->value('defaults') === null ? null : Input::object($e($op->node('defaults')), 'attributes'));
             case 'reload': return $this->mutation->reloadForUpdate($this->model($e($op->node('record'))));
             case 'update': return $this->mutation->update($this->model($e($op->node('record'))), Input::object($e($op->node('data')), 'data'));
             case 'delete': return $this->mutation->delete($this->model($e($op->node('record'))));

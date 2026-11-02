@@ -2,10 +2,8 @@
 
 declare(strict_types=1);
 
-use ZeroForLaravel\Http\ContextResolver;
-
 return [
-    // Empty discovers models with a zero() definition under app/Models.
+    // Empty discovers models using HasZeroQueries under app/Models.
     'models' => [],
     // When models is empty, only explicitly opted-in models in these PSR-4 roots are discovered.
     'discovery' => [], // Empty retains app/Models and the application's namespace.
@@ -25,8 +23,9 @@ return [
     'api_key' => env('ZERO_API_KEY'),
     'route_prefix' => 'zero',
     'middleware' => ['api', 'auth'],
-    // Bind this class (or replace it) to add trusted tenant context.
-    'context_resolver' => ContextResolver::class,
+    // Application-owned enum and attributed resolver methods. Values are never sampled during generation.
+    'context' => App\Enums\ZeroContext::class,
+    'context_resolver' => App\Zero\ResolveZeroContext::class,
     'dev' => [
         'port' => (int) env('ZERO_PORT', 4848),
         'replica' => storage_path('app/zero/replica.db'),

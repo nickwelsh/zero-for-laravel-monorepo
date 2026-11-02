@@ -7,7 +7,7 @@ namespace ZeroForLaravel\Inertia;
 use Inertia\ProvidesInertiaProperties;
 use Inertia\Response;
 use LogicException;
-use ZeroForLaravel\Query\Query;
+use ZeroForLaravel\Query\ZeroQuery;
 
 /** Uses Inertia's property-provider extension before serialization and partial filtering. */
 final class ResponseFactory extends \Inertia\ResponseFactory
@@ -19,7 +19,7 @@ final class ResponseFactory extends \Inertia\ResponseFactory
         }
 
         foreach ($this->sharedProps as $value) {
-            if ($value instanceof Query) {
+            if ($value instanceof ZeroQuery) {
                 throw new LogicException('Live queries must be controller props, not shared props.');
             }
         }

@@ -13,12 +13,12 @@ use ZeroForLaravel\Generation\ControllerQueryCompiler;
 use ZeroForLaravel\Generation\ControllerQueryGenerator;
 use ZeroForLaravel\Generation\ZodSchemaDriver;
 use ZeroForLaravel\Metadata\ModelRegistry;
-use ZeroForLaravel\Query\Query;
 use ZeroForLaravel\Query\QueryCompiler;
 use ZeroForLaravel\Query\RegisteredQuery;
+use ZeroForLaravel\Query\ZeroQuery;
+use ZeroForLaravel\ResolvedContext;
 use ZeroForLaravel\Tests\Fixtures\QueryController;
 use ZeroForLaravel\Tests\TestCase;
-use ZeroForLaravel\ZeroContext;
 
 uses(TestCase::class);
 
@@ -58,10 +58,11 @@ test('registered controller queries preserve input branches without executing th
 
     foreach (['', '0', 'actual'] as $title) {
         $query = $factory(['title' => $title]);
-        if (! $query instanceof Query) {
+        if (! $query instanceof ZeroQuery) {
             throw new LogicException('Expected query declaration.');
         }
 
+        $query->withoutGlobalScopes();
         expect(array_key_exists('where', $query->ast()))->toBe($title !== '');
         if ($title !== '') {
             expect(data_get($query->ast(), 'where.right.value'))->toBe($title);
@@ -83,7 +84,7 @@ test('registered controller queries preserve input branches without executing th
 
         $registered = $registrations[$definition->name()];
         $compiler = new QueryCompiler(resolve(ModelRegistry::class));
-        $context = new ZeroContext(['user_id' => 'alice']);
+        $context = new ResolvedContext(['user_id' => 'alice'], 'alice');
         $ast = $registered->compile(['title' => '0'], $context, $compiler);
         expect(data_get($ast, 'where.conditions.0.right.value'))->toBe('alice');
         expect(data_get($ast, 'where.conditions.2.right.value'))->toBe('0');

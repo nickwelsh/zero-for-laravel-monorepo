@@ -10,13 +10,20 @@ use Illuminate\Database\Schema\Blueprint;
 use ZeroForLaravel\Generation\TypeScriptGenerator;
 use ZeroForLaravel\Metadata\ModelRegistry;
 use ZeroForLaravel\Query\QueryCompiler;
+use ZeroForLaravel\Query\ZeroQuery;
+use ZeroForLaravel\ResolvedContext;
 use ZeroForLaravel\Tests\Fixtures\Comment;
 use ZeroForLaravel\Tests\Fixtures\Tag;
 use ZeroForLaravel\Tests\Fixtures\Task;
 use ZeroForLaravel\Tests\Fixtures\TaskList;
-use ZeroForLaravel\ZeroContext;
+use ZeroForLaravel\Tests\Fixtures\ContextResolver;
+use ZeroForLaravel\Tests\Fixtures\ZeroContext;
 
-$capsule = new Manager;
+$container = new Container;
+$container->instance('config', new Illuminate\Config\Repository([
+    'zero' => ['context' => ZeroContext::class, 'context_resolver' => ContextResolver::class],
+]));
+$capsule = new Manager($container);
 $capsule->addConnection(['driver' => 'sqlite', 'database' => ':memory:', 'prefix' => '']);
 $capsule->setAsGlobal();
 $capsule->bootEloquent();
@@ -70,17 +77,19 @@ if (($argv[1] ?? null) === 'generate') {
         echo (new ZeroForLaravel\Generation\ControllerQueryGenerator($schemas))->typescript([$definition, $filtered, $relationships, $window, $pages, $sorted], './generated');
         exit;
     }
+    $context = new ResolvedContext(['user_id' => 'alice'], 'alice');
+    $queryCompiler = new QueryCompiler($registry);
     $factory = eval('return '.$definition->php().';');
     $cases = [];
     foreach (['', '0', 'actual'] as $title) {
         $query = $factory(['title' => $title]);
-        $cases[] = ['args' => ['title' => $title], 'ast' => $query->ast(), 'format' => $query->format()];
+        $cases[] = ['args' => ['title' => $title], 'ast' => $queryCompiler->compileDeclaration($query, $context), 'format' => $query->format()];
     }
     $filteredFactory = eval('return '.$filtered->php().';');
     $filteredCases = [];
     foreach ([['title' => '', 'showDone' => false, 'window' => 0], ['title' => '0', 'showDone' => true, 'window' => 2], ['title' => 'actual', 'showDone' => false, 'window' => 3]] as $args) {
         $query = $filteredFactory($args);
-        $filteredCases[] = ['args' => $args, 'ast' => $query->ast(), 'format' => $query->format()];
+        $filteredCases[] = ['args' => $args, 'ast' => $queryCompiler->compileDeclaration($query, $context), 'format' => $query->format()];
     }
     $relationshipFactory = eval('return '.$relationships->php().';');
     $relationshipQuery = $relationshipFactory(['title' => '0']);
@@ -88,55 +97,70 @@ if (($argv[1] ?? null) === 'generate') {
     $windowQuery = $windowFactory([]);
     echo json_encode([
         'name' => $definition->name(),
+        'context' => $context->values,
         'sorted' => ['typescript' => $sorted->typescript(), 'schema' => $schemas->object($sorted->parameters)],
         'typescript' => $definition->typescript(), 'schema' => $schemas->object($definition->parameters), 'cases' => $cases,
         'filtered' => ['typescript' => $filtered->typescript(), 'schema' => $schemas->object($filtered->parameters), 'cases' => $filteredCases],
-        'relationships' => ['typescript' => $relationships->typescript(), 'ast' => $relationshipQuery->ast(), 'format' => $relationshipQuery->format()],
-        'window' => ['typescript' => $window->typescript(), 'ast' => $windowQuery->ast()],
+        'relationships' => ['typescript' => $relationships->typescript(), 'ast' => $queryCompiler->compileDeclaration($relationshipQuery, $context), 'format' => $relationshipQuery->format()],
+        'window' => ['typescript' => $window->typescript(), 'ast' => $queryCompiler->compileDeclaration($windowQuery, $context)],
     ], JSON_THROW_ON_ERROR);
 } elseif (($argv[1] ?? null) === 'declarations') {
-    $query = new ZeroForLaravel\Query\Query($registry->get('Task'), $registry);
+    // Native construction parity intentionally excludes application authorization.
+    // The authorized mode below separately verifies all root and target scopes.
+    $query = (new ZeroQuery($registry->get('Task'), $registry))->withoutGlobalScopes();
     $queries = [
-        'unbounded' => $query->all(),
-        'zeroLimit' => $query->limit(0),
-        'one' => $query->where('id', 'task-a')->one(),
-        'cursor' => $query->orderBy('title', 'desc')->orderBy('id', 'asc')->start(['title' => '0', 'id' => 'task-a'], ['inclusive' => true])->limit(7),
-        'exclusive' => $query->orderBy('id', 'asc')->start(['id' => 'task-a']),
-        'relationships' => $query->related('comments', fn ($q) => $q->where('body', 'NOT ILIKE', '%private%')->orderBy('id', 'desc')->limit(3))->related('list'),
-        'junction' => $query->related('tags', fn ($q) => $q->where('name', 'IN', ['0', 'work'])),
-        'exists' => $query->whereExists('comments', fn ($q) => $q->where('body', 'NOT LIKE', 'secret%'), ['flip' => false]),
-        'scalar' => $query->whereExists('list', fn ($q) => $q->where('id', 'list-a'), ['scalar' => true]),
-        'junctionExists' => $query->whereExists('tags', fn ($q) => $q->where('name', 'work'), ['flip' => true]),
-        'negation' => $query->where(fn ($eb) => $eb->not($eb->or($eb->cmp('done', false), $eb->exists('comments', fn ($q) => $q->where('body', 'hidden'))))),
-        'literals' => $query->where(fn ($eb) => $eb->or($eb->cmpLit('0', '=', '0'), $eb->and($eb->cmpLit(0, '!=', 1), $eb->cmp('list_id', 'IS', null)))),
-        'emptyGroups' => $query->where(fn ($eb) => $eb->and($eb->or(), $eb->cmp('done', true))),
-        'missing' => $query->where(fn ($eb) => $eb->or(ZeroForLaravel\Query\MissingValue::Missing, $eb->cmp('id', ZeroForLaravel\Query\MissingValue::Missing))),
+        'unbounded' => clone $query,
+        'zeroLimit' => (clone $query)->limit(0),
+        'one' => (clone $query)->where('id', 'task-a')->one(),
+        'cursor' => (clone $query)->orderBy('title', 'desc')->orderBy('id', 'asc')->start(['title' => '0', 'id' => 'task-a'], ['inclusive' => true])->limit(7),
+        'exclusive' => (clone $query)->orderBy('id', 'asc')->start(['id' => 'task-a']),
+        'relationships' => (clone $query)->with('comments', fn ($q) => $q->withoutGlobalScopes()->where('body', 'NOT ILIKE', '%private%')->orderBy('id', 'desc')->limit(3))->with('list', fn ($q) => $q->withoutGlobalScopes()),
+        'junction' => (clone $query)->with('tags', fn ($q) => $q->withoutGlobalScopes()->where('name', 'IN', ['0', 'work'])),
+        'exists' => (clone $query)->whereExists('comments', fn ($q) => $q->withoutGlobalScopes()->where('body', 'NOT LIKE', 'secret%'), ['flip' => false]),
+        'scalar' => (clone $query)->whereExists('list', fn ($q) => $q->withoutGlobalScopes()->where('id', 'list-a'), ['scalar' => true]),
+        'junctionExists' => (clone $query)->whereExists('tags', fn ($q) => $q->withoutGlobalScopes()->where('name', 'work'), ['flip' => true]),
+        'negation' => (clone $query)->where('done', '!=', false)->whereDoesntHave('comments', fn ($q) => $q->withoutGlobalScopes()->where('body', 'hidden')),
+        'nullEquality' => (clone $query)->where('list_id', null),
+        'nullInequality' => (clone $query)->where('list_id', '!=', null),
     ];
     foreach (['=', '!=', '<', '<=', '>', '>=', 'LIKE', 'NOT LIKE', 'ILIKE', 'NOT ILIKE'] as $operator) {
-        $queries[$operator] = $query->where('title', $operator, '0');
+        $queries[$operator] = (clone $query)->where('title', $operator, '0');
     }
     foreach (['IN', 'NOT IN'] as $operator) {
-        $queries[$operator] = $query->where('title', $operator, ['0', 'two']);
+        $queries[$operator] = (clone $query)->where('title', $operator, ['0', 'two']);
     }
     foreach (['IS', 'IS NOT'] as $operator) {
-        $queries[$operator] = $query->where('list_id', $operator, null);
+        $queries[$operator] = (clone $query)->where('list_id', $operator, null);
     }
-    echo json_encode(array_map(fn ($q) => ['ast' => $q->ast(), 'format' => $q->format()], $queries), JSON_THROW_ON_ERROR);
+    $output = array_map(fn ($q) => ['ast' => $q->ast(), 'format' => $q->format()], $queries);
+    // Literal-only and empty expressions exercise the native internal expression
+    // builder directly; grouped public callbacks now receive a mutable ZeroQuery.
+    $eb = $query->expressionBuilder();
+    $expressions = [
+        'literals' => $eb->or($eb->cmpLit('0', '=', '0'), $eb->and($eb->cmpLit(0, '!=', 1), $eb->cmp('list_id', 'IS', null))),
+        'emptyGroups' => $eb->and($eb->or(), $eb->cmp('done', true)),
+        'missing' => $eb->or(ZeroForLaravel\Query\MissingValue::Missing, $eb->cmp('id', ZeroForLaravel\Query\MissingValue::Missing)),
+    ];
+    foreach ($expressions as $name => $condition) {
+        $output[$name] = ['ast' => ['table' => 'tasks', 'where' => $condition->toArray()], 'format' => $query->format()];
+    }
+    echo json_encode($output, JSON_THROW_ON_ERROR);
 } elseif (($argv[1] ?? null) === 'authorized') {
-    $query = new ZeroForLaravel\Query\Query($registry->get('Task'), $registry);
+    $query = new ZeroQuery($registry->get('Task'), $registry);
     $queries = [
-        'root' => $query,
-        'related' => $query->related('list')->related('comments', fn ($q) => $q->limit(3)),
-        'junction' => $query->whereExists('tags', fn ($q) => $q->where('id', 'owned')),
-        'groups' => $query->where(fn ($eb) => $eb->or(
-            $eb->exists('tags', fn ($q) => $q->where('name', 'Reading')),
-            $eb->exists('tags', fn ($q) => $q->where('name', 'Other')),
-        )),
+        'root' => clone $query,
+        'related' => (clone $query)->with('list')->with('comments', fn ($q) => $q->limit(3)),
+        'junction' => (clone $query)->whereHas('tags', fn ($q) => $q->where('id', 'owned')),
+        'groups' => (clone $query)->where(fn (ZeroQuery $q) => $q
+            ->whereHas('tags', fn ($q) => $q->where('name', 'Reading'))
+            ->orWhere(fn (ZeroQuery $q) => $q->whereHas('tags', fn ($q) => $q->where('name', 'Other')))),
     ];
     $compiler = new QueryCompiler($registry);
-    $context = new ZeroContext(['user_id' => 'alice']);
+    $context = new ResolvedContext(['user_id' => 'alice'], 'alice');
     $asts = array_map(fn ($q) => $compiler->compileDeclaration($q, $context), $queries);
-    $registry->get('Task')->definition->enforceServerScope(fn (ZeroForLaravel\Query\ZQLBuilder $q) => $q->where(fn (ZeroForLaravel\Query\ZeroOperator $op) => $op->or($op->cmp('done', true), $op->cmp('title', 'shared'))));
+    Task::addZeroGlobalScope('shared', function (ZeroQuery $query): void {
+        $query->where(fn (ZeroQuery $q) => $q->where('done', true)->orWhere('title', 'shared'));
+    });
     $asts['scope'] = $compiler->compileDeclaration($query, $context);
     echo json_encode($asts, JSON_THROW_ON_ERROR);
 } else {

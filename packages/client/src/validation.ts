@@ -1,5 +1,5 @@
 import type { ReadonlyJSONValue } from '@rocicorp/zero';
-import type { Column } from './contract';
+import type { ClientContext, Column, ContextContract } from './contract';
 
 export class InputError extends Error {
     constructor(public readonly fields: Readonly<Record<string, string>>) {
@@ -25,6 +25,39 @@ export function object(value: unknown, path: string): Record<string, unknown> {
     )
         fail(path, 'Expected an object.');
     return value as Record<string, unknown>;
+}
+
+/** Validate reflected application context before it reaches native Zero or storage identity. */
+export function validateContext(value: unknown, contract?: ContextContract): asserts value is ClientContext {
+    const context = object(value, 'context');
+    for (const field of Reflect.ownKeys(context)) {
+        if (typeof field !== 'string' || (contract && !Object.hasOwn(contract, field)))
+            fail('context', 'Unknown context field.');
+        if (!Object.getOwnPropertyDescriptor(context, field)?.enumerable)
+            fail(`context.${field}`, 'Context fields must be enumerable.');
+        const entry = context[field];
+        if (
+            entry !== null &&
+            typeof entry !== 'string' &&
+            typeof entry !== 'boolean' &&
+            !(typeof entry === 'number' && Number.isFinite(entry))
+        )
+            fail(`context.${field}`, 'Expected a finite scalar context value.');
+    }
+    if (!contract) return;
+    for (const [field, definition] of Object.entries(contract)) {
+        if (!Object.hasOwn(context, field)) fail(`context.${field}`, 'Missing context field.');
+        const entry = context[field];
+        const valid =
+            entry === null
+                ? definition.nullable
+                : definition.type === 'int'
+                  ? typeof entry === 'number' && Number.isSafeInteger(entry)
+                  : definition.type === 'float'
+                    ? typeof entry === 'number' && Number.isFinite(entry)
+                    : typeof entry === (definition.type === 'bool' ? 'boolean' : 'string');
+        if (!valid) fail(`context.${field}`, 'Invalid context value.');
+    }
 }
 
 export function columnValue(value: unknown, column: Column, path: string, publicDate = false): ReadonlyJSONValue {

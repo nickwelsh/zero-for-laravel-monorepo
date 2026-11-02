@@ -12,6 +12,19 @@ attributes, prepared-field overrides, named controller imports, bounded keyed
 loops, result contracts, and transaction limitations. Examples below use
 representative application models rather than the todos schema.
 
+The accepted 0.x context/scopes redesign adds overridable creation defaults through
+`withAttributes`: active global defaults in registry order, then root/local
+defaults in call order, then explicit creation data. Nested predicate and
+higher-order OR builders contribute conditions only. Global defaults cover Zero
+creates, including lowered controller creates and helper create branches, never
+updates or ordinary Eloquent outside Zero. Fields absent from FormRequest
+`validated()` are not caller input; trusted explicit data can override defaults.
+This is not immutable ownership authorization. Keep policies, Gates, and association
+checks. Arbitrary FormRequest hooks/events are not automatically optimistic; use
+custom/disabled optimism for nonportable PHP. See
+[creation defaults](../apps/docs/content/docs/0.x/docs/mutations.mdx#creation-defaults)
+and [migration mappings](../apps/docs/content/docs/0.x/docs/constraints.mdx#migrating-existing-0x-applications).
+
 ## 1. Decisions and scope
 
 | Area                    | Design                                                                                                                                                                                     |
@@ -594,7 +607,7 @@ These are implementation requirements, not claims that an implementation or test
 | Shared helpers          | Reachable shared methods preserve transaction reads, calls, branches, and write order; unsupported dependencies identify their source.                         |
 | PHP semantics           | Missing, null, false, zero, `"0"`, strict comparisons, and supported string/array behavior agree across executions.                                            |
 | Stable preparation      | IDs, required timestamps, and keyed repeated creates remain stable across retries, local replay, and server execution.                                         |
-| Protected input         | Client metadata cannot override trusted ownership, tenant context, relationship binding, or writable-field constraints.                                        |
+| Protected input         | Client metadata cannot override identity/context, binding, or writable-field constraints; authorized explicit creation data may override defaults.             |
 | Public/wire schemas     | Dates and other supported casts normalize before native request creation; validators and generated types agree.                                                |
 | Transaction reads       | Helpers read current transaction state, including preceding writes, rather than detached UI snapshots.                                                         |
 | Local prerequisites     | Missing cache data can produce the declared no-op prediction without falsely rejecting a valid server operation.                                               |

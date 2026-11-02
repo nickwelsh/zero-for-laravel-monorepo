@@ -9,8 +9,8 @@ use Inertia\AlwaysProp;
 use Inertia\ProvidesInertiaProperties;
 use Inertia\RenderContext;
 use LogicException;
-use ZeroForLaravel\Query\Query;
 use ZeroForLaravel\Query\RegisteredQueries;
+use ZeroForLaravel\Query\ZeroQuery;
 
 final readonly class LiveProps implements ProvidesInertiaProperties
 {
@@ -49,7 +49,7 @@ final readonly class LiveProps implements ProvidesInertiaProperties
                 $registry = resolve(\ZeroForLaravel\Metadata\ModelRegistry::class);
                 foreach ($registry->all() as $model) {
                     if ($value::class === $model->class) {
-                        $props[$key] = (new Query($model, $registry))->where($model->key, $value->getKey())->one();
+                        $props[$key] = (new ZeroQuery($model, $registry))->where($model->key, $value->getKey())->one();
                         break;
                     }
                 }
@@ -57,7 +57,7 @@ final readonly class LiveProps implements ProvidesInertiaProperties
         }
 
         $partial = $context->request->header('X-Inertia-Partial-Component') === $context->component;
-        $live = array_filter($props, fn (mixed $value): bool => $value instanceof Query);
+        $live = array_filter($props, fn (mixed $value): bool => $value instanceof ZeroQuery);
         foreach ($live as $key => $value) {
             if (array_key_exists($key, $this->shared)) {
                 throw new LogicException("Shared prop {$key} collides with a live query.");

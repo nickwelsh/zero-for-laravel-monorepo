@@ -8,8 +8,8 @@ use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use ZeroForLaravel\Concerns\HasZeroQueries;
-use ZeroForLaravel\ContextField;
-use ZeroForLaravel\Definition\ZeroDefinition;
+use App\Enums\ZeroContext;
+use ZeroForLaravel\Query\ZeroQuery;
 
 /**
  * @property string $id
@@ -22,12 +22,6 @@ class TodoList extends Model
     use HasZeroQueries;
 
     protected $fillable = ['name', 'user_id'];
-
-    public static function zero(): ZeroDefinition
-    {
-        return ZeroDefinition::make()->authorizeRelation('memberships')->fillFromContext('user_id', ContextField::UserId)
-            ->relations('todos');
-    }
 
     /** @return HasMany<ListMembership, $this> */
     public function memberships(): HasMany
@@ -48,6 +42,10 @@ class TodoList extends Model
 
     protected static function booted(): void
     {
+        static::addZeroGlobalScope('membership', function (ZeroQuery $query): void {
+            $query->whereHas('memberships')->withAttributes(['user_id' => ZeroContext::USER_ID], asConditions: false);
+        });
+
         static::created(function (self $list): void {
             $list->memberships()->create(['user_id' => $list->user_id]);
         });

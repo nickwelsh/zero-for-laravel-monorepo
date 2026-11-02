@@ -1,10 +1,10 @@
 // Generated controller mutations; deploy with the matching PHP manifest.
 /* oxlint-disable unicorn/no-thenable -- Operation trees use a JSON then branch, never a callable then. */
 import type {Schema} from '@rocicorp/zero';
-import {createControllerMutations, type ModelContract} from '@nickwelsh/zero-for-laravel';
+import {createControllerMutations, type ClientContext, type ModelContract} from '@nickwelsh/zero-for-laravel';
 import {z} from 'zod';
 export const controllerMutationContracts = {
-    "m_80aaa0bb59e6ad59856c2fdb450891b4": {
+    "m_dcb46793e910089df22156fc22391269": {
         "action": "App\\Http\\Controllers\\ShareListController@__invoke",
         "optimism": "disabled",
         "conceal": true,
@@ -25,10 +25,10 @@ export const controllerMutationContracts = {
         },
         "operations": [],
         "sites": {},
-        "version": "80aaa0bb59e6ad59856c2fdb450891b445ae056d4da6e3826190584da2f0b1c5",
+        "version": "dcb46793e910089df22156fc223912694443c5af58ada5cfb9d0b0854186a0b4",
         "returnType": "void"
     },
-    "m_0bcf40bb888705f85b344867b89aab04": {
+    "m_3db96884c449c1526ca129ad23a92d91": {
         "action": "App\\Http\\Controllers\\TodoController@destroy",
         "optimism": "generated",
         "conceal": true,
@@ -84,10 +84,10 @@ export const controllerMutationContracts = {
             }
         ],
         "sites": {},
-        "version": "0bcf40bb888705f85b344867b89aab04b5d26caabc57d1e0d38c00985a2a74ba",
+        "version": "3db96884c449c1526ca129ad23a92d919229df38e21592944cacf3fb2503afc7",
         "returnType": "void"
     },
-    "m_b0c58c177425ca9dc172decf05a24d81": {
+    "m_56120a14c922034ed80ac4c6e8fbffbd": {
         "action": "App\\Http\\Controllers\\TodoController@store",
         "optimism": "generated",
         "conceal": false,
@@ -168,10 +168,10 @@ export const controllerMutationContracts = {
         "sites": {
             "s0": "uuid"
         },
-        "version": "b0c58c177425ca9dc172decf05a24d81f4a287336b4bd55089ba1a886327ccec",
+        "version": "56120a14c922034ed80ac4c6e8fbffbdc53be11319899f3f6b79a65c3553c0b3",
         "returnType": "array"
     },
-    "m_346d8c43e547e41a57fc168ff963a72f": {
+    "m_62ec8cea799b02bd5ef6ab18d6ef1b4b": {
         "action": "App\\Http\\Controllers\\TodoController@update",
         "optimism": "generated",
         "conceal": true,
@@ -246,10 +246,10 @@ export const controllerMutationContracts = {
             }
         ],
         "sites": {},
-        "version": "346d8c43e547e41a57fc168ff963a72f7c3718a9a98353349dc0f8a964aba161",
+        "version": "62ec8cea799b02bd5ef6ab18d6ef1b4bb85e323857cdaed2336956cb2f039447",
         "returnType": "void"
     },
-    "m_9d7195c6688b9e5f1503612e03b379f9": {
+    "m_d130a045794ac87790e8e91a4cd02813": {
         "action": "App\\Http\\Controllers\\TodoListController@destroy",
         "optimism": "generated",
         "conceal": true,
@@ -305,10 +305,10 @@ export const controllerMutationContracts = {
             }
         ],
         "sites": {},
-        "version": "9d7195c6688b9e5f1503612e03b379f94ff64fc40b4a7d1fc49674dae3337318",
+        "version": "d130a045794ac87790e8e91a4cd028130bc635cba7354d3d540ac0fad1fc04fc",
         "returnType": "void"
     },
-    "m_ebb170b8ab48673b0b9ed95701ff999a": {
+    "m_2e5d81423675e0e2eaa7b0d20a7ab665": {
         "action": "App\\Http\\Controllers\\TodoListController@store",
         "optimism": "generated",
         "conceal": false,
@@ -389,10 +389,10 @@ export const controllerMutationContracts = {
         "sites": {
             "s0": "uuid"
         },
-        "version": "ebb170b8ab48673b0b9ed95701ff999ae7dbdc86107b2e3738c2bfc396abbae1",
+        "version": "2e5d81423675e0e2eaa7b0d20a7ab66548e4dc63b68dbe9c64002d5610f757b9",
         "returnType": "array"
     },
-    "m_9885930d6180e37ae8488db1abfeebaa": {
+    "m_165bb13b1eca8466b1bacb24022c1381": {
         "action": "App\\Http\\Controllers\\TodoListController@update",
         "optimism": "generated",
         "conceal": true,
@@ -467,7 +467,7 @@ export const controllerMutationContracts = {
             }
         ],
         "sites": {},
-        "version": "9885930d6180e37ae8488db1abfeebaa79b55b912868c4cf7e0c230eb5d40fba",
+        "version": "165bb13b1eca8466b1bacb24022c1381ed981367671b3f0e571918f02f7a3a97",
         "returnType": "void"
     }
 } as const;
@@ -520,24 +520,24 @@ export const inputSchema6 = z.strictObject({"name": z.string().refine(value => A
 export const serverResultSchema6 = z.undefined();
 export const clientResultSchema6 = z.undefined();
 const codec6 = {input: inputSchema6, encode: (input: Input6) => ({...(input["name"] === undefined ? {} : {"name": input["name"]})}), serverResult: serverResultSchema6, clientResult: clientResultSchema6};
-export function createControllerMutationBindings<S extends Schema>(schema: S, models: Readonly<Record<string, ModelContract>>) {
+export function createControllerMutationBindings<S extends Schema, C extends ClientContext = ClientContext>(schema: S, models: Readonly<Record<string, ModelContract>>) {
   const codecs = {
-    "m_80aaa0bb59e6ad59856c2fdb450891b4": {...codec0},
-    "m_0bcf40bb888705f85b344867b89aab04": {...codec1},
-    "m_b0c58c177425ca9dc172decf05a24d81": {...codec2},
-    "m_346d8c43e547e41a57fc168ff963a72f": {...codec3},
-    "m_9d7195c6688b9e5f1503612e03b379f9": {...codec4},
-    "m_ebb170b8ab48673b0b9ed95701ff999a": {...codec5},
-    "m_9885930d6180e37ae8488db1abfeebaa": {...codec6},
+    "m_dcb46793e910089df22156fc22391269": {...codec0},
+    "m_3db96884c449c1526ca129ad23a92d91": {...codec1},
+    "m_56120a14c922034ed80ac4c6e8fbffbd": {...codec2},
+    "m_62ec8cea799b02bd5ef6ab18d6ef1b4b": {...codec3},
+    "m_d130a045794ac87790e8e91a4cd02813": {...codec4},
+    "m_2e5d81423675e0e2eaa7b0d20a7ab665": {...codec5},
+    "m_165bb13b1eca8466b1bacb24022c1381": {...codec6},
   };
-  const runtime = createControllerMutations(schema, models, controllerMutationContracts, codecs);
+  const runtime = createControllerMutations<S, C>(schema, models, controllerMutationContracts, codecs);
   return {...runtime, actions: {
-    "App\\Http\\Controllers\\ShareListController@__invoke": runtime.bind("m_80aaa0bb59e6ad59856c2fdb450891b4", codecs["m_80aaa0bb59e6ad59856c2fdb450891b4"]),
-    "App\\Http\\Controllers\\TodoController@destroy": runtime.bind("m_0bcf40bb888705f85b344867b89aab04", codecs["m_0bcf40bb888705f85b344867b89aab04"]),
-    "App\\Http\\Controllers\\TodoController@store": runtime.bind("m_b0c58c177425ca9dc172decf05a24d81", codecs["m_b0c58c177425ca9dc172decf05a24d81"]),
-    "App\\Http\\Controllers\\TodoController@update": runtime.bind("m_346d8c43e547e41a57fc168ff963a72f", codecs["m_346d8c43e547e41a57fc168ff963a72f"]),
-    "App\\Http\\Controllers\\TodoListController@destroy": runtime.bind("m_9d7195c6688b9e5f1503612e03b379f9", codecs["m_9d7195c6688b9e5f1503612e03b379f9"]),
-    "App\\Http\\Controllers\\TodoListController@store": runtime.bind("m_ebb170b8ab48673b0b9ed95701ff999a", codecs["m_ebb170b8ab48673b0b9ed95701ff999a"]),
-    "App\\Http\\Controllers\\TodoListController@update": runtime.bind("m_9885930d6180e37ae8488db1abfeebaa", codecs["m_9885930d6180e37ae8488db1abfeebaa"]),
+    "App\\Http\\Controllers\\ShareListController@__invoke": runtime.bind("m_dcb46793e910089df22156fc22391269", codecs["m_dcb46793e910089df22156fc22391269"]),
+    "App\\Http\\Controllers\\TodoController@destroy": runtime.bind("m_3db96884c449c1526ca129ad23a92d91", codecs["m_3db96884c449c1526ca129ad23a92d91"]),
+    "App\\Http\\Controllers\\TodoController@store": runtime.bind("m_56120a14c922034ed80ac4c6e8fbffbd", codecs["m_56120a14c922034ed80ac4c6e8fbffbd"]),
+    "App\\Http\\Controllers\\TodoController@update": runtime.bind("m_62ec8cea799b02bd5ef6ab18d6ef1b4b", codecs["m_62ec8cea799b02bd5ef6ab18d6ef1b4b"]),
+    "App\\Http\\Controllers\\TodoListController@destroy": runtime.bind("m_d130a045794ac87790e8e91a4cd02813", codecs["m_d130a045794ac87790e8e91a4cd02813"]),
+    "App\\Http\\Controllers\\TodoListController@store": runtime.bind("m_2e5d81423675e0e2eaa7b0d20a7ab665", codecs["m_2e5d81423675e0e2eaa7b0d20a7ab665"]),
+    "App\\Http\\Controllers\\TodoListController@update": runtime.bind("m_165bb13b1eca8466b1bacb24022c1381", codecs["m_165bb13b1eca8466b1bacb24022c1381"]),
   }};
 }

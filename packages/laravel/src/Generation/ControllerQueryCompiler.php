@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace ZeroForLaravel\Generation;
 
 use BackedEnum;
+use Closure;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Foundation\Http\FormRequest;
 use LogicException;
@@ -18,11 +19,16 @@ use PhpParser\NodeFinder;
 use PhpParser\NodeTraverser;
 use PhpParser\NodeVisitor\NameResolver;
 use PhpParser\Parser;
+use ReflectionFunction;
 use ReflectionMethod;
 use ReflectionNamedType;
+use ReflectionObject;
 use ReflectionParameter;
+use ZeroForLaravel\Context\ContextDefinition;
 use ZeroForLaravel\Metadata\ModelRegistry;
 use ZeroForLaravel\Query\QueryInput;
+use ZeroForLaravel\Query\ZeroQuery;
+use ZeroForLaravel\Scopes\ScopeRegistry;
 
 /** Pure declarations only: an unrepresented guard or dependency is a build error. */
 final class ControllerQueryCompiler
@@ -35,7 +41,101 @@ final class ControllerQueryCompiler
 
     private int $callbackId = 0;
 
+    /** @var list<string> */
+    private array $scopeStack = [];
+
     public function __construct(private readonly Parser $parser, private readonly ModelRegistry $models) {}
+
+    /** @param array<string, QueryExpression> $variables */
+    public function construction(Expr $expression, array $variables = []): QueryExpression
+    {
+        return $this->expression($expression, $variables)->snapshot();
+    }
+
+    /**
+     * @param  list<QueryExpression>  $arguments
+     */
+    public function scope(ReflectionMethod|Closure $scope, \ZeroForLaravel\Metadata\ModelMetadata $model, array $arguments = [], ?object $instance = null): QueryExpression
+    {
+        $reflection = $scope instanceof Closure ? new ReflectionFunction($scope) : $scope;
+        $id = ($scope instanceof ReflectionMethod ? $scope->class.'::'.$scope->name : $reflection->getFileName().':'.$reflection->getStartLine());
+        if (in_array($id, $this->scopeStack, true)) {
+            throw new LogicException('Recursive Zero local scope: '.implode(' -> ', [...$this->scopeStack, $id]));
+        }
+
+        $this->scopeStack[] = $id;
+        $previous = [$this->file, $this->action, $this->prop];
+        $this->file = $reflection->getFileName() ?: throw new LogicException('Scope source is unavailable.');
+        $this->action = $id;
+        $this->prop = 'scope';
+        try {
+            $nodes = (new NodeTraverser(new NameResolver))->traverse($this->parser->parse(file_get_contents($this->file) ?: '') ?? []);
+            $node = (new NodeFinder)->findFirst($nodes, fn (Node $candidate): bool => ($candidate instanceof Stmt\ClassMethod || $candidate instanceof Expr\Closure || $candidate instanceof Expr\ArrowFunction) && $candidate->getStartLine() <= $reflection->getStartLine() && $candidate->getEndLine() === $reflection->getEndLine() && ($scope instanceof Closure ? ! $candidate instanceof Stmt\ClassMethod : $candidate instanceof Stmt\ClassMethod && $candidate->name->name === $scope->name));
+            if (! $node instanceof Stmt\ClassMethod && ! $node instanceof Expr\Closure && ! $node instanceof Expr\ArrowFunction) {
+                throw new LogicException($id.': cannot locate scope body.');
+            }
+
+            $parameter = $node->params[0] ?? null;
+            if ($parameter === null || ! $parameter->var instanceof Expr\Variable || ! is_string($parameter->var->name)) {
+                $this->unsupported($node, 'A scope requires a query parameter.');
+            }
+
+            $name = $parameter->var->name;
+            $local = QueryExpression::reference(new QueryExpression('local', 'zeroScope', model: $model, type: 'query'));
+            $variables = [$name => $local];
+            foreach (array_slice($node->params, 1) as $index => $param) {
+                if (! $param->var instanceof Expr\Variable || ! is_string($param->var->name) || $param->byRef || $param->variadic) {
+                    $this->unsupported($param, 'Scopes require ordinary named arguments.');
+                }
+
+                if ($param->type instanceof Name && $param->type->toString() === Model::class) {
+                    $variables[$param->var->name] = new QueryExpression('metadata', model: $model, type: 'metadata');
+                } else {
+                    $variables[$param->var->name] = $arguments[$index] ?? ($param->default !== null ? $this->expression($param->default, []) : throw new LogicException($id.': missing scope argument '.$param->var->name));
+                }
+            }
+
+            if ($scope instanceof Closure) {
+                foreach ($reflection->getStaticVariables() as $key => $value) {
+                    if (is_string($key)) {
+                        $variables[$key] = ScopeCompiler::value($value);
+                    }
+                }
+            } elseif ($instance !== null) {
+                $state = [];
+                foreach ((new ReflectionObject($instance))->getProperties() as $property) {
+                    if (! $property->isStatic() && $property->isInitialized($instance)) {
+                        $state[] = new QueryExpression('property', $property->name, [ScopeCompiler::value($property->getValue($instance))]);
+                    }
+                }
+
+                $variables['this'] = new QueryExpression('state', children: $state, type: 'state');
+            }
+
+            if ($node instanceof Expr\ArrowFunction) {
+                return $this->expression($node->expr, $variables)->snapshot();
+            }
+
+            $statements = $node->stmts ?? [];
+            $return = end($statements);
+            if ($return instanceof Stmt\Return_) {
+                array_pop($statements);
+            }
+
+            $variables = $this->statements($statements, $variables);
+            if ($return instanceof Stmt\Return_ && $return->expr instanceof Expr) {
+                $result = $this->expression($return->expr, $variables);
+                if ($result !== $variables[$name]) {
+                    $this->unsupported($return, 'Scopes must return the supplied query or void.');
+                }
+            }
+
+            return $variables[$name]->snapshot();
+        } finally {
+            [$this->file, $this->action, $this->prop] = $previous;
+            array_pop($this->scopeStack);
+        }
+    }
 
     /** @return list<ControllerQuery> */
     public function compile(string $controller, string $method): array
@@ -56,7 +156,7 @@ final class ControllerQueryCompiler
             throw new LogicException("{$this->file}: {$this->action}: controller body is unavailable.");
         }
 
-        $declaration = (new NodeFinder)->findFirst($node->stmts, fn (Node $candidate): bool => $candidate instanceof Expr\StaticCall && $candidate->name instanceof Identifier && $candidate->name->name === 'zeroQuery');
+        $declaration = (new NodeFinder)->findFirst($node->stmts, fn (Node $candidate): bool => $candidate instanceof Expr\StaticCall && $candidate->class instanceof Name && $candidate->name instanceof Identifier && ($candidate->name->name === 'zeroQuery' || class_exists($candidate->class->toString()) && ScopeRegistry::local($candidate->class->toString(), $candidate->name->name) instanceof ReflectionMethod));
         $boundModels = array_filter($reflection->getParameters(), fn (ReflectionParameter $parameter): bool => $parameter->getType() instanceof ReflectionNamedType && is_subclass_of($parameter->getType()->getName(), Model::class));
         $render = (new NodeFinder)->findFirst($node->stmts, fn (Node $candidate): bool => $candidate instanceof Expr\StaticCall && $candidate->class instanceof Name && $candidate->class->toString() === \Inertia\Inertia::class && $candidate->name instanceof Identifier && $candidate->name->name === 'render');
         if (! $declaration instanceof Node && ($boundModels === [] || ! $render instanceof Node)) {
@@ -115,7 +215,7 @@ final class ControllerQueryCompiler
         $models = $this->models->all();
         ksort($models);
         $schemaFingerprint = hash('sha256', json_encode([
-            'zero' => '1.11.3',
+            'zero' => '1.11.3', 'builder' => 'mutable-scopes-v1', 'context' => ContextDefinition::configured()->contract(),
             'models' => array_map(fn (\ZeroForLaravel\Metadata\ModelMetadata $model): array => $model->toArray(), $models),
             'pivots' => $this->models->pivotColumns(),
             'inputs' => array_map(static fn (string $type): mixed => match (true) {
@@ -132,7 +232,7 @@ final class ControllerQueryCompiler
             }
 
             $this->prop = $item->key->value;
-            $expression = $this->expression($item->value, $variables);
+            $expression = $this->expression($item->value, $variables)->snapshot();
             $props[$this->prop] = [$expression, $item->getStartLine()];
             if (! $expression->model instanceof \ZeroForLaravel\Metadata\ModelMetadata) {
                 $ordinary[$this->prop] = match ($expression->type) {
@@ -152,6 +252,43 @@ final class ControllerQueryCompiler
         return $queries;
     }
 
+    private function mutate(QueryExpression $receiver, QueryExpression $value): QueryExpression
+    {
+        if ($receiver->kind !== 'reference') {
+            return $value;
+        }
+
+        $receiver->children = [$value];
+        $receiver->singular = $value->singular;
+
+        return $receiver;
+    }
+
+    private function derivesFrom(QueryExpression $query, string $symbol): bool
+    {
+        return match ($query->kind) {
+            'local' => $query->value === $symbol,
+            'conditional' => $this->derivesFrom($query->children[1], $symbol) && $this->derivesFrom($query->children[2], $symbol),
+            'method', 'scope' => $this->derivesFrom($query->children[0], $symbol),
+            default => false,
+        };
+    }
+
+    /** @param array<string, QueryExpression> $variables
+     * @return array<string, QueryExpression>
+     */
+    private function branch(array $variables): array
+    {
+        $copies = [];
+        foreach ($variables as $name => $value) {
+            if ($value->kind === 'reference') {
+                $variables[$name] = $copies[spl_object_id($value)] ??= QueryExpression::reference($value->snapshot());
+            }
+        }
+
+        return $variables;
+    }
+
     /**
      * @param  array<Stmt>  $statements
      * @param  array<string, QueryExpression>  $variables
@@ -162,14 +299,17 @@ final class ControllerQueryCompiler
         foreach ($statements as $statement) {
             if ($statement instanceof Stmt\Expression && $statement->expr instanceof Expr\Assign && $statement->expr->var instanceof Expr\Variable && is_string($statement->expr->var->name)) {
                 $variables[$statement->expr->var->name] = $this->expression($statement->expr->expr, $variables);
+            } elseif ($statement instanceof Stmt\Expression && $statement->expr instanceof Expr\MethodCall) {
+                $this->expression($statement->expr, $variables);
             } elseif ($statement instanceof Stmt\If_ && $statement->elseifs === []) {
                 $condition = $this->expression($statement->cond, $variables);
                 if (! $this->boolean($condition)) {
                     $this->unsupported($statement->cond, 'A portable condition must be explicitly boolean, not PHP truthiness.');
                 }
 
-                $yes = $this->statements($statement->stmts, $this->narrow($condition, $variables));
-                $no = $this->statements($statement->else->stmts ?? [], $variables);
+                $yes = $this->statements($statement->stmts, $this->branch($this->narrow($condition, $variables)));
+                $no = $this->statements($statement->else->stmts ?? [], $this->branch($variables));
+                $merged = [];
                 foreach (array_unique([...array_keys($yes), ...array_keys($no)]) as $name) {
                     if (str_starts_with($name, "\0")) {
                         continue;
@@ -183,7 +323,13 @@ final class ControllerQueryCompiler
                         $this->unsupported($statement, "Variable {$name} changes its result contract across branches.");
                     }
 
-                    $variables[$name] = $yes[$name] === $no[$name] ? $yes[$name] : new QueryExpression('conditional', children: [$condition, $yes[$name], $no[$name]], model: $yes[$name]->model, type: $yes[$name]->type, singular: $yes[$name]->singular);
+                    $value = new QueryExpression('conditional', children: [$condition, $yes[$name]->snapshot(), $no[$name]->snapshot()], model: $yes[$name]->model, type: $yes[$name]->type, singular: $yes[$name]->singular);
+                    if ($yes[$name]->type === 'query') {
+                        $identity = spl_object_id($yes[$name]).':'.spl_object_id($no[$name]);
+                        $value = $merged[$identity] ??= QueryExpression::reference($value);
+                    }
+
+                    $variables[$name] = $value;
                 }
             } else {
                 $this->unsupported($statement, 'Statement or guard cannot be represented in the query definition.');
@@ -196,7 +342,16 @@ final class ControllerQueryCompiler
     /** @param array<string, QueryExpression> $variables */
     private function expression(Expr $node, array $variables): QueryExpression
     {
-        if ($node instanceof Scalar\String_ || $node instanceof Scalar\Int_) {
+        if ($node instanceof Expr\Clone_) {
+            $query = $this->expression($node->expr, $variables);
+            if ($query->type !== 'query') {
+                $this->unsupported($node, 'Only Zero queries may be cloned.');
+            }
+
+            return QueryExpression::reference($query->snapshot());
+        }
+
+        if ($node instanceof Scalar\String_ || $node instanceof Scalar\Int_ || $node instanceof Scalar\Float_) {
             if (is_int($node->value) && abs($node->value) > 9007199254740991) {
                 $this->unsupported($node, 'Integer literal cannot be represented exactly by JavaScript.');
             }
@@ -218,6 +373,24 @@ final class ControllerQueryCompiler
 
         if ($node instanceof Expr\PropertyFetch && $node->name instanceof Identifier) {
             $receiver = $this->expression($node->var, $variables);
+            if ($receiver->type === 'query' && $node->name->name === 'orWhere') {
+                return new QueryExpression('higherOrder', children: [$receiver], model: $receiver->model, type: 'higherOrder');
+            }
+
+            if ($receiver->kind === 'state') {
+                foreach ($receiver->children as $property) {
+                    if ($property->value === $node->name->name) {
+                        return $property->children[0];
+                    }
+                }
+
+                $this->unsupported($node, 'Unknown portable scope property.');
+            }
+
+            if ($receiver->kind === 'context' && $node->name->name === 'value') {
+                return new QueryExpression('literal', $receiver->value, type: 'string');
+            }
+
             if ($receiver->kind === 'bound' && $node->name->name === $receiver->model?->key) {
                 return new QueryExpression('argument', $receiver->value, type: $receiver->model->columns[$receiver->model->key]['type'] === 'number' ? 'int' : 'string');
             }
@@ -267,8 +440,20 @@ final class ControllerQueryCompiler
         if ($node instanceof Expr\ClassConstFetch && $node->class instanceof Name && $node->name instanceof Identifier && is_subclass_of($node->class->toString(), BackedEnum::class)) {
             $case = constant($node->class->toString().'::'.$node->name->name);
             if ($case instanceof BackedEnum) {
+                $context = ContextDefinition::configured();
+                if ($case instanceof ($context->enum)) {
+                    $field = (string) $case->value;
+                    $contract = $context->fields[$field] ?? throw new LogicException('Unknown context field '.$field.'.');
+
+                    return new QueryExpression('context', $field, type: $contract['type']);
+                }
+
                 return new QueryExpression('literal', $case->value, type: get_debug_type($case->value));
             }
+        }
+
+        if ($node instanceof Expr\ClassConstFetch && $node->class instanceof Name && $node->name instanceof Identifier && $node->name->name === 'class') {
+            return new QueryExpression('literal', $node->class->toString(), type: 'string');
         }
 
         if ($node instanceof Expr\Array_) {
@@ -280,7 +465,7 @@ final class ControllerQueryCompiler
                 }
 
                 $value = $this->expression($item->value, $variables);
-                if (! in_array($value->type, ['string', 'int', 'bool', 'null'], true)) {
+                if (! in_array($value->type, ['string', 'int', 'float', 'bool', 'null', 'list', 'object'], true)) {
                     $this->unsupported($item, 'Query lists require scalar values.');
                 }
 
@@ -303,10 +488,17 @@ final class ControllerQueryCompiler
             return new QueryExpression($object ? 'object' : 'list', children: array_values($items), type: $object ? 'object' : 'list');
         }
 
-        if ($node instanceof Expr\StaticCall && $node->class instanceof Name && $node->name instanceof Identifier && $node->name->name === 'zeroQuery' && $node->args === []) {
+        if ($node instanceof Expr\StaticCall && $node->class instanceof Name && $node->name instanceof Identifier) {
             foreach ($this->models->all() as $model) {
                 if ($model->class === $node->class->toString()) {
-                    return new QueryExpression('query', model: $model, type: 'query');
+                    $query = QueryExpression::reference(new QueryExpression('query', model: $model, type: 'query'));
+                    if ($node->name->name === 'zeroQuery' && $node->args === []) {
+                        return $query;
+                    }
+
+                    if (ScopeRegistry::local($model->class, $node->name->name) instanceof ReflectionMethod) {
+                        return $this->expression(new Expr\MethodCall(new Expr\Variable('__entry'), $node->name, $node->args), [...$variables, '__entry' => $query]);
+                    }
                 }
             }
 
@@ -316,11 +508,57 @@ final class ControllerQueryCompiler
         if ($node instanceof Expr\MethodCall && $node->name instanceof Identifier) {
             $receiver = $this->expression($node->var, $variables);
             $method = $node->name->name;
+            if ($receiver->type === 'query' && $method === 'with' && ($node->getArgs()[0]->value ?? null) instanceof Expr\Array_) {
+                if (count($node->getArgs()) !== 1) {
+                    $this->unsupported($node, 'Array includes take their callbacks in the keyed array.');
+                }
+
+                foreach ($node->getArgs()[0]->value->items as $item) {
+                    if ($item === null || $item->unpack || $item->byRef || $item->key !== null && ! $item->key instanceof Scalar\String_) {
+                        $this->unsupported($node, 'Includes require relationship names or literal keys and callbacks.');
+                    }
+
+                    $args = $item->key instanceof Scalar\String_ ? [new Node\Arg($item->key), new Node\Arg($item->value)] : [new Node\Arg($item->value)];
+                    $receiver = $this->expression(new Expr\MethodCall(new Expr\Variable('__include'), 'with', $args), [...$variables, '__include' => $receiver]);
+                }
+
+                return $receiver;
+            }
+
+            if ($receiver->type === 'query' && $method === 'with' && ($node->getArgs()[0]->value ?? null) instanceof Scalar\String_ && str_contains($node->getArgs()[0]->value->value, '.')) {
+                [$head, $tail] = explode('.', $node->getArgs()[0]->value->value, 2);
+                $args = [new Node\Arg(new Scalar\String_($tail)), ...array_slice($node->getArgs(), 1)];
+                $callback = new Expr\ArrowFunction(['params' => [new Node\Param(new Expr\Variable('__nested'))], 'expr' => new Expr\MethodCall(new Expr\Variable('__nested'), 'with', $args)]);
+
+                return $this->expression(new Expr\MethodCall(new Expr\Variable('__include'), 'with', [new Node\Arg(new Scalar\String_($head)), new Node\Arg($callback)]), [...$variables, '__include' => $receiver]);
+            }
+
+            if ($receiver->kind === 'metadata' && $node->args === [] && in_array($method, ['getTable', 'getKeyName', 'getDeletedAtColumn'], true)) {
+                return new QueryExpression('literal', match ($method) {
+                    'getTable' => $receiver->queryModel()->table, 'getKeyName' => $receiver->queryModel()->key, default => $receiver->queryModel()->deletedAt,
+                }, type: 'string');
+            }
+
+            if ($receiver->kind === 'higherOrder') {
+                $root = $receiver->children[0];
+                $local = QueryExpression::reference(new QueryExpression('local', 'zeroOr', model: $root->model, type: 'query'));
+                $scope = $this->expression(new Expr\MethodCall(new Expr\Variable('__or'), $node->name, $node->args), [...$variables, '__or' => $local])->snapshot();
+
+                return $this->mutate($root, new QueryExpression('method', 'orWhere', [$root->snapshot(), new QueryExpression('callback', 'zeroOr', [$scope], type: 'callback')], $root->model, 'query', $root->singular));
+            }
+
             if ($receiver->kind === 'request' && $method === 'validated' && $node->args === []) {
                 return new QueryExpression('validated', $receiver->value, type: $receiver->type);
             }
 
-            $operations = $receiver->type === 'builder' ? ['cmp', 'cmpLit', 'and', 'or', 'not', 'exists'] : ['where', 'whereExists', 'related', 'orderBy', 'limit', 'start', 'one', 'all', 'infinite', 'paginate'];
+            if ($receiver->type === 'query' && $receiver->model instanceof \ZeroForLaravel\Metadata\ModelMetadata && ($scope = ScopeRegistry::local($receiver->model->class, $method)) instanceof ReflectionMethod) {
+                $args = array_values(array_map(fn (Node\Arg $arg): QueryExpression => $this->expression($arg->value, $variables)->snapshot(), $node->getArgs()));
+                $body = $this->scope($scope, $receiver->model, $args);
+
+                return $this->mutate($receiver, new QueryExpression('scope', $method, [$receiver->snapshot(), $body, ...$args], $receiver->model, 'query', $receiver->singular));
+            }
+
+            $operations = $receiver->type === 'builder' ? ['cmp', 'cmpLit', 'and', 'or', 'not', 'exists'] : ['where', 'orWhere', 'whereExists', 'whereHas', 'whereDoesntHave', 'with', 'orderBy', 'limit', 'start', 'one', 'all', 'infinite', 'paginate', 'withAttributes', 'withoutGlobalScope', 'withoutGlobalScopes'];
             if (in_array($receiver->kind, ['infinite', 'paginate'], true)) {
                 $this->unsupported($node, 'Pagination must be the final query operation.');
             }
@@ -331,14 +569,14 @@ final class ControllerQueryCompiler
 
             $arguments = [];
             foreach ($node->getArgs() as $index => $argument) {
-                if ($argument->unpack || $argument->name !== null || $argument->byRef) {
+                if ($argument->unpack || $argument->name !== null && ! ($method === 'withAttributes' && $index === 1 && $argument->name->name === 'asConditions') || $argument->byRef) {
                     $this->unsupported($argument, 'Only positional query arguments are supported.');
                 }
 
-                if ($argument->value instanceof Expr\ArrowFunction) {
+                if ($argument->value instanceof Expr\ArrowFunction || $argument->value instanceof Expr\Closure) {
                     $model = $receiver->model;
-                    $type = 'builder';
-                    if ($index === 1 && in_array($method, ['related', 'whereExists', 'exists'], true)) {
+                    $type = 'query';
+                    if ($index === 1 && in_array($method, ['with', 'whereHas', 'whereDoesntHave', 'whereExists', 'exists'], true)) {
                         $relation = $arguments[0] ?? null;
                         if ($relation?->kind !== 'literal' || ! is_string($relation->value) || ! isset($model->relations[$relation->value])) {
                             $this->unsupported($argument, 'Relationship callback requires a registered relationship.');
@@ -346,7 +584,7 @@ final class ControllerQueryCompiler
 
                         $model = $this->models->get($model->relations[$relation->value]['model']);
                         $type = 'query';
-                    } elseif ($index !== 0 || $method !== 'where') {
+                    } elseif ($index !== 0 || ! in_array($method, ['where', 'orWhere'], true)) {
                         $this->unsupported($argument, 'Callback is not supported in this argument position.');
                     }
 
@@ -358,24 +596,36 @@ final class ControllerQueryCompiler
 
                     $name = $parameter->var->name;
                     $symbol = 'zero'.++$this->callbackId;
-                    $local = new QueryExpression('local', $symbol, model: $model, type: $type);
-                    $body = $this->expression($callback->expr, [...$variables, $name => $local]);
-                    if ($body->type !== ($type === 'builder' ? 'condition' : 'query') || $body->model !== $model) {
+                    $local = QueryExpression::reference(new QueryExpression('local', $symbol, model: $model, type: $type));
+                    if ($callback instanceof Expr\ArrowFunction) {
+                        $body = $this->expression($callback->expr, [...$variables, $name => $local])->snapshot();
+                    } else {
+                        foreach ($callback->uses as $use) {
+                            if ($use->byRef) {
+                                $this->unsupported($use, 'Callback captures must be by value.');
+                            }
+                        }
+
+                        $stmts = $callback->stmts;
+                        $return = end($stmts);
+                        if ($return instanceof Stmt\Return_) {
+                            array_pop($stmts);
+                        }
+
+                        $locals = $this->statements($stmts, [...$variables, $name => $local]);
+                        $body = $return instanceof Stmt\Return_ && $return->expr instanceof Expr ? $this->expression($return->expr, $locals)->snapshot() : $locals[$name]->snapshot();
+                    }
+
+                    if ($body->type !== 'query' || $body->model !== $model) {
                         $this->unsupported($callback, 'Callback must return a condition or a refinement of its related query.');
                     }
 
-                    $root = $body;
-                    while ($root->kind === 'method') {
-                        $root = $root->children[0];
-                    }
-
-                    if ($root !== $local) {
+                    if (! $this->derivesFrom($body, $symbol)) {
                         $this->unsupported($callback, 'Callback must derive its result from the supplied builder.');
                     }
 
-                    $expectedParameter = $type === 'builder' ? \ZeroForLaravel\Query\ExpressionBuilder::class : \ZeroForLaravel\Query\Query::class;
-                    $expectedReturn = $type === 'builder' ? \ZeroForLaravel\Query\Condition::class : \ZeroForLaravel\Query\Query::class;
-                    if (($parameter->type !== null && (! $parameter->type instanceof Name || $parameter->type->toString() !== $expectedParameter)) || ($callback->returnType instanceof Node && (! $callback->returnType instanceof Name || $callback->returnType->toString() !== $expectedReturn))) {
+                    $expectedParameter = ZeroQuery::class;
+                    if (($parameter->type !== null && (! $parameter->type instanceof Name || $parameter->type->toString() !== $expectedParameter)) || ($callback->returnType instanceof Node && (! $callback->returnType instanceof Identifier || $callback->returnType->name !== 'void') && (! $callback->returnType instanceof Name || $callback->returnType->toString() !== ZeroQuery::class))) {
                         $this->unsupported($callback, 'Callback annotations must match the supplied builder and return type.');
                     }
 
@@ -393,15 +643,15 @@ final class ControllerQueryCompiler
                 $arguments[1] = new QueryExpression('callback', $symbol, [$local], type: 'callback');
             }
 
-            if (in_array($method, ['where', 'cmp', 'orderBy', 'related', 'whereExists', 'exists'], true) && ($method !== 'where' || ($arguments[0]->kind ?? null) !== 'callback')) {
+            if (in_array($method, ['where', 'orWhere', 'cmp', 'orderBy', 'with', 'whereHas', 'whereDoesntHave', 'whereExists', 'exists'], true) && (! in_array($method, ['where', 'orWhere'], true) || ($arguments[0]->kind ?? null) !== 'callback') && ($method !== 'with' || ($arguments[0]->kind ?? null) !== 'object')) {
                 $field = $arguments[0] ?? null;
-                $names = in_array($method, ['related', 'whereExists', 'exists'], true) ? $receiver->model->relations : $receiver->model->columns;
+                $names = in_array($method, ['with', 'whereHas', 'whereDoesntHave', 'whereExists', 'exists'], true) ? $receiver->model->relations : $receiver->model->columns;
                 if ($field?->kind !== 'literal' || ! is_string($field->value) || ! array_key_exists($field->value, $names)) {
                     $this->unsupported($node, 'Query fields and relationships must name a registered column or relationship.');
                 }
             }
 
-            if (in_array($method, ['where', 'cmp'], true) && count($arguments) >= 2) {
+            if (in_array($method, ['where', 'orWhere', 'cmp'], true) && count($arguments) >= 2) {
                 $last = count($arguments) - 1;
                 if (in_array($arguments[$last]->type, ['date', 'dateOnly'], true)) {
                     $column = is_string($arguments[0]->value) ? $receiver->model->columns[$arguments[0]->value] ?? null : null;
@@ -422,13 +672,13 @@ final class ControllerQueryCompiler
                 }
 
                 if (! $receiver->ordersKey()) {
-                    $receiver = new QueryExpression('method', 'orderBy', [$receiver, new QueryExpression('literal', $receiver->model->key, type: 'string'), new QueryExpression('literal', 'asc', type: 'string')], $receiver->model, 'query');
+                    $this->mutate($receiver, new QueryExpression('method', 'orderBy', [$receiver->snapshot(), new QueryExpression('literal', $receiver->queryModel()->key, type: 'string'), new QueryExpression('literal', 'asc', type: 'string')], $receiver->model, 'query'));
                 }
 
-                return new QueryExpression($method, $size, [$receiver], $receiver->model, 'query');
+                return $this->mutate($receiver, new QueryExpression($method, $size, [$receiver->snapshot()], $receiver->model, 'query'));
             }
 
-            return new QueryExpression('method', $method, [$receiver, ...$arguments], $receiver->model, $receiver->type === 'builder' ? 'condition' : 'query', $receiver->singular || $method === 'one');
+            return $this->mutate($receiver, new QueryExpression('method', $method, [$receiver->snapshot(), ...$arguments], $receiver->model, $receiver->type === 'builder' ? 'condition' : 'query', $receiver->singular || $method === 'one'));
         }
 
         if ($node instanceof Expr\BooleanNot) {
@@ -506,11 +756,14 @@ final class ControllerQueryCompiler
         $count = count($arguments);
         $arity = match ($method) {
             'one', 'all' => $count === 0,
+            'withoutGlobalScope' => $count === 1 && $arguments[0]->kind === 'literal' && $arguments[0]->type === 'string',
+            'withoutGlobalScopes' => $count === 0 || $count === 1 && ($arguments[0]->kind === 'list' || $arguments[0]->type === 'null'),
+            'withAttributes' => $count >= 1 && $count <= 2 && $arguments[0]->type === 'object' && ($count === 1 || $arguments[1]->kind === 'literal' && $arguments[1]->type === 'bool'),
             'limit', 'not', 'infinite', 'paginate' => $count === 1,
             'orderBy' => $count === 2,
-            'related', 'start' => $count >= 1 && $count <= 2,
+            'with', 'start', 'whereHas', 'whereDoesntHave' => $count >= 1 && $count <= 2,
             'whereExists', 'exists' => $count >= 1 && $count <= 3,
-            'where' => ($arguments[0]->type ?? null) === 'callback' ? $count === 1 : ($count === 2 || $count === 3),
+            'where', 'orWhere' => ($arguments[0]->type ?? null) === 'callback' ? $count === 1 : ($count === 2 || $count === 3),
             'cmp' => $count === 2 || $count === 3,
             'cmpLit' => $count === 3,
             'and', 'or' => true,
@@ -540,7 +793,7 @@ final class ControllerQueryCompiler
             }
         }
 
-        if ($method === 'related' && $count === 2 && $arguments[1]->type !== 'callback') {
+        if (in_array($method, ['with', 'whereHas', 'whereDoesntHave'], true) && $count === 2 && $arguments[1]->type !== 'callback') {
             $this->unsupported($node, 'Relationship refinement requires a query callback.');
         }
 
@@ -588,14 +841,22 @@ final class ControllerQueryCompiler
             }
         }
 
-        if (in_array($method, ['where', 'cmp', 'cmpLit'], true) && $count >= 2) {
+        if ($method === 'withAttributes') {
+            foreach ($arguments[0]->children as $property) {
+                if (! in_array($property->value, $receiver->queryModel()->writable, true)) {
+                    $this->unsupported($node, 'Creation defaults require an exposed, fillable, non-metadata column.');
+                }
+            }
+        }
+
+        if (in_array($method, ['where', 'orWhere', 'cmp', 'cmpLit'], true) && $count >= 2) {
             $operator = $count === 2 ? '=' : $arguments[1]->value;
             if (($count === 3 && $arguments[1]->kind !== 'literal') || ! in_array($operator, ['=', '!=', '<', '>', '<=', '>=', 'LIKE', 'NOT LIKE', 'ILIKE', 'NOT ILIKE', 'IN', 'NOT IN', 'IS', 'IS NOT'], true)) {
                 $this->unsupported($node, 'Comparison requires a supported literal operator.');
             }
 
             $value = $arguments[$count - 1];
-            if (in_array($operator, ['IN', 'NOT IN'], true) ? $value->type !== 'list' : ! in_array($value->type, ['string', 'int', 'bool', 'null'], true)) {
+            if (in_array($operator, ['IN', 'NOT IN'], true) ? $value->type !== 'list' : ! in_array($value->type, ['string', 'int', 'float', 'bool', 'null'], true)) {
                 $this->unsupported($node, 'Comparison operand must be a scalar, or a list for membership.');
             }
         }
