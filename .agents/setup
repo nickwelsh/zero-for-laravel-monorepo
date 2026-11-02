@@ -3,12 +3,20 @@ set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 export DEBIAN_FRONTEND=noninteractive
+# Xdebug's default develop mode slows contract generation; keep it installed for
+# coverage, but disable it only for setup and its child processes.
+export XDEBUG_MODE=off
 
 step() {
     local started=$SECONDS
     printf '\n==> %s\n' "$*"
-    "$@"
-    printf '==> Finished in %ss\n' "$((SECONDS - started))"
+    if "$@"; then
+        printf '==> Finished in %ss\n' "$((SECONDS - started))"
+    else
+        local status=$?
+        printf '==> Failed in %ss (exit %s): %s\n' "$((SECONDS - started))" "$status" "$*" >&2
+        return "$status"
+    fi
 }
 
 # PHP 8.5 supports both the library and the example's Pest 5 dependencies.
@@ -23,10 +31,12 @@ for package in "${packages[@]}"; do
 done
 if ((${#missing[@]})); then
     if [[ ! -f /etc/apt/sources.list.d/php.list ]]; then
-        step sudo apt-get update -qq
-        step sudo apt-get install -y --no-install-recommends ca-certificates curl
+        if ! command -v curl >/dev/null || [[ ! -s /etc/ssl/certs/ca-certificates.crt ]]; then
+            step sudo apt-get update -qq
+            step sudo apt-get install -y --no-install-recommends ca-certificates curl
+        fi
         keyring=$(mktemp)
-        curl -fsSL https://packages.sury.org/debsuryorg-archive-keyring.deb -o "$keyring"
+        step curl -fsSL --connect-timeout 10 --max-time 120 https://packages.sury.org/debsuryorg-archive-keyring.deb -o "$keyring"
         step sudo dpkg -i "$keyring"
         rm -f "$keyring"
         echo 'deb [signed-by=/usr/share/keyrings/debsuryorg-archive-keyring.gpg] https://packages.sury.org/php/ bookworm main' |
@@ -50,11 +60,13 @@ if ! command -v pnpm >/dev/null || [[ $(pnpm --version) != "$pnpm_version" ]]; t
 fi
 if ! command -v composer >/dev/null; then
     installer=$(mktemp)
-    curl -fsSL https://getcomposer.org/installer -o "$installer"
-    expected=$(curl -fsSL https://composer.github.io/installer.sig)
+    signature=$(mktemp)
+    step curl -fsSL --connect-timeout 10 --max-time 120 https://getcomposer.org/installer -o "$installer"
+    step curl -fsSL --connect-timeout 10 --max-time 120 https://composer.github.io/installer.sig -o "$signature"
+    expected=$(cat "$signature")
     [[ $(sha384sum "$installer" | cut -d ' ' -f 1) == "$expected" ]]
     step sudo php "$installer" --install-dir=/usr/local/bin --filename=composer --2
-    rm -f "$installer"
+    rm -f "$installer" "$signature"
 fi
 
 # Own the orb-local database without requiring systemd (custom orbs may lack it).
