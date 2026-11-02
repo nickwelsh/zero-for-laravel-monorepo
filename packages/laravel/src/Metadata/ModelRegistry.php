@@ -17,11 +17,21 @@ use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Database\Query\JoinClause;
 use LogicException;
+use PhpParser\Node;
+use PhpParser\NodeFinder;
+use PhpParser\NodeTraverser;
+use PhpParser\NodeVisitor\ParentConnectingVisitor;
+use PhpParser\ParserFactory;
 use ReflectionClass;
+use ReflectionMethod;
+use ReflectionNamedType;
 use ZeroForLaravel\Attributes;
-use ZeroForLaravel\Definition\ZeroDefinition;
+use ZeroForLaravel\Search\ScoutSearch;
 
-/** @phpstan-import-type Column from \ZeroForLaravel\Metadata\ModelMetadata */
+/**
+ * @phpstan-import-type Column from \ZeroForLaravel\Metadata\ModelMetadata
+ * @phpstan-import-type RelationWhere from \ZeroForLaravel\Metadata\ModelMetadata
+ */
 final class ModelRegistry
 {
     /** @var array<string, ModelMetadata> */
@@ -62,15 +72,50 @@ final class ModelRegistry
             }
 
             $this->models[$metadata->name] = $metadata;
+            $metadata->registry = $this;
         }
 
         foreach ($this->models as $metadata) {
             $this->describeRelations($metadata);
         }
 
-        foreach ($this->models as $metadata) {
-            $this->validateAuthorizationPath($metadata, []);
+    }
+
+    /** @param array<array-key, mixed> $wheres
+     * @return list<RelationWhere>
+     */
+    public static function relationWheres(array $wheres, ModelMetadata $target, bool $normalized = false): array
+    {
+        $result = [];
+        foreach ($wheres as $where) {
+            if (! is_array($where) || ! isset($where['type'], $where['boolean']) || ! in_array($where['boolean'], ['and', 'or'], true)) {
+                throw new LogicException($target->name.': unsupported relationship constraint.');
+            }
+
+            if ($where['type'] === 'Nested') {
+                $nested = $normalized ? ($where['wheres'] ?? null) : (($where['query'] ?? null) instanceof \Illuminate\Database\Query\Builder ? $where['query']->wheres : null);
+                if (! is_array($nested)) {
+                    throw new LogicException($target->name.': unsupported nested relationship constraint.');
+                }
+
+                $result[] = ['type' => 'Nested', 'boolean' => $where['boolean'], 'wheres' => self::relationWheres($nested, $target, $normalized)];
+
+                continue;
+            }
+
+            $column = $where['column'] ?? null;
+            if (! is_string($column) || ! isset($target->columns[ModelMetadata::column($column)]) || str_contains($column, '.') && ! str_starts_with($column, $target->table.'.') || ! in_array($where['type'], ['Basic', 'Null', 'NotNull', 'In', 'NotIn'], true)) {
+                throw new LogicException($target->name.': unsupported relationship constraint; use an explicit Zero query callback.');
+            }
+
+            $operator = match ($where['type']) {
+                'Null' => 'IS', 'NotNull' => 'IS NOT', 'In' => 'IN', 'NotIn' => 'NOT IN', default => is_string($where['operator'] ?? null) ? strtoupper($where['operator']) : throw new LogicException('Relationship comparison requires an operator.'),
+            };
+            $value = $where['value'] ?? $where['values'] ?? null;
+            $result[] = ['type' => 'Basic', 'column' => ModelMetadata::column($column), 'operator' => $operator, 'value' => $value, 'boolean' => $where['boolean']];
         }
+
+        return $result;
     }
 
     public function get(string $name): ModelMetadata
@@ -119,22 +164,6 @@ final class ModelRegistry
         return (new (reset($this->models)->class))->getConnection();
     }
 
-    /** @param list<string> $ancestors */
-    private function validateAuthorizationPath(ModelMetadata $model, array $ancestors): void
-    {
-        if (in_array($model->name, $ancestors, true)) {
-            throw new LogicException("{$model->name}: Cyclic authorization relations are unsupported.");
-        }
-
-        if (count($ancestors) > 8) {
-            throw new LogicException('Authorization relations exceed the maximum depth.');
-        }
-
-        foreach ($model->authorizationRelations as $relation) {
-            $this->validateAuthorizationPath($this->get($model->relations[$relation]['model']), [...$ancestors, $model->name]);
-        }
-    }
-
     /**
      * @template T of object
      *
@@ -179,18 +208,14 @@ final class ModelRegistry
         }
 
         $this->connectionName = $connection;
-        $definition = method_exists($class, 'zero') ? $class::zero() : ZeroDefinition::make();
-        if (! $definition instanceof ZeroDefinition) {
-            throw new LogicException("{$name}: zero() must return ZeroDefinition.");
+        if (method_exists($class, 'zero')) {
+            throw new LogicException("{$name}: legacy zero()/ZeroDefinition is unsupported. Use HasZeroQueries, Zero scopes, withAttributes(), and zeroSearch(), then run zero:generate.");
         }
 
-        $authorization = $definition->authorization;
-        $authorizationRelations = array_values(array_unique($definition->authorizationRelations));
-        if ($authorization === [] && $authorizationRelations === [] && ! $definition->public && $definition->serverScopes === []) {
-            throw new LogicException("{$name}: declare publicReads, authorize, authorizeRelation, or enforceServerScope visibility.");
+        $search = method_exists($class, 'zeroSearch') ? $class::zeroSearch() : null;
+        if ($search !== null && ! $search instanceof ScoutSearch) {
+            throw new LogicException("{$name}: zeroSearch() must return ScoutSearch.");
         }
-
-        $fills = $definition->serverFill;
 
         $traits = class_uses_recursive($class);
         $deleted = in_array(SoftDeletes::class, $traits) && method_exists($model, 'getDeletedAtColumn') ? $model->getDeletedAtColumn() : null;
@@ -254,7 +279,7 @@ final class ModelRegistry
                 ...($castType !== null && ! $date && $enum === null ? ['cast' => $castType] : [])];
         }
 
-        $required = array_filter(array_merge([$model->getKeyName(), $created, $updated, $deleted], array_keys($fills), array_column($authorization, 'field')));
+        $required = array_filter([$model->getKeyName(), $created, $updated, $deleted]);
         foreach ($required as $field) {
             $this->requireColumn($columns, $name, $field);
         }
@@ -265,16 +290,10 @@ final class ModelRegistry
             throw new LogicException("{$name}: the model key must match a single-column database primary key.");
         }
 
-        foreach ($authorization as $rule) {
-            if (! in_array($rule['op'], ['=', '!=', '<', '<=', '>', '>=', 'IS', 'IS NOT'], true)) {
-                throw new LogicException("{$name}: unsupported authorization operator.");
-            }
-        }
-
         $generator = in_array(HasUlids::class, $traits) ? 'ulid' : (in_array(HasUuids::class, $traits) ? 'uuid' : null);
-        $writable = array_values(array_intersect(array_diff($this->fillable($model), array_filter(array_merge([$model->getKeyName(), $created, $updated, $deleted], array_keys($fills)))), array_keys($columns)));
+        $writable = array_values(array_intersect(array_diff($this->fillable($model), array_filter([$model->getKeyName(), $created, $updated, $deleted])), array_keys($columns)));
 
-        return new ModelMetadata($class, $name, $model->getTable(), $model->getKeyName(), $columns, $authorization, $fills, $writable, $generator, $created, $updated, $deleted, $definition, authorizationRelations: $authorizationRelations);
+        return new ModelMetadata($class, $name, $model->getTable(), $model->getKeyName(), $columns, $writable, $generator, $created, $updated, $deleted, $search);
     }
 
     /** @return list<string> */
@@ -295,7 +314,13 @@ final class ModelRegistry
     private function describeRelations(ModelMetadata $metadata): void
     {
         $model = new $metadata->class;
-        foreach (array_unique([...$metadata->authorizationRelations, ...$metadata->definition->scopeRelations]) as $name) {
+        foreach ((new ReflectionClass($model))->getMethods(ReflectionMethod::IS_PUBLIC) as $method) {
+            $return = $method->getReturnType();
+            if ($method->isStatic() || $method->getNumberOfRequiredParameters() !== 0 || ! $return instanceof ReflectionNamedType || ! is_subclass_of($return->getName(), Relation::class)) {
+                continue;
+            }
+
+            $name = $method->getName();
             if (isset($metadata->columns[$name])) {
                 throw new LogicException("{$metadata->name}.{$name}: relation name conflicts with a model column or instance API.");
             }
@@ -310,10 +335,12 @@ final class ModelRegistry
             }
 
             $targetName = (new ReflectionClass($relation->getRelated()))->getShortName();
-            $target = $this->get($targetName);
-            if ($target->class !== $relation->getRelated()::class) {
-                throw new LogicException("{$metadata->name}.{$name}: target model is not registered.");
+            $target = $this->models[$targetName] ?? null;
+            if ($target === null || $target->class !== $relation->getRelated()::class) {
+                continue;
             }
+
+            $this->validateRelationSource($method);
 
             // Eloquent constraints cannot silently disappear when exported to Zero.
             $query = $relation->getQuery();
@@ -321,9 +348,20 @@ final class ModelRegistry
             $joins = $base->joins ?? [];
             $join = $joins[0] ?? null;
             $standardJoin = $relation instanceof BelongsToMany && count($joins) === 1 && $join instanceof JoinClause && is_array($join->wheres) && $join->table === $relation->getTable() && $join->type === 'inner' && count($join->wheres) === 1 && $join->wheres[0] === ['type' => 'Column', 'first' => $relation->getQualifiedRelatedKeyName(), 'operator' => '=', 'second' => $relation->getQualifiedRelatedPivotKeyName(), 'boolean' => 'and'];
-            if ($base->wheres || $base->orders || $base->limit || $base->offset || $base->groups || $base->havings || $base->unions || $base->distinct || ($base->columns !== null && $base->columns !== ['*']) || ($joins !== [] && ! $standardJoin)) {
-                throw new LogicException("{$metadata->name}.{$name}: constrained Eloquent relations require a custom query, which is not supported yet.");
+            if ($base->limit !== null || $base->offset !== null || $base->groups || $base->havings || $base->unions || $base->distinct || ($base->columns !== null && $base->columns !== ['*']) || ($joins !== [] && ! $standardJoin)) {
+                throw new LogicException("{$metadata->name}.{$name}: unsupported constrained Eloquent relationship.");
             }
+
+            $orders = [];
+            foreach ($base->orders ?? [] as $order) {
+                if (! is_array($order) || ! isset($order['column'], $order['direction']) || ! is_string($order['column']) || ! isset($target->columns[ModelMetadata::column($order['column'])]) || ! in_array($order['direction'], ['asc', 'desc'], true)) {
+                    throw new LogicException("{$metadata->name}.{$name}: unsupported relationship ordering.");
+                }
+
+                $orders[] = ['column' => $order['column'], 'direction' => $order['direction']];
+            }
+
+            $metadata->relationConstraints[$name] = ['wheres' => self::relationWheres($base->wheres, $target), 'orders' => $orders];
 
             if ($relation instanceof BelongsTo) {
                 $path = [['source' => [$relation->getForeignKeyName()], 'dest' => [$relation->getOwnerKeyName()], 'table' => $target->table]];
@@ -370,6 +408,34 @@ final class ModelRegistry
             }
 
             $metadata->relations[$name] = ['model' => $targetName, 'cardinality' => $cardinality, 'path' => $path];
+        }
+    }
+
+    private function validateRelationSource(ReflectionMethod $method): void
+    {
+        $file = $method->getFileName();
+        $source = $file === false ? false : file_get_contents($file);
+        if ($source === false) {
+            throw new LogicException("{$method->class}::{$method->name}: relationship source is required for Zero generation.");
+        }
+
+        $nodes = (new ParserFactory)->createForNewestSupportedVersion()->parse($source) ?? [];
+        $finder = new NodeFinder;
+        $body = $finder->findFirst($nodes, fn (Node $node): bool => $node instanceof Node\Stmt\ClassMethod && $node->name->name === $method->name && $node->getStartLine() === $method->getStartLine() && $node->getEndLine() === $method->getEndLine());
+        if (! $body instanceof Node\Stmt\ClassMethod) {
+            throw new LogicException("{$method->class}::{$method->name}: relationship source could not be inspected.");
+        }
+
+        (new NodeTraverser(new ParentConnectingVisitor))->traverse([$body]);
+        foreach ($finder->findInstanceOf($body, Node\Expr\Variable::class) as $variable) {
+            if ($variable->name !== 'this') {
+                continue;
+            }
+
+            $parent = $variable->getAttribute('parent');
+            if (! $parent instanceof Node\Expr\MethodCall || $parent->var !== $variable || ! $parent->name instanceof Node\Identifier || ! in_array($parent->name->name, ['belongsTo', 'hasOne', 'hasMany', 'belongsToMany'], true)) {
+                throw new LogicException("{$file}:{$variable->getStartLine()} {$method->class}::{$method->name}: nonportable parent-instance relationship logic. Use foreign keys for correlation and Zero scopes/callbacks for dynamic constraints.");
+            }
         }
     }
 

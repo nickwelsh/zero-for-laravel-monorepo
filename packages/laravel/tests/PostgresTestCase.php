@@ -57,6 +57,7 @@ abstract class PostgresTestCase extends TestCase
 
     protected function defineEnvironment($app): void
     {
+        parent::defineEnvironment($app);
         $app['config']->set('database.default', 'testing');
         $app['config']->set('database.connections.testing', [
             'driver' => 'pgsql', 'host' => getenv('ZERO_TEST_PG_HOST') ?: '127.0.0.1',

@@ -31,11 +31,11 @@ final readonly class ControllerQuery
 
     public function php(): string
     {
-        return 'static fn (array $args): \\ZeroForLaravel\\Query\\Query => '.$this->expression->emit(false);
+        return 'static fn (array $args): \\ZeroForLaravel\\Query\\ZeroQuery => '.$this->expression->emit(false);
     }
 
     public function typescript(): string
     {
-        return '({args}) => '.$this->expression->emit(true);
+        return '({args, ctx}) => '.$this->expression->emit(true);
     }
 }

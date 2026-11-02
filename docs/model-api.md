@@ -4,26 +4,48 @@ The public entry points are controller declarations, generated page contracts, a
 generated actions. Models provide schema, casts, visibility, and writable columns.
 See the [main guide](../README.md) and [working example](../examples/todos/README.md).
 
-## Visibility remains authoritative
+## Context, scopes, and visibility
 
-`ZeroDefinition::authorize()` and `authorizeRelation()` constrain root reads,
-includes, and relationship predicates. All relation targets must be registered.
-`publicReads()` is an explicit public-data decision. The server resolves fresh
-trusted context independently of the browser. Keep publication columns restricted
-with Eloquent visibility and Zero column attributes.
+Applications define a string-backed `App\Enums\ZeroContext` enum and configure
+`context` and `context_resolver`. Exactly one public resolver method per case uses
+`#[ZeroForLaravel\Attributes\ResolvesContext(ZeroContext::USER_ID)]`; native
+`string`/`int`/`float`/`bool` and nullable return types define the contract.
+Generation reflects signatures without executing methods. Laravel injects
+`Request`/services when resolving trusted values at runtime into `ResolvedContext`.
+Native `userID` and typed provider `context` are separate; neither invents an
+application `user_id` key. Configured enum cases in supported builder value
+positions become context references before domain enum flattening; `->value` is
+always the literal backed value.
 
-Server scopes may add authoritative predicates not portable to the browser. They
-must declare their relationship dependencies. An empty mandatory scope fails
-closed. Model read visibility does not grant write permissions: use action
-middleware, FormRequests, and explicit Gates/policies. Association IDs need their
-own authorization checks.
+Protected `#[ZeroScope]` methods take `ZeroForLaravel\Query\ZeroQuery` and return
+void or that same mutable builder. Direct `Todo::completed()` and
+`Todo::zeroQuery()->completed()` compose the same scope, with dynamic arguments and
+Eloquent-like higher-order `orWhere`. They are not Eloquent local scopes.
+
+Global scopes implement
+`ZeroForLaravel\Scopes\ZeroGlobalScope::apply(ZeroQuery $query, Model $model): void`.
+Register with `#[ZeroScopedBy([ScopeClass::class])]`, an instance through
+`static::addZeroGlobalScope`, or a named closure. Registration order is inherited,
+attributes, then boot. Only the checked portable subset is supported. Remove scopes
+by class/name with `withoutGlobalScope`, or all with `withoutGlobalScopes`;
+removal drops conditions and defaults. Related scopes apply independently and can
+be removed inside callbacks; parent removals do not propagate.
+
+For shared todos, memberships filter `user_id` to current context, lists require
+`whereHas('memberships')`, and todos require `whereHas('list')`. Lists set a creator
+default with `withAttributes(['user_id' => ZeroContext::USER_ID], asConditions: false)`
+so collaborator access is not narrowed to owners. These are removable read scopes,
+not immutable write authorization. Keep policies, Gates, FormRequest association
+checks, and narrow publication columns.
 
 ## Checked query declarations
 
-Use immutable `Model::zeroQuery()` declarations in a final `Inertia::render()` prop
-array. Supported surrounding PHP includes typed route inputs, backed enums,
-validated FormRequest fields, local assignments, boolean branches, comparisons,
-and arrow callbacks. Unsupported guards and dependencies fail with source locations.
+Use mutable `Model::zeroQuery()` declarations in a final `Inertia::render()` prop
+array; explicitly clone a base query for independent branches. This is a separate
+Zero builder, not an Eloquent builder. Supported surrounding PHP includes typed
+route inputs, backed enums, validated FormRequest fields, local assignments,
+boolean branches, comparisons, and arrow callbacks. Unsupported guards and
+dependencies fail with source locations.
 Arbitrary controller effects are not replayed on query transforms.
 
 The ZQL construction surface targets Zero 1.11.3: comparisons, membership, patterns,
@@ -31,6 +53,15 @@ null tests, boolean expression groups, literal comparisons, correlated existence
 relationship refinement, ordering, raw cursors, limits, and singular results.
 Existence supports `flip` and `scalar`; native scalar hints require unique-key
 constraints. Sort direction may be literal or an asc/desc backed enum.
+
+The Laravel-facing API uses `with` for includes and `whereHas` for parent filters;
+native `related`/`EXISTS` stay internal, without a `related()` alias. Relationships
+are discovered from supported Eloquent methods between opted-in models.
+`HasZeroQueries` enables discovery; `zero.models` explicitly registers alternatives.
+There is no silent target enrollment or private-column expansion; unsupported
+constraints fail. `$list->todos()` remains an Eloquent relation and cannot invoke
+a Zero scope. Optional Scout metadata uses `public static zeroSearch(): ScoutSearch`;
+Typesense authorization and index exposure remain separate from Zero scopes.
 
 `infinite(size)` and `paginate(size)` must be the final operation on an unbounded
 collection. They append a primary-key tie breaker when necessary. Infinite queries
@@ -48,6 +79,10 @@ boundary. Public Date values are encoded before request identity or enqueueing.
 FormRequests remain authoritative, including normalization and validation hooks.
 Nested object/list rules must declare their types and bounds explicitly. Database
 and custom validation rules are not invented as browser checks.
+
+Arbitrary FormRequest hooks and Eloquent events are not automatically replayed in
+optimism. Use custom or disabled optimism when the intended behavior depends on
+nonportable PHP rather than claiming generated parity.
 
 Plain rows decode primitive casts, backed enums, JSON, and dates recursively.
 Native temporal columns use epoch milliseconds. Date-cast string columns use UTC
@@ -71,6 +106,28 @@ Server binding and authorization still run. Late errors roll back the transactio
 unconditional unique keys. Reads see preceding writes. Conditional insertion never
 overwrites an existing opt-out. A PostgreSQL insert conflict rolls back to a
 savepoint and reloads the winner; explicit upserts update only named fields.
+
+### Creation defaults
+
+`withAttributes([...])` adds equality conditions and creation defaults by default;
+`asConditions: false` supplies defaults only. Merge active global defaults in
+registry order, then root/local defaults in call order, then explicit creation
+data. Nested predicates and higher-order OR builders contribute conditions only,
+not parent defaults. Related builders keep their defaults separate. Scope removal
+removes that scope's conditions and defaults.
+
+Global defaults apply to Zero creates, including compiler-lowered controller
+`Todo::create($request->validated())` and helper create branches. Updates and
+existing-row helper branches are never stamped. Ordinary Eloquent creates outside
+Zero remain unchanged. A field absent from FormRequest `validated()` is not caller
+input; trusted explicit creation data can override a default. These defaults are
+not immutable authorization and do not replace policies or association checks.
+
+See [the mutation guide](../apps/docs/content/docs/0.x/docs/mutations.mdx#creation-defaults)
+for examples and [the 0.x migration mappings](../apps/docs/content/docs/0.x/docs/constraints.mdx#migrating-existing-0x-applications).
+There is no `ZeroDefinition` compatibility layer or `related()` alias.
+
+### Repeated creates, outcomes, and effects
 
 Bounded keyed loops require validated lists with distinct, nonempty stable string
 keys and `max` at most 1000. Prepared UUID seeds plus item keys determine created

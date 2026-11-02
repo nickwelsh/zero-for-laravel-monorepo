@@ -19,6 +19,11 @@ Transaction primitives include:
 - `insertUnlessExists`: create only when no row with that key exists; preserve existing opt-outs.
 - `upsertUnique`: insert or update only the explicitly supplied fields.
 
+Create branches use the model's active Zero global creation defaults, with explicit
+creation data taking precedence. Existing-row and update branches never receive
+creation defaults. Nested predicate and related builders do not supply defaults to
+the helper's parent operation. See [creation defaults](./mutations.mdx#creation-defaults).
+
 Unique keys require a real unconditional unique index. PostgreSQL conditional
 insertion uses savepoint conflict recovery so a competing opt-out is not overwritten.
 Partial, expression, nullable, or deferred unique-key assumptions are unsupported.

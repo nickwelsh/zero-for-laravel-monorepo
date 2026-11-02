@@ -7,14 +7,19 @@ namespace ZeroForLaravel\Tests\Feature;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\SoftDeletes;
+use Illuminate\Validation\ValidationException;
+use InvalidArgumentException;
 use LogicException;
+use PHPUnit\Framework\Assert;
 use ZeroForLaravel\Attributes\ZeroColumns;
 use ZeroForLaravel\Attributes\ZeroExclude;
 use ZeroForLaravel\Attributes\ZeroIncludeColumns;
-use ZeroForLaravel\ContextField;
-use ZeroForLaravel\Definition\ZeroDefinition;
+use ZeroForLaravel\Attributes\ZeroScopedBy;
 use ZeroForLaravel\Generation\TypeScriptGenerator;
 use ZeroForLaravel\Metadata\ModelRegistry;
+use ZeroForLaravel\Query\ZeroQuery;
+use ZeroForLaravel\Tests\Fixtures\OwnedScope;
+use ZeroForLaravel\Tests\Fixtures\OwnerReadScope;
 use ZeroForLaravel\Tests\Fixtures\VisibleTask;
 use ZeroForLaravel\Tests\TestCase;
 
@@ -56,10 +61,34 @@ test('required columns omitted from visible fail closed', function (Model $model
     'primary key' => [fn (): Model => new MissingVisibleKey, 'id'],
     'timestamps' => [fn (): Model => new MissingVisibleTimestamp, 'created_at'],
     'soft delete timestamp' => [fn (): Model => new MissingVisibleDeletedAt, 'deleted_at'],
-    'authorization field' => [fn (): Model => new MissingVisibleAuthorization, 'user_id'],
-    'server fill' => [fn (): Model => new MissingVisibleFill, 'user_id'],
     'relationship key' => [fn (): Model => new MissingVisibleRelationKey, 'list_id'],
 ]);
+
+test('scope predicates cannot expose omitted visible columns', function (): void {
+    $registry = new ModelRegistry([MissingVisibleAuthorization::class]);
+    $model = $registry->get('MissingVisibleAuthorization');
+    expect($model->columns)->not->toHaveKey('user_id');
+    $query = new ZeroQuery($model, $registry);
+    expect(fn (): array => $query->ast())->toThrow(InvalidArgumentException::class, 'MissingVisibleAuthorization.user_id');
+    expect(fn (): string => (new TypeScriptGenerator)->generate($registry))
+        ->toThrow(LogicException::class, 'Query fields and relationships must name a registered column or relationship.');
+});
+
+test('creation defaults cannot expose omitted visible columns', function (): void {
+    $registry = new ModelRegistry([MissingVisibleFill::class]);
+    $model = $registry->get('MissingVisibleFill');
+    expect($model->columns)->not->toHaveKey('user_id');
+    $query = new ZeroQuery($model, $registry);
+    try {
+        $query->ast();
+        Assert::fail('Expected creation defaults to reject an omitted column.');
+    } catch (ValidationException $validationException) {
+        expect(array_keys($validationException->errors()))->toContain('attributes.user_id');
+    }
+
+    expect(fn (): string => (new TypeScriptGenerator)->generate($registry))
+        ->toThrow(LogicException::class, 'Creation defaults require an exposed, fillable, non-metadata column.');
+});
 
 class HiddenVisibleTask extends VisibleTask
 {
@@ -111,29 +140,14 @@ class MissingVisibleDeletedAt extends VisibleTask
     use SoftDeletes;
 }
 
-class MissingVisibleAuthorization extends VisibleTask
-{
-    public static function zero(): ZeroDefinition
-    {
-        return ZeroDefinition::make()->authorize('user_id', '=', ContextField::UserId);
-    }
-}
+#[ZeroScopedBy([OwnerReadScope::class])]
+class MissingVisibleAuthorization extends VisibleTask {}
 
-class MissingVisibleFill extends VisibleTask
-{
-    public static function zero(): ZeroDefinition
-    {
-        return parent::zero()->fillFromContext('user_id', ContextField::UserId);
-    }
-}
+#[ZeroScopedBy([OwnedScope::class])]
+class MissingVisibleFill extends VisibleTask {}
 
 class MissingVisibleRelationKey extends VisibleTask
 {
-    public static function zero(): ZeroDefinition
-    {
-        return parent::zero()->relations('list');
-    }
-
     /** @return BelongsTo<MissingVisibleRelationKey, $this> */
     public function list(): BelongsTo
     {

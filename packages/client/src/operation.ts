@@ -1,7 +1,10 @@
 import type { Schema, Zero, MutatorResult, ReadonlyJSONValue } from '@rocicorp/zero';
 import type { ClientContext } from './contract';
 
-export type MutationClient<S extends Schema> = Pick<Zero<S, undefined, ClientContext>, 'mutate'>;
+export type MutationClient<S extends Schema, C extends ClientContext = ClientContext> = Pick<
+    Zero<S, undefined, C>,
+    'mutate'
+>;
 
 /** The write committed, but its native result failed its declared contract. */
 export class MutationResultError extends Error {

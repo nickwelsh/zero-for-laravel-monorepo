@@ -13,12 +13,23 @@ export type {
     ControllerMutationOptions,
     ControllerMutationWire,
     ControllerMutationAction,
+    MutationNode,
+    MutationStatement,
     MutationPreparation,
     InferMutationInput,
     InferMutationResult,
 } from './controller-mutation';
-export { InputError, encodeDate } from './validation';
-export type { Column, ColumnValue, ModelContract, ContractMap, ClientContext, ModelRow, ModelTypes } from './contract';
+export { InputError, encodeDate, validateContext } from './validation';
+export type {
+    Column,
+    ColumnValue,
+    ModelContract,
+    ContractMap,
+    ClientContext,
+    ContextContract,
+    ModelRow,
+    ModelTypes,
+} from './contract';
 
 export { completeMutation, MutationResultError } from './operation';
 export type { MutationClient } from './operation';

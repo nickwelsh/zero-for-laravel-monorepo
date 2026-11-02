@@ -8,7 +8,8 @@ use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use ZeroForLaravel\Concerns\HasZeroQueries;
-use ZeroForLaravel\Definition\ZeroDefinition;
+use ZeroForLaravel\Attributes\ZeroScope;
+use ZeroForLaravel\Query\ZeroQuery;
 
 /**
  * @property string $id
@@ -24,10 +25,23 @@ class Todo extends Model
 
     protected $fillable = ['list_id', 'title', 'completed'];
 
-    public static function zero(): ZeroDefinition
+    protected static function booted(): void
     {
-        return ZeroDefinition::make()->authorizeRelation('list')
-            ->relations('list');
+        static::addZeroGlobalScope('accessibleList', function (ZeroQuery $query): void {
+            $query->whereHas('list');
+        });
+    }
+
+    #[ZeroScope]
+    protected function completed(ZeroQuery $query): void
+    {
+        $query->where('completed', true);
+    }
+
+    #[ZeroScope]
+    protected function status(ZeroQuery $query, bool $completed): void
+    {
+        $query->where('completed', $completed);
     }
 
     /** @return BelongsTo<TodoList, $this> */

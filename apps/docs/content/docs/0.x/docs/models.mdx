@@ -1,44 +1,125 @@
 ---
-title: Model definitions
-description: Define replicated columns, casts, relationships, and mandatory visibility.
+title: Models, scopes, and relationships
+description: Opt models into Zero, compose local scopes, and discover Eloquent relationships safely.
 ---
 
-Models own replication metadata and row visibility. Controllers own queries and
-mutation actions. The generated client exposes plain row types, not model instances
-with `query`, `update`, or `destroy` methods.
+Models own replication metadata, casts, relationships, and Zero scopes. Controllers
+own query declarations and mutation actions. Generated clients expose plain row
+types, not model instances with `query`, `update`, or `destroy` methods.
 
 ```php
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use ZeroForLaravel\Attributes\ZeroScope;
 use ZeroForLaravel\Concerns\HasZeroQueries;
-use ZeroForLaravel\ContextField;
-use ZeroForLaravel\Definition\ZeroDefinition;
+use ZeroForLaravel\Query\ZeroQuery;
 
-class Task extends Model
+class Todo extends Model
 {
     use HasUuids, HasZeroQueries;
 
-    protected $fillable = ['title', 'done'];
-    protected $visible = ['id', 'user_id', 'title', 'done', 'created_at', 'updated_at'];
+    protected $fillable = ['list_id', 'title', 'completed', 'assigned_to'];
+    protected $visible = ['id', 'list_id', 'title', 'completed', 'assigned_to', 'created_at', 'updated_at'];
 
     protected function casts(): array
     {
-        return ['done' => 'boolean'];
+        return ['completed' => 'boolean'];
     }
 
-    public static function zero(): ZeroDefinition
+    public function list(): BelongsTo
     {
-        return ZeroDefinition::make()
-            ->authorize('user_id', '=', ContextField::UserId)
-            ->fillFromContext('user_id', ContextField::UserId);
+        return $this->belongsTo(TodoList::class, 'list_id');
+    }
+
+    #[ZeroScope]
+    protected function completed(ZeroQuery $query): void
+    {
+        $query->where('completed', true);
+    }
+
+    #[ZeroScope]
+    protected function assignedTo(ZeroQuery $query, string $userId): ZeroQuery
+    {
+        return $query->where('assigned_to', $userId);
     }
 }
 ```
 
-Register every participating relationship target. Use `relations(...)` to expose
-schema relationships, `authorizeRelation(...)` for mandatory related visibility,
-and `publicReads()` only for deliberately public rows. Missing required context
-denies access. Read visibility never grants write permission.
+This example assumes an `assigned_to` column; authorize assignee changes separately.
+Add the [membership-based global scopes](./authorization.mdx#membership-based-todo-sharing)
+before using these models for private shared todos. Opting in alone does not
+create a row-visibility rule or grant write permission.
+
+## Opt-in and discovery
+
+Add `HasZeroQueries` to concrete Eloquent models for discovery, or list every
+participating model in `zero.models`. An explicit list takes precedence over
+discovery. Relationship targets must opt in too: discovering a relationship does
+not silently enroll its target or expose that target's private columns.
+
+There is no `zero(): ZeroDefinition` hook. Declare local and global scopes with
+the Zero attributes and registration methods instead. See
+[configuration](./configuration.mdx#modular-model-registration) for discovery roots.
+
+## Local Zero scopes
+
+`#[ZeroScope]` marks a protected model method whose first parameter is the
+separate, mutable `ZeroForLaravel\Query\ZeroQuery`. It is not an Eloquent builder.
+A scope may return `void` or return that same builder; it must not replace it with
+an unrelated query. Extra arguments form the scope's dynamic arguments:
+
+```php
+$completed = Todo::completed();
+$assigned = Todo::zeroQuery()->completed()->assignedTo($assigneeId);
+$either = Todo::completed()->orWhere->assignedTo($assigneeId);
+```
+
+Direct model calls and `zeroQuery()` calls compose the same Zero scopes. The
+higher-order `orWhere` form groups the following scope's conditions, as in
+Eloquent. Only the checked portable subset is compiled; arbitrary Eloquent scope
+methods and arbitrary PHP do not become portable by adding an attribute.
+
+Builders mutate in place. Use an explicit clone when branching from a common
+base; simple assignment aliases the same builder. See [query composition](./queries.mdx#mutable-query-composition).
+
+## Eloquent relationships, Zero includes
+
+Declare ordinary Eloquent relationship methods between opted-in models. For
+example, `Todo::list()` above can pair with:
+
+```php
+// On TodoList; import Illuminate\Database\Eloquent\Relations\HasMany.
+public function todos(): HasMany
+{
+    return $this->hasMany(Todo::class, 'list_id');
+}
+
+public function memberships(): HasMany
+{
+    return $this->hasMany(ListMembership::class, 'list_id');
+}
+```
+
+Generation invokes methods with declared Eloquent relation return types, then
+checks their keys, targets, and portable constraints. It does not invoke arbitrary
+model helpers to guess which methods are relationships. Unsupported relationship
+types or constraints fail with diagnostics; they are not silently dropped. All
+required correlation columns must be exposed on the participating models.
+
+Keep relationship definitions independent of a loaded parent instance. Reading
+`$this->user_id` or calling a parent attribute accessor in a relationship fails
+generation rather than freezing a blank model's value into every query. Use
+relationship foreign keys for correlation, and Zero scopes or query callbacks for
+dynamic context/input constraints.
+
+On a Zero query, use `with('list')` to include a result and
+`whereHas('list', ...)` to filter parents by related rows. Each related query has
+its own global scopes, including in callbacks. See [relationships in queries](./queries.mdx#includes-and-parent-filters).
+
+The model's relationships remain Eloquent. `$list->todos()` returns an Eloquent
+relationship builder, so `$list->todos()->completed()` cannot invoke a Zero scope.
+Use `Todo::zeroQuery()->completed()` or a Zero relationship callback instead.
 
 ## Columns and privacy
 
@@ -49,12 +130,32 @@ PostgreSQL publication. Nonempty `$visible` is the default allowlist.
 explicit `ZeroColumns` allowlist. Accessors and appended properties are not stored
 columns and do not become replicated values.
 
-Primary keys, enabled timestamps, authorization/context fields, and relationship
-keys must remain available. Missing required columns fail generation instead of
-silently expanding exposure. `$fillable` separately controls write fields; it does
-not hide replicated data. Ownership, primary keys, and lifecycle timestamps are
-not patchable business input.
+Primary keys, enabled timestamps, scope/default columns, and relationship keys
+must remain available when required by the generated contract. Missing required
+columns fail generation instead of silently expanding exposure. `$fillable`
+separately controls mass assignment; it does not hide replicated data. Do not
+accept primary keys or lifecycle timestamps as patchable business input. Validate
+and authorize any accepted ownership or association changes explicitly.
 
 UUID/ULID identities support generated optimistic creation. Numeric identities
 can use explicitly disabled optimism for authoritative creation. See
-[records and casts](./records-and-casts.mdx) and [authorization](./authorization.mdx).
+[records and casts](./records-and-casts.mdx) and [creation defaults](./mutations.mdx#creation-defaults).
+
+## Optional Scout search
+
+Search remains optional and separate from query scopes. An opted-in Scout model
+can declare its metadata with `public static zeroSearch(): ScoutSearch`:
+
+```php
+use ZeroForLaravel\Search\ScoutSearch;
+
+public static function zeroSearch(): ScoutSearch
+{
+    return ScoutSearch::for(self::class)->filters('user_id');
+}
+```
+
+Configure Scout's collection schema and search parameters separately. Zero global
+scopes do not authorize Typesense results or protect fields already indexed there.
+Use an explicitly authorized search transport or appropriately scoped browser keys,
+and review search-index field exposure independently of Zero's publication.

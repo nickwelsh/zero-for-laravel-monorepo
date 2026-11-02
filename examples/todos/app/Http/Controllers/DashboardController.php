@@ -15,10 +15,10 @@ final class DashboardController extends Controller
     {
         $values = $input->validated();
         $lists = TodoList::zeroQuery()
-            ->related('todos', fn ($todos) => $todos->orderBy('created_at', 'asc')->orderBy('id', 'asc'));
+            ->with('todos', fn ($todos) => $todos->orderBy('created_at', 'asc')->orderBy('id', 'asc'));
         if (isset($values['status']) && $values['status'] !== 'all') {
-            $lists = TodoList::zeroQuery()->related('todos', fn ($todos) => $todos
-                ->where('completed', $values['status'] === 'completed')
+            $lists = TodoList::zeroQuery()->with('todos', fn ($todos) => $todos
+                ->status($values['status'] === 'completed')
                 ->orderBy('created_at', 'asc')->orderBy('id', 'asc'));
         }
 

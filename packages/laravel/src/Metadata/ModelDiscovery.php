@@ -74,6 +74,10 @@ final class ModelDiscovery
             }
 
             if (method_exists($class, 'zero')) {
+                throw new LogicException($class.': legacy zero()/ZeroDefinition must be migrated to HasZeroQueries and Zero scopes.');
+            }
+
+            if (in_array(\ZeroForLaravel\Concerns\HasZeroQueries::class, class_uses_recursive($class), true)) {
                 $classes[] = $class;
             }
         }

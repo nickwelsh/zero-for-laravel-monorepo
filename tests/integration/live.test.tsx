@@ -18,8 +18,7 @@ import { useData, type Data } from '../../packages/client/src/react/data';
 import { liveQuery, withQueryInputs } from '../../packages/client/src/live-query';
 import type { index } from '../interop/controller-api/ZeroForLaravel/Tests/Fixtures/QueryController';
 import { expect, it } from 'vite-plus/test';
-import { schema, definitions } from '../interop/generated';
-import type { ClientContext } from '../../packages/client/src/contract';
+import { schema, definitions, type Context } from '../interop/generated';
 
 const enabled = process.env.ZERO_LIVE_TESTS === '1';
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -111,7 +110,7 @@ it.skipIf(!enabled)(
             ).trim();
         let php: ChildProcess | undefined;
         let cache: ChildProcess | undefined;
-        let zero: Zero<typeof schema, undefined, ClientContext> | undefined;
+        let zero: Zero<typeof schema, undefined, Context> | undefined;
         let logs = '';
         let created = false;
         try {
@@ -142,7 +141,7 @@ it.skipIf(!enabled)(
                 clientResult: z.object({ id: z.string() }),
             };
             const updateCodec = { ...codec, serverResult: z.undefined(), clientResult: z.undefined() };
-            const controllers = createControllerMutations(schema, definitions, contracts, {
+            const controllers = createControllerMutations<typeof schema, Context>(schema, definitions, contracts, {
                 [name]: codec,
                 [updateName]: updateCodec,
             });
@@ -253,7 +252,7 @@ it.skipIf(!enabled)(
             psql(
                 `INSERT INTO tasks (id,user_id,title,secret,created_at,updated_at) VALUES ('${alice}','alice','Initial','private',now(),now()),('${bob}','bob','Other owner','private',now(),now()),('${third}','alice','Zebra','private',now(),now())`,
             );
-            zero = new Zero<typeof schema, undefined, ClientContext>({
+            zero = new Zero<typeof schema, undefined, Context>({
                 schema,
                 mutators: allMutators,
                 userID: 'alice',
@@ -345,7 +344,7 @@ it.skipIf(!enabled)(
                 view.destroy();
             }
             await zero.close();
-            zero = new Zero<typeof schema, undefined, ClientContext>({
+            zero = new Zero<typeof schema, undefined, Context>({
                 schema,
                 mutators: allMutators,
                 userID: 'bob',
@@ -368,6 +367,25 @@ it.skipIf(!enabled)(
                 bobView.destroy();
             }
             await zero.close();
+            zero = new Zero<typeof schema, undefined, Context>({
+                schema,
+                mutators: allMutators,
+                userID: 'bob',
+                auth: 'bob',
+                context: { user_id: 'alice' },
+                cacheURL: `http://127.0.0.1:${zeroPort}`,
+                kvStore: 'mem',
+                logLevel: 'error',
+            });
+            const forgedContext = store.prepare({ title: 'Trusted owner' });
+            const authoritative = zero.mutate(forgedContext);
+            expect((await authoritative.client).type).toBe('success');
+            expect(
+                await zero.run(createBuilder(schema).tasks.where('id', forgedContext.args.prepared.ids.s0).one()),
+            ).toMatchObject({ title: 'Trusted owner', user_id: 'alice' });
+            expect((await authoritative.server).type).toBe('success');
+            expect(psql(`SELECT user_id FROM tasks WHERE id='${forgedContext.args.prepared.ids.s0}'`)).toBe('bob');
+            await zero.close();
             zero = undefined;
             await stop(cache);
             expect(cache.exitCode).not.toBeNull();
@@ -377,7 +395,7 @@ it.skipIf(!enabled)(
             });
             expect(reset).toContain('Local replica files reset');
             expect(existsSync(join(root, 'replica.db'))).toBe(false);
-            expect(psql('SELECT count(*) FROM tasks')).toBe('4');
+            expect(psql('SELECT count(*) FROM tasks')).toBe('5');
             cache = spawn('php', ['tests/integration/app.php', 'dev'], {
                 env,
                 detached: true,

@@ -6,6 +6,7 @@ namespace ZeroForLaravel\Tests\Fixtures;
 
 use Inertia\Inertia;
 use Inertia\Response;
+use ZeroForLaravel\Query\ZeroQuery;
 
 final class QueryController
 {
@@ -90,14 +91,12 @@ final class QueryController
     {
         return Inertia::render('tasks/relationships', [
             'tasks' => Task::zeroQuery()
-                ->where(fn ($args) => $args->not($args->or(
-                    $args->cmp('title', 'IN', [$title, 'hidden']),
-                    $args->exists('comments', fn ($query) => $query->where('body', 'secret'), ['flip' => true]),
-                )))
-                ->whereExists('list', fn ($query) => $query->where('id', 'list-a'), ['scalar' => true])
+                ->where('title', 'NOT IN', [$title, 'hidden'])
+                ->whereDoesntHave('comments', fn (ZeroQuery $query) => $query->where('body', 'secret'))
+                ->whereExists('list', fn (ZeroQuery $query) => $query->where('id', 'list-a'), ['scalar' => true])
                 ->whereExists('comments', ['flip' => false])
-                ->related('comments', fn ($query) => $query->where('body', '!=', $title)->orderBy('id', 'desc')->limit(2))
-                ->related('list')
+                ->with('comments', fn (ZeroQuery $query) => $query->where('body', '!=', $title)->orderBy('id', 'desc')->limit(2))
+                ->with('list')
                 ->orderBy('title', 'desc')->orderBy('id', 'asc')
                 ->start(['title' => $title, 'id' => 'task-a'], ['inclusive' => false]),
         ]);

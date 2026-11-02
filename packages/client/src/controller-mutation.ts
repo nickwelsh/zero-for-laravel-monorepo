@@ -17,6 +17,14 @@ import { columnValue, encodeDate, freeze } from './validation';
 /** Compiler-owned JSON nodes. Never accept these from mutation arguments. */
 export type MutationNode =
     | { readonly op: 'literal'; readonly value: ReadonlyJSONValue }
+    | { readonly op: 'context'; readonly field: string }
+    | { readonly op: 'merge'; readonly values: readonly MutationNode[] }
+    | {
+          readonly op: 'conditional';
+          readonly condition: MutationNode;
+          readonly yes: MutationNode;
+          readonly no: MutationNode;
+      }
     | { readonly op: 'local'; readonly name: string }
     | { readonly op: 'get' | 'has'; readonly base: MutationNode; readonly key: MutationNode }
     | { readonly op: 'validated'; readonly base: MutationNode }
@@ -28,11 +36,17 @@ export type MutationNode =
       }
     | {
           readonly op: 'binary';
-          readonly operator: '===' | '!==' | '&&' | '||';
+          readonly operator: '===' | '!==' | '&&' | '||' | '.';
           readonly left: MutationNode;
           readonly right: MutationNode;
       }
-    | { readonly op: 'create'; readonly model: string; readonly site: string; readonly data: MutationNode }
+    | {
+          readonly op: 'create';
+          readonly model: string;
+          readonly site: string;
+          readonly data: MutationNode;
+          readonly defaults?: MutationNode;
+      }
     | { readonly op: 'findUnique'; readonly model: string; readonly unique: MutationNode }
     | {
           readonly op: 'insertUnlessExists' | 'upsertUnique';
@@ -40,6 +54,7 @@ export type MutationNode =
           readonly unique: MutationNode;
           readonly site: string;
           readonly data: MutationNode;
+          readonly defaults?: MutationNode;
       }
     | { readonly op: 'reload' | 'delete'; readonly record: MutationNode }
     | { readonly op: 'update'; readonly record: MutationNode; readonly data: MutationNode }
@@ -103,16 +118,22 @@ export type InferMutationInput<M extends { inputSchema: MutationCodec<unknown> }
 export type InferMutationResult<M extends { serverResultSchema: MutationCodec<unknown> }> = ReturnType<
     M['serverResultSchema']['parse']
 >;
-export interface ControllerMutationOptions<Input, ServerResult, ClientResult> {
+export interface ControllerMutationOptions<
+    Input,
+    ServerResult,
+    ClientResult,
+    S extends Schema = Schema,
+    C extends ClientContext = ClientContext,
+> {
     readonly input: MutationCodec<Input>;
     /** Runs before native request creation, e.g. Date -> epoch milliseconds. */
     readonly encode: (input: Input) => Readonly<Record<string, ReadonlyJSONValue>>;
     readonly serverResult: MutationCodec<ServerResult>;
     readonly clientResult: MutationCodec<ClientResult>;
     readonly optimistic?: (options: {
-        tx: Transaction<Schema>;
+        tx: Transaction<S>;
         args: ControllerMutationWire;
-        ctx: ClientContext;
+        ctx: C;
     }) => Promise<ClientResult>;
 }
 
@@ -157,12 +178,13 @@ function propertyKey(value: unknown): string | number {
     if (typeof value !== 'string' && typeof value !== 'number') throw new Error('Expected a string or numeric key.');
     return value;
 }
-function writeData(model: ModelContract, value: unknown) {
+function writeData(model: ModelContract, value: unknown, defaults = false) {
     const data = jsonObject(value);
     const result: Record<string, ReadonlyJSONValue> = {};
     for (const key of Object.keys(data)) {
-        if (!model.writable.includes(key)) throw new Error(`Protected mutation field ${key}`);
-        const column = model.columns[key]!;
+        if (!defaults && !model.writable.includes(key)) throw new Error(`Protected mutation field ${key}`);
+        const column = model.columns[key];
+        if (!column) throw new Error(`Unknown mutation field ${key}`);
         const fieldValue = column.date && typeof data[key] === 'string' ? new Date(data[key]) : data[key];
         result[key] = columnValue(fieldValue, column, key, column.date ? fieldValue instanceof Date : true);
     }
@@ -208,6 +230,18 @@ export async function runControllerMutation<S extends Schema>(
         switch (node.op) {
             case 'literal':
                 return node.value;
+            case 'context': {
+                if (!Object.hasOwn(ctx, node.field) || ctx[node.field] === undefined)
+                    throw new Error(`Missing trusted context ${node.field}`);
+                return ctx[node.field];
+            }
+            case 'merge': {
+                const result = {};
+                for (const value of node.values) Object.assign(result, jsonObject(await e(value)));
+                return result;
+            }
+            case 'conditional':
+                return e(mutationTruthy(await e(node.condition)) ? node.yes : node.no);
             case 'local':
                 return scope[node.name];
             case 'get': {
@@ -244,6 +278,12 @@ export async function runControllerMutation<S extends Schema>(
                 const left = await e(node.left);
                 if (node.operator === '&&') return mutationTruthy(left) && mutationTruthy(await e(node.right));
                 if (node.operator === '||') return mutationTruthy(left) || mutationTruthy(await e(node.right));
+                if (node.operator === '.') {
+                    const right = await e(node.right);
+                    if (typeof left !== 'string' || typeof right !== 'string')
+                        throw new Error('Compiled concatenation requires strings.');
+                    return left + right;
+                }
                 const equal = identical(left, await e(node.right));
                 return node.operator === '===' ? equal : !equal;
             }
@@ -289,19 +329,18 @@ export async function runControllerMutation<S extends Schema>(
                     model: node.model,
                     site: node.site,
                     data: { op: 'literal', value: { ...unique, ...data } },
+                    ...(node.defaults === undefined ? {} : { defaults: node.defaults }),
                 });
             }
             case 'create': {
                 const model = models[node.model]!;
-                const row = writeData(model, await e(node.data));
+                const row = {
+                    ...writeData(model, await e(node.defaults ?? model.creationDefaults), true),
+                    ...writeData(model, await e(node.data)),
+                };
                 for (const [field, column] of Object.entries(model.columns)) {
                     if (!(field in row) && column.hasDefault) row[field] = structuredClone(column.default);
                     else if (!(field in row) && column.nullable) row[field] = null;
-                }
-                for (const [field, source] of Object.entries(model.serverFill)) {
-                    const value = ctx[source];
-                    if (value === undefined) throw new Error(`Missing trusted context ${source}`);
-                    row[field] = value;
                 }
                 const id = args.prepared.ids[node.site];
                 if (!id) throw new Error('Missing prepared identity.');
@@ -425,18 +464,15 @@ export async function runControllerMutation<S extends Schema>(
 }
 
 /** Register flat m_<hash> names in the existing native registry. No second transport. */
-export function createControllerMutations<S extends Schema>(
+export function createControllerMutations<S extends Schema, C extends ClientContext = ClientContext>(
     schema: S,
     models: Readonly<Record<string, ModelContract>>,
     contracts: Readonly<Record<string, ControllerMutationContract>>,
     options: Readonly<
-        Record<string, Pick<ControllerMutationOptions<never, unknown, unknown>, 'clientResult' | 'optimistic'>>
+        Record<string, Pick<ControllerMutationOptions<never, unknown, unknown, S, C>, 'clientResult' | 'optimistic'>>
     >,
 ) {
-    const definitions: Record<
-        string,
-        MutatorDefinition<ControllerMutationWire, ControllerMutationWire, ClientContext>
-    > = {};
+    const definitions: Record<string, MutatorDefinition<ControllerMutationWire, ControllerMutationWire, C>> = {};
     for (const [name, contract] of Object.entries(contracts)) {
         if (!/^m_[a-f0-9]{32}$/.test(name)) throw new Error('Invalid controller mutation registration name.');
         const config = options[name];
@@ -450,13 +486,13 @@ export function createControllerMutations<S extends Schema>(
         )
             config.clientResult.parse(undefined);
         definitions[name] = defineMutator(
-            async ({ tx, args, ctx }: { tx: Transaction<S>; args: ControllerMutationWire; ctx: ClientContext }) => {
+            async ({ tx, args, ctx }: { tx: Transaction<S>; args: ControllerMutationWire; ctx: C }) => {
                 if (args.version !== contract.version) throw new Error('Unsupported mutation version.');
                 const result =
                     contract.optimism === 'disabled'
                         ? undefined
                         : contract.optimism === 'custom'
-                          ? await config.optimistic!({ tx: tx as unknown as Transaction<Schema>, args, ctx })
+                          ? await config.optimistic!({ tx, args, ctx })
                           : await runControllerMutation(schema, models, contract, tx, args, ctx);
                 if (result !== undefined) json(result);
                 config.clientResult.parse(result);
@@ -470,11 +506,11 @@ export function createControllerMutations<S extends Schema>(
         mutators,
         bind<Input, ServerResult, ClientResult>(
             name: string,
-            config: ControllerMutationOptions<Input, ServerResult, ClientResult>,
+            config: ControllerMutationOptions<Input, ServerResult, ClientResult, S, C>,
         ) {
             const contract = contracts[name];
             if (!contract) throw new Error('Unknown controller mutation.');
-            const mutator = mutators[name] as unknown as Mutator<ControllerMutationWire, S, ClientContext>;
+            const mutator = mutators[name] as unknown as Mutator<ControllerMutationWire, S, C>;
             return {
                 inputSchema: config.input,
                 serverResultSchema: config.serverResult,
@@ -518,7 +554,7 @@ export function createControllerMutations<S extends Schema>(
                     return mutator(wire);
                 },
                 async execute(
-                    client: MutationClient<S>,
+                    client: MutationClient<S, C>,
                     input: Input,
                     route: ControllerMutationWire['route'] = {},
                     preparation: MutationPreparation = {},

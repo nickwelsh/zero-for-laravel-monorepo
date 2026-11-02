@@ -10,7 +10,7 @@ use JsonException;
 use LogicException;
 use ZeroForLaravel\Mutation\MutationProcessor;
 use ZeroForLaravel\Query\QueryProcessor;
-use ZeroForLaravel\ZeroContext;
+use ZeroForLaravel\ResolvedContext;
 
 final class ZeroController
 {
@@ -33,18 +33,13 @@ final class ZeroController
         }
     }
 
-    private function context(Request $request): ZeroContext
+    private function context(Request $request): ResolvedContext
     {
-        $resolver = resolve(config()->string('zero.context_resolver'));
-        if (! is_callable($resolver)) {
-            throw new LogicException('Zero context resolver must be callable.');
+        $id = $request->user()?->getAuthIdentifier();
+        if ($id !== null && ! is_string($id) && ! is_int($id)) {
+            throw new LogicException('Authenticated Zero identity must be a string or integer.');
         }
 
-        $context = $resolver($request);
-        if (! $context instanceof ZeroContext) {
-            throw new LogicException('Zero context resolver must return ZeroContext.');
-        }
-
-        return $context;
+        return new ResolvedContext([], $id === null ? null : (string) $id);
     }
 }

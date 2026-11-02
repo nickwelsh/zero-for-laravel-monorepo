@@ -8,17 +8,16 @@ use Closure;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Route;
-use LogicException;
 use ZeroForLaravel\Http\ControllerRouteDispatcher;
+use ZeroForLaravel\ResolvedContext;
 use ZeroForLaravel\Support\Input;
-use ZeroForLaravel\ZeroContext;
 
 /** An application-generated registration, never supplied by the browser. */
 final readonly class RegisteredQuery
 {
     /**
      * @param  array<string, string>  $parameters
-     * @param  Closure(array<string, mixed>): Query  $factory
+     * @param  Closure(array<string, mixed>): ZeroQuery  $factory
      * @param  array<string,\ZeroForLaravel\Generation\Mutations\ValueContract>  $inputContracts
      */
     public function __construct(
@@ -31,12 +30,12 @@ final readonly class RegisteredQuery
     ) {}
 
     /** @return array<string, mixed> */
-    public function compile(mixed $arguments, ZeroContext $context, QueryCompiler $compiler): array
+    public function compile(mixed $arguments, ResolvedContext $context, QueryCompiler $compiler): array
     {
         return $compiler->compileDeclaration($this->declaration($arguments), $context);
     }
 
-    public function declaration(mixed $arguments): Query
+    public function declaration(mixed $arguments): ZeroQuery
     {
         $args = Input::object($arguments, 'args');
         $window = $args['__window'] ?? null;
@@ -73,7 +72,7 @@ final readonly class RegisteredQuery
     }
 
     /** @return array<string, mixed> */
-    public function invoke(mixed $arguments, ZeroContext $identity, QueryCompiler $compiler): array
+    public function invoke(mixed $arguments, ResolvedContext $identity, QueryCompiler $compiler): array
     {
         $wire = Input::object($arguments, 'args');
         $args = $wire;
@@ -106,13 +105,8 @@ final readonly class RegisteredQuery
                 }
             }
 
-            $resolver = resolve(config()->string('zero.context_resolver'));
-            if (! is_callable($resolver)) {
-                throw new LogicException('Zero context resolver must be callable.');
-            }
-
-            $context = $resolver($request);
-            if (! $context instanceof ZeroContext || $context->userId() !== $identity->userId()) {
+            $context = \ZeroForLaravel\Context\ContextDefinition::configured()->resolve($request);
+            if ($context->userId() !== $identity->userId()) {
                 throw new AuthorizationException('Controller identity differs from the authenticated Zero identity.');
             }
 

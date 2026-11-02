@@ -2,6 +2,8 @@
 import {table, string, number, boolean, json, relationships, createSchema} from '@rocicorp/zero';
 import type {ContractMap, ModelRow} from '@nickwelsh/zero-for-laravel';
 
+export type Context = {readonly "user_id": number;};
+export const contextContract = {"user_id":{"type":"int","nullable":false}} as const;
 const table0 = table("list_memberships").columns({
   "id": string(),
   "list_id": string(),
@@ -79,27 +81,28 @@ export const definitions = {
                 "default": null
             }
         },
-        "authorization": [
-            {
-                "field": "user_id",
-                "op": "=",
-                "value": {
-                    "context": "user_id"
-                }
-            }
-        ],
-        "serverFill": {},
         "writable": [
             "list_id",
             "user_id"
         ],
+        "scopeFingerprint": "51190ca30c508e08e4d7bf15dca4adb181a44e2faf23a15929c7e691c64b1f94",
+        "creationDefaults": {
+            "op": "merge",
+            "values": [
+                {
+                    "op": "merge",
+                    "values": []
+                }
+            ]
+        },
         "idGenerator": "uuid",
         "timestamps": {
             "created": "created_at",
             "updated": "updated_at",
             "deleted": null
         },
-        "relations": {}
+        "relations": {},
+        "relationConstraints": {}
     },
     "Todo": {
         "name": "Todo",
@@ -156,16 +159,21 @@ export const definitions = {
                 "default": null
             }
         },
-        "authorization": [],
-        "authorizationRelations": [
-            "list"
-        ],
-        "serverFill": {},
         "writable": [
             "list_id",
             "title",
             "completed"
         ],
+        "scopeFingerprint": "15cb62c8dbb6b210dfdd44ea9091e80d0a895d2b37daceb4e9ed38ea892e7127",
+        "creationDefaults": {
+            "op": "merge",
+            "values": [
+                {
+                    "op": "merge",
+                    "values": []
+                }
+            ]
+        },
         "idGenerator": "uuid",
         "timestamps": {
             "created": "created_at",
@@ -187,6 +195,12 @@ export const definitions = {
                         "table": "todo_lists"
                     }
                 ]
+            }
+        },
+        "relationConstraints": {
+            "list": {
+                "wheres": [],
+                "orders": []
             }
         }
     },
@@ -236,16 +250,33 @@ export const definitions = {
                 "default": null
             }
         },
-        "authorization": [],
-        "authorizationRelations": [
-            "memberships"
-        ],
-        "serverFill": {
-            "user_id": "user_id"
-        },
         "writable": [
-            "name"
+            "name",
+            "user_id"
         ],
+        "scopeFingerprint": "7a6effaf1eb159c95e272c89e33f7380fac3d3d436e93d20cbf9fc3339675377",
+        "creationDefaults": {
+            "op": "merge",
+            "values": [
+                {
+                    "op": "merge",
+                    "values": [
+                        {
+                            "op": "object",
+                            "items": [
+                                {
+                                    "key": "user_id",
+                                    "value": {
+                                        "op": "context",
+                                        "field": "user_id"
+                                    }
+                                }
+                            ]
+                        }
+                    ]
+                }
+            ]
+        },
         "idGenerator": "uuid",
         "timestamps": {
             "created": "created_at",
@@ -282,6 +313,16 @@ export const definitions = {
                         "table": "todos"
                     }
                 ]
+            }
+        },
+        "relationConstraints": {
+            "memberships": {
+                "wheres": [],
+                "orders": []
+            },
+            "todos": {
+                "wheres": [],
+                "orders": []
             }
         }
     }

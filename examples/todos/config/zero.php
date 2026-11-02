@@ -5,10 +5,11 @@ declare(strict_types=1);
 use App\Models\ListMembership;
 use App\Models\Todo;
 use App\Models\TodoList;
-use ZeroForLaravel\Http\ContextResolver;
+use App\Enums\ZeroContext;
+use App\Zero\ResolveZeroContext;
 
 return [
-    // Empty discovers models with a zero() definition under app/Models.
+    // Empty discovers models using HasZeroQueries under app/Models.
     'models' => [TodoList::class, Todo::class, ListMembership::class],
     'output' => resource_path('js/zero/generated.ts'),
     'react' => true,
@@ -20,6 +21,6 @@ return [
     'api_key' => env('ZERO_API_KEY'),
     'route_prefix' => 'zero',
     'middleware' => ['web', 'auth'],
-    // Bind this class (or replace it) to add trusted tenant context.
-    'context_resolver' => ContextResolver::class,
+    'context' => ZeroContext::class,
+    'context_resolver' => ResolveZeroContext::class,
 ];

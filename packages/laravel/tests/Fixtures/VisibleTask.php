@@ -5,10 +5,12 @@ declare(strict_types=1);
 namespace ZeroForLaravel\Tests\Fixtures;
 
 use Illuminate\Database\Eloquent\Model;
-use ZeroForLaravel\Definition\ZeroDefinition;
+use ZeroForLaravel\Concerns\HasZeroQueries;
 
 class VisibleTask extends Model
 {
+    use HasZeroQueries;
+
     public $timestamps = false;
 
     protected $table = 'tasks';
@@ -16,9 +18,4 @@ class VisibleTask extends Model
     protected $visible = ['id', 'title'];
 
     protected $fillable = ['title', 'secret'];
-
-    public static function zero(): ZeroDefinition
-    {
-        return ZeroDefinition::make()->publicReads();
-    }
 }

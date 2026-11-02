@@ -38,7 +38,7 @@ final readonly class ControllerMutationGenerator
         $lines = ['// Generated controller mutations; deploy with the matching PHP manifest.',
             '/* oxlint-disable unicorn/no-thenable -- Operation trees use a JSON then branch, never a callable then. */',
             "import type {Schema} from '@rocicorp/zero';",
-            'import {createControllerMutations, type ModelContract'.($hasCustom ? ', type ControllerMutationOptions' : '')."} from '@nickwelsh/zero-for-laravel';",
+            'import {createControllerMutations, type ClientContext, type ModelContract'.($hasCustom ? ', type ControllerMutationOptions' : '')."} from '@nickwelsh/zero-for-laravel';",
             $this->schemas->imports(),
             'export const controllerMutationContracts = '.json_encode((object) $contracts, JSON_THROW_ON_ERROR | JSON_PRETTY_PRINT).' as const;',
         ];
@@ -66,18 +66,18 @@ final readonly class ControllerMutationGenerator
             $lines[] = 'export const clientResultSchema'.$index.' = '.$this->schemas->value($client).';';
             $lines[] = 'const codec'.$index.' = {input: inputSchema'.$index.', encode: (input: Input'.$index.') => '.$input->encode('input').', serverResult: serverResultSchema'.$index.', clientResult: clientResultSchema'.$index.'};';
             if ($program->optimism === 'custom') {
-                $custom[] = json_encode($program->action, JSON_THROW_ON_ERROR).': NonNullable<ControllerMutationOptions<Input'.$index.', ServerResult'.$index.', ClientResult'.$index.'>["optimistic"]>';
+                $custom[] = json_encode($program->action, JSON_THROW_ON_ERROR).': NonNullable<ControllerMutationOptions<Input'.$index.', ServerResult'.$index.', ClientResult'.$index.', S, C>["optimistic"]>';
             }
         }
 
-        $lines[] = 'export function createControllerMutationBindings<S extends Schema>(schema: S, models: Readonly<Record<string, ModelContract>>'.($custom === [] ? '' : ', projections: {'.implode('; ', $custom).'}').') {';
+        $lines[] = 'export function createControllerMutationBindings<S extends Schema, C extends ClientContext = ClientContext>(schema: S, models: Readonly<Record<string, ModelContract>>'.($custom === [] ? '' : ', projections: {'.implode('; ', $custom).'}').') {';
         $lines[] = '  const codecs = {';
         foreach ($programs as $index => $program) {
             $lines[] = '    '.json_encode($program->name(), JSON_THROW_ON_ERROR).': {...codec'.$index.($program->optimism === 'custom' ? ', optimistic: projections['.json_encode($program->action, JSON_THROW_ON_ERROR).']' : '').'},';
         }
 
         $lines[] = '  };';
-        $lines[] = '  const runtime = createControllerMutations(schema, models, controllerMutationContracts, codecs);';
+        $lines[] = '  const runtime = createControllerMutations<S, C>(schema, models, controllerMutationContracts, codecs);';
         $lines[] = '  return {...runtime, actions: {';
         foreach ($programs as $program) {
             $name = json_encode($program->name(), JSON_THROW_ON_ERROR);

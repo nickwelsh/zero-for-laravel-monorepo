@@ -40,7 +40,7 @@ test('controller transforms replay bindings and middleware and cannot substitute
     Route::bind('title', fn (string $value): string => $value === 'alias' ? 'allowed' : $value);
     app()->instance(RegisteredQueries::class, new RegisteredQueries([
         'q_test' => new RegisteredQuery(QueryController::class.'@index', 'tasks/index', 'tasks', ['title' => 'string'],
-            static fn (array $args): \ZeroForLaravel\Query\Query => Task::zeroQuery()->where('title', $args['title'])),
+            static fn (array $args): \ZeroForLaravel\Query\ZeroQuery => Task::zeroQuery()->where('title', $args['title'])),
     ]));
     $alice = (new User)->setKeyType('string')->forceFill(['id' => 'alice']);
     $this->actingAs($alice)->withHeader('X-Api-Key', 'private-test-secret');

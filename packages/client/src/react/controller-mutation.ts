@@ -11,12 +11,12 @@ import type {
 import { completeMutation, MutationResultError } from '../operation';
 import { selectionKey } from '../validation';
 
-interface Binding<Input, Result, S extends Schema> {
+interface Binding<Input, Result, S extends Schema, C extends ClientContext> {
     prepare(
         input: Input,
         route?: ControllerMutationWire['route'],
         preparation?: MutationPreparation,
-    ): MutateRequest<ControllerMutationWire, S, ClientContext>;
+    ): MutateRequest<ControllerMutationWire, S, C>;
     serverResultSchema: MutationCodec<Result>;
 }
 export const ControllerMutations = createContext<{
@@ -66,12 +66,12 @@ function validationFields(error: unknown): ControllerMutationState['fields'] {
 }
 
 /** One native submission. Disposing observation never cancels an enqueued write. */
-export function useControllerMutation<Input, Result, S extends Schema>(
-    binding: Binding<Input, Result, S> | ControllerMutationAction<Input, Result>,
+export function useControllerMutation<Input, Result, S extends Schema, C extends ClientContext = ClientContext>(
+    binding: Binding<Input, Result, S, C> | ControllerMutationAction<Input, Result>,
     route: ControllerMutationWire['route'] = {},
     preparation?: MutationPreparation,
 ) {
-    const zero = useContext(ZeroContext) as Zero<S, undefined, ClientContext> | undefined;
+    const zero = useContext(ZeroContext) as Zero<S, undefined, C> | undefined;
     const registered = useContext(ControllerMutations);
     const key = selectionKey(route);
     const identity = useRef({ zero, binding, key, version: 0, mounted: true });
@@ -99,7 +99,7 @@ export function useControllerMutation<Input, Result, S extends Schema>(
             // React context erases the application's schema; generated references and
             // the provider registry restore the same binding by controller identity.
             const action = ('action' in binding ? registered.actions[binding.action] : binding) as
-                | Binding<Input, Result, S>
+                | Binding<Input, Result, S, C>
                 | undefined;
             if (!action) throw new Error('The controller action is not registered with this Zero provider.');
             const parsed = 'inputSchema' in binding ? binding.inputSchema.parse(input) : input;

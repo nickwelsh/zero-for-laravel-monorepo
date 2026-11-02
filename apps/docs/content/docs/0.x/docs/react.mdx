@@ -19,10 +19,23 @@ return livePages.wrap(module.default, page);
 ```
 
 Put the generated `ZeroProvider` in the authenticated persistent layout, outside
-the wrapped page. Supply user identity and the context counterpart used for local
-prediction. Laravel independently resolves trusted context. Identity or tenant
-changes isolate subscriptions and local storage; native Zero owns construction
-and cleanup.
+the wrapped page. Supply both native `userID` and the generated typed `context`
+used for local queries and creation defaults. With the two-case enum from
+[configuration](./configuration.mdx#typed-context-and-resolver), for example:
+
+```tsx
+<ZeroProvider userID={identity} context={{ user_id: user.id, tenant_id: authorizedTenantId }}>
+    {children}
+</ZeroProvider>
+```
+
+Here `identity` is the application's native Zero identity string; it is not
+implicitly read from `context.user_id`, and `userID` does not populate that key.
+The generated context type follows all configured resolver return types (including
+nullable fields). Supply the matching values; a custom enum need not have a
+`user_id` case at all. Laravel independently resolves trusted `ResolvedContext`;
+browser context is not authority. Identity or tenant changes isolate subscriptions
+and local storage; native Zero owns construction and cleanup.
 
 ```tsx
 import type { QueryData } from '@nickwelsh/zero-for-laravel/react';

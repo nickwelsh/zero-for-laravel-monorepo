@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace ZeroForLaravel\Generation\Mutations;
 
+use BackedEnum;
 use Illuminate\Foundation\Http\FormRequest;
 use LogicException;
 use PhpParser\Node;
@@ -19,7 +20,11 @@ use ReflectionMethod;
 use ReflectionNamedType;
 use ZeroForLaravel\Attributes\ZeroMutation;
 use ZeroForLaravel\Attributes\ZeroShared;
+use ZeroForLaravel\Context\ContextDefinition;
+use ZeroForLaravel\Generation\ControllerQueryCompiler;
+use ZeroForLaravel\Generation\QueryExpression;
 use ZeroForLaravel\Generation\RequestContract;
+use ZeroForLaravel\Generation\ScopeCompiler;
 use ZeroForLaravel\Metadata\ModelMetadata;
 use ZeroForLaravel\Metadata\ModelRegistry;
 use ZeroForLaravel\Mutation\Mutation;
@@ -81,7 +86,7 @@ final class ControllerMutationCompiler
 
         $operations = $config->optimism === 'generated' ? $this->statements($node->stmts ?? [], $variables) : [];
         $this->validateSeeds($node);
-        $data = [$controller, $method, $config, $parameters, $operations, $this->sources,
+        $data = ['mutable-scopes-v1', ContextDefinition::configured()->contract(), $controller, $method, $config, $parameters, $operations, $this->sources,
             array_map(fn (ModelMetadata $model): array => $model->toArray(), $this->models->all())];
 
         return new MutationProgram($controller.'@'.$method, $config->optimism, $config->conceal,
@@ -256,6 +261,21 @@ final class ControllerMutationCompiler
     private function expression(Expr $expr, array $variables): array
     {
         $e = fn (Expr $node): array => $this->expression($node, $variables);
+        if ($expr instanceof Expr\ClassConstFetch && $expr->class instanceof Node\Name && $expr->name instanceof Node\Identifier && enum_exists($expr->class->toString())) {
+            $value = constant($expr->class->toString().'::'.$expr->name->name);
+
+            return ScopeCompiler::mutation(ScopeCompiler::value($value));
+        }
+
+        if ($expr instanceof Expr\PropertyFetch && $expr->name instanceof Node\Identifier && $expr->name->name === 'value' && $expr->var instanceof Expr\ClassConstFetch && $expr->var->class instanceof Node\Name && $expr->var->name instanceof Node\Identifier && enum_exists($expr->var->class->toString())) {
+            $case = constant($expr->var->class->toString().'::'.$expr->var->name->name);
+            if (! $case instanceof BackedEnum) {
+                $this->fail($expr, 'Only backed enum cases expose a portable value.');
+            }
+
+            return ['op' => 'literal', 'value' => $case->value];
+        }
+
         if ($expr instanceof Node\Scalar\String_ || $expr instanceof Node\Scalar\Int_ || $expr instanceof Node\Scalar\Float_) {
             return ['op' => 'literal', 'value' => $expr->value];
         }
@@ -367,6 +387,19 @@ final class ControllerMutationCompiler
         }
 
         if ($expr instanceof Expr\MethodCall && $expr->name instanceof Node\Identifier) {
+            if ($expr->name->name === 'create' && ($expr->var instanceof Expr\StaticCall || $expr->var instanceof Expr\MethodCall)) {
+                $inputs = [];
+                foreach ($variables as $name => $type) {
+                    $inputs[$name] = new QueryExpression($type['kind'] === 'request' ? 'request' : 'local', $name, type: $type['kind'] === 'request' ? 'request:'.($type['type'] ?? throw new LogicException('Request input requires a FormRequest class.')) : ($type['type'] ?? 'unknown'));
+                }
+
+                $query = (new ControllerQueryCompiler($this->parser, $this->models))->construction($expr->var, $inputs);
+                $node = $this->create($expr, $query->queryModel()->class, $variables);
+                $node['defaults'] = ScopeCompiler::mutation(ScopeCompiler::attributes($query));
+
+                return $node;
+            }
+
             $base = $e($expr->var);
             $kind = $base['result']['kind'] ?? '';
             $method = $expr->name->name;
@@ -533,7 +566,7 @@ final class ControllerMutationCompiler
      * @param  array<string,VariableType>  $variables
      * @return Expression
      */
-    private function create(Expr\StaticCall $expr, string $class, array $variables): array
+    private function create(Expr\StaticCall|Expr\MethodCall $expr, string $class, array $variables): array
     {
         $meta = $this->modelClasses()[$class] ?? null;
         if ($meta === null || $meta->idGenerator === null || count($expr->args) !== 1 || ! $expr->args[0] instanceof Node\Arg || $expr->args[0]->name instanceof Node\Identifier || $expr->args[0]->unpack) {

@@ -1,6 +1,6 @@
 ---
 title: Configuration
-description: Configure Laravel discovery, generated output, context, authentication, and the cache.
+description: Configure Laravel discovery, generated output, typed context, authentication, and the cache.
 ---
 
 Publish the package configuration into your Laravel application:
@@ -14,27 +14,104 @@ The source defaults live in
 
 ## Laravel settings
 
-| Key                           | Default                                      | Purpose                                                                                                             |
-| ----------------------------- | -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| `models`                      | `[]`                                         | Discover models under `app/Models` with a `zero()` definition; otherwise list every participating model explicitly. |
-| `output`                      | `resources/js/zero/generated.ts`             | Generated schema, metadata, and plain row types; query/mutation modules are written alongside it.                   |
-| `controller_output`           | `bootstrap/zero-queries.php`                 | Authoritative controller query registrations.                                                                       |
-| `mutation_output`             | `bootstrap/zero-mutations.php`               | Authoritative controller mutation registrations.                                                                    |
-| `react`                       | `false`                                      | Also generate the React wrapper and check it for drift.                                                             |
-| `wayfinder_import`            | `@/zero`                                     | TypeScript module root for the opt-in Wayfinder page converter; not a filesystem path.                              |
-| `sync_publication_on_migrate` | `false`                                      | Synchronize the dedicated publication after successful PostgreSQL `up` migration batches.                           |
-| `publication`                 | `ZERO_PUBLICATION` or `laravel_zero`         | Dedicated PostgreSQL publication managed by the package.                                                            |
-| `app_id`                      | `ZERO_APP_ID` or `zero`                      | Application identity shared with Zero cache.                                                                        |
-| `upstream_schema`             | `ZERO_UPSTREAM_SCHEMA` or `zero_0`           | Zero-owned bookkeeping schema; match the cache's `<app-id>_0`.                                                      |
-| `api_key`                     | `ZERO_API_KEY`                               | Private cache API key; never include it in browser code.                                                            |
-| `route_prefix`                | `zero`                                       | Prefix for query and mutation endpoints.                                                                            |
-| `middleware`                  | `['api', 'auth']`                            | Authenticate the end user independently of cache authentication.                                                    |
-| `context_resolver`            | `ZeroForLaravel\Http\ContextResolver::class` | Resolve trusted `ZeroContext`; by default supplies the authenticated `user_id`.                                     |
+| Key                           | Default or application setting       | Purpose                                                                                               |
+| ----------------------------- | ------------------------------------ | ----------------------------------------------------------------------------------------------------- |
+| `models`                      | `[]`                                 | Discover concrete models using `HasZeroQueries`; otherwise explicitly list every participating model. |
+| `output`                      | `resources/js/zero/generated.ts`     | Generated schema, metadata, and plain row types; query/mutation modules are written alongside it.     |
+| `controller_output`           | `bootstrap/zero-queries.php`         | Authoritative controller query registrations.                                                         |
+| `mutation_output`             | `bootstrap/zero-mutations.php`       | Authoritative controller mutation registrations.                                                      |
+| `react`                       | `false`                              | Also generate the React wrapper and check it for drift.                                               |
+| `wayfinder_import`            | `@/zero`                             | TypeScript module root for the opt-in Wayfinder page converter; not a filesystem path.                |
+| `sync_publication_on_migrate` | `false`                              | Synchronize the dedicated publication after successful PostgreSQL `up` migration batches.             |
+| `publication`                 | `ZERO_PUBLICATION` or `laravel_zero` | Dedicated PostgreSQL publication managed by the package.                                              |
+| `app_id`                      | `ZERO_APP_ID` or `zero`              | Application identity shared with Zero cache.                                                          |
+| `upstream_schema`             | `ZERO_UPSTREAM_SCHEMA` or `zero_0`   | Zero-owned bookkeeping schema; match the cache's `<app-id>_0`.                                        |
+| `api_key`                     | `ZERO_API_KEY`                       | Private cache API key; never include it in browser code.                                              |
+| `route_prefix`                | `zero`                               | Prefix for query and mutation endpoints.                                                              |
+| `middleware`                  | `['api', 'auth']`                    | Authenticate the end user independently of cache authentication.                                      |
+| `context`                     | Application configuration            | Application-owned string-backed context enum, for example `App\Enums\ZeroContext::class`.             |
+| `context_resolver`            | Application configuration            | Resolver class with one `#[ResolvesContext(...)]` public method per configured enum case.             |
 
 Register relationship targets even if they expose no top-level queries or writes.
 Choose the middleware and guard appropriate to your application. Session
 configuration needs the cookie-forwarding and CSRF setup in
 [generation and replication](./replication.mdx).
+
+## Typed context and resolver
+
+Context keys belong to the application, not a package enum or a set of magic
+string references. For example, create `app/Enums/ZeroContext.php`:
+
+```php
+namespace App\Enums;
+
+enum ZeroContext: string
+{
+    case USER_ID = 'user_id';
+    case TENANT_ID = 'tenant_id';
+}
+```
+
+Then define `app/Zero/ResolveZeroContext.php`:
+
+```php
+namespace App\Zero;
+
+use App\Enums\ZeroContext;
+use App\Services\CurrentTenant;
+use Illuminate\Http\Request;
+use ZeroForLaravel\Attributes\ResolvesContext;
+
+final class ResolveZeroContext
+{
+    #[ResolvesContext(ZeroContext::USER_ID)]
+    public function userId(Request $request): string
+    {
+        return (string) $request->user()->getAuthIdentifier();
+    }
+
+    #[ResolvesContext(ZeroContext::TENANT_ID)]
+    public function tenantId(Request $request, CurrentTenant $tenant): ?string
+    {
+        return $tenant->authorizedIdFor($request->user());
+    }
+}
+```
+
+`CurrentTenant` is an application service in this example: its `authorizedIdFor`
+method must check the authenticated user's membership and return a string or null.
+The nonnullable user resolver assumes authenticated middleware. Configure both
+classes in `config/zero.php`:
+
+```php
+use App\Enums\ZeroContext;
+use App\Zero\ResolveZeroContext;
+
+return [
+    'context' => ZeroContext::class,
+    'context_resolver' => ResolveZeroContext::class,
+    // Other Zero settings...
+];
+```
+
+Each enum case must have **exactly one** attributed public resolver method.
+Missing or duplicate mappings are errors. Return types must be native `string`,
+`int`, `float`, or `bool`, optionally nullable (`?string`, for example). These
+signatures define the generated TypeScript shape; do not return an Eloquent model,
+an enum object, `mixed`, or a DTO. `Request` and service parameters use Laravel DI
+at runtime. Generation reflects the signatures and attributes without executing
+resolver methods or resolving their request-specific values.
+
+At runtime the package carries resolved values in `ResolvedContext`. This is
+distinct from the application enum, which declares keys. Native Zero `userID` is
+also separate: it is not inferred from a `user_id` context entry, and resolving
+identity does not implicitly add that entry.
+
+Use the configured enum case directly in supported builder value positions:
+`->where('user_id', ZeroContext::USER_ID)` or
+`->withAttributes(['user_id' => ZeroContext::USER_ID])`. It becomes a context
+reference before domain enum literal conversion. Using `ZeroContext::USER_ID->value`
+instead means the literal string `'user_id'`. See [authorization and context](./authorization.mdx).
 
 ## Artisan commands
 
@@ -62,9 +139,10 @@ do not require deleting the Zero replica.
 contracts once. Set its public `cacheURL` and optional query/mutation URLs.
 Regeneration preserves that configuration.
 
-The generated provider accepts the native user identity, trusted-context values
-for local behavior, and optional token `auth`. Laravel independently resolves the
-authoritative context. See [React integration](./react.mdx).
+The generated provider needs both native `userID` and typed `context`, plus optional
+token `auth`. For the example enum, context contains `user_id: string` and
+`tenant_id: string | null`. Laravel independently resolves authoritative values;
+browser-supplied context cannot establish permissions. See [React integration](./react.mdx).
 
 Mutation bindings capture IDs and timestamps once during preparation. Native Zero
 options control transport and local storage. Custom optimistic implementations
@@ -87,8 +165,10 @@ empty, `zero.discovery` lists PSR-4 roots to scan:
 ],
 ```
 
-Only concrete Eloquent models with a Zero definition or visibility/query/mutation
-attributes opt in. Discovery does not expose every model in those directories.
-Explicit visibility, required keys, `$visible` replication allowlists, and override
-precedence remain enforced. No modular-framework dependency is required.
-Use `zero:exposure` to inspect the resulting columns and permissions.
+Only concrete Eloquent models using `HasZeroQueries` opt in through discovery;
+`zero.models` can explicitly register models instead. Discovery does not expose
+every model in those directories, and a relationship never silently opts in its
+target. Required keys, `$visible` replication allowlists, and column override
+precedence remain enforced. Zero scopes supply row constraints; there is no
+required `zero()` visibility definition. No modular-framework dependency is required.
+Use `zero:exposure` to inspect the resulting replication exposure.

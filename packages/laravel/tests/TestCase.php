@@ -67,6 +67,8 @@ abstract class TestCase extends Orchestra
 
     protected function defineEnvironment($app): void
     {
+        $app['config']->set('zero.context', Fixtures\ZeroContext::class);
+        $app['config']->set('zero.context_resolver', Fixtures\ContextResolver::class);
         $app['config']->set('database.default', 'testing');
         $app['config']->set('database.connections.testing', [
             'driver' => 'sqlite', 'database' => ':memory:', 'prefix' => '',

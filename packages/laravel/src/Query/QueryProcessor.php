@@ -6,8 +6,8 @@ namespace ZeroForLaravel\Query;
 
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Validation\ValidationException;
+use ZeroForLaravel\ResolvedContext;
 use ZeroForLaravel\Support\Input;
-use ZeroForLaravel\ZeroContext;
 
 /**
  * @phpstan-type QueryResult array{id: string, name: string, ast?: array<string, mixed>, error?: 'parse'|'app', message?: string, details?: array{fields: array<array-key, mixed>}}
@@ -21,7 +21,7 @@ final readonly class QueryProcessor
     /**
      * @return TransformFailed|QueryResponse
      */
-    public function process(mixed $body, ZeroContext $context): array
+    public function process(mixed $body, ResolvedContext $context): array
     {
         // Zero can revalidate every retained query in one batch, including
         // queries no longer displayed. AuthenticateZeroCache bounds the body

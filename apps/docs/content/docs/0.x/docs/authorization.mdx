@@ -1,89 +1,187 @@
 ---
-title: Authorization and context
-description: Separate trusted read constraints, server scopes, write policies, and field permissions.
+title: Authorization, context, and global scopes
+description: Resolve typed application context, preserve membership-based sharing, and authorize writes explicitly.
 ---
 
-Use `->authorizeRelation('memberships')` to require at least one related row
-that is visible under the related model's own authorization. For a shared list,
-configure memberships with `->authorize('user_id', '=', ContextField::UserId)`
-and the list with `->authorizeRelation('memberships')`. Todos can then use
-`->authorizeRelation('list')` to inherit access to their parent list.
+Use Zero global scopes for reusable read constraints and creation defaults. These
+are Eloquent-like, removable query scopes, not immutable authorization rules.
+Trusted application code owns the declarations; do not let browser input choose
+which scopes to remove. Write policies, Gates, and FormRequest association checks
+remain authoritative.
 
-These predicates compile to correlated `EXISTS` queries in both Laravel and the
-native client. Multiple scalar and relationship authorization declarations combine
-with AND. Authorization relationships are schema dependencies, not result selections;
-select related rows with `related()` in controllers. Register every target model. Cycles and authorization
-paths deeper than eight relationships fail generation. Write policies and
-FormRequests still control mutations and association changes.
+## Trusted application context
 
-See [the authenticated todos example](https://github.com/nickwelsh/zero-for-laravel-monorepo/tree/main/examples/todos) for shared lists,
-PostgreSQL, and Herd HTTPS setup.
+Define an application-owned, string-backed `App\Enums\ZeroContext` enum and
+configure both `context` and `context_resolver`. The resolver exposes one public
+method per enum case, annotated with `#[ResolvesContext(ZeroContext::USER_ID)]`.
+See [the full configuration example](./configuration.mdx#typed-context-and-resolver).
 
-## Trusted context and server scopes
-
-```php
-return ZeroDefinition::make()
-    ->authorize('user_id', '=', ContextField::UserId)
-    ->fillFromContext('user_id', ContextField::UserId)
-    ->relations('list');
-```
-
-Use `publicReads()` for explicitly public models, or `authorizeRelation('list')`
-to require a related row visible under that model's own definition. These
-constraints are generated for local queries and independently enforced by Laravel.
-Context fills apply on create, are resolved separately on client/server, and are
-excluded from caller-writable fields. Custom context keys can use string references.
-The server context resolver must derive their values from authenticated state.
-
-For runtime PHP, use a mandatory server scope:
+Generation reflects resolver signatures without executing their methods. Native
+`string`, `int`, `float`, and `bool` return types, including nullable variants,
+define the generated context shape. Laravel resolves `Request` and service
+dependencies when it resolves trusted values at runtime. Package runtime values
+live in `ResolvedContext`; the application's enum is a declaration of keys, not
+the runtime value bag.
 
 ```php
-->enforceServerScope(
-    function (ZQLBuilder $query, ZeroContext $context): void {
-        $query->whereExists('list', fn (ZQLBuilder $list) => $list->where(
-            fn (ZeroOperator $op) => $op->or(
-                $op->cmp('user_id', $context->get('user_id')),
-                $op->exists('shares', fn (ZQLBuilder $share) =>
-                    $share->where('user_id', $context->get('user_id'))),
-            ),
-        ));
-    },
-    relations: ['list'],
-)
+use App\Enums\ZeroContext;
+
+$query = Todo::zeroQuery()->where('assigned_to', ZeroContext::USER_ID);
 ```
 
-Register `shares` on the list definition with `->relations('shares')` or through
-its own scope's `relations` argument. This declares schema dependencies; controllers
-choose which related rows to select. Every target must define its own visibility.
-Scopes also apply to included rows and relationship predicates. Conditions within
-a scope can use OR; the mandatory scope as a whole is ANDed with user filters.
-An empty scope is an error. Missing required context denies access.
+In supported Zero builder value positions, a configured context enum case is a
+context reference. It is recognized **before** ordinary backed domain enums are
+flattened into literal values. `ZeroContext::USER_ID->value` is the literal string
+`'user_id'`, not a context lookup. An unrelated domain enum remains a literal.
 
-Callbacks execute with fresh trusted context during server query compilation,
-never during generation. Their PHP source is not exported. Zero permits server
-queries to add permission constraints absent from the local implementation.
-Local queries can still match other already-synced authorized rows, so mirror
-predicates with `authorize`/`authorizeRelation` when exact local behavior matters.
+The provider needs both native `userID` and typed `context`. Native identity is
+independent of an application key named `user_id`; the package does not infer one
+from the other. Browser values predict local queries/defaults. Laravel independently
+resolves authoritative values from authenticated state. Validate tenant membership
+before resolving a tenant value; never treat browser context as server authority.
+Declare nullability intentionally and write predicates that handle it, rather
+than assuming a nullable context key is an authenticated identity.
 
-## Write authorization
+## Global scope registration
 
-Read visibility does not grant write permission. Controller mutations must call
-the appropriate Laravel policy or gate, in the action or its FormRequest.
-FormRequests authorize and validate the payload separately, including foreign key
-association permissions. See [mutations](./mutations.mdx) for complete examples.
+Implement the Zero-specific interface, not Eloquent's `Scope`:
+
+```php
+use App\Enums\ZeroContext;
+use Illuminate\Database\Eloquent\Model;
+use ZeroForLaravel\Query\ZeroQuery;
+use ZeroForLaravel\Scopes\ZeroGlobalScope;
+
+final class CurrentMemberships implements ZeroGlobalScope
+{
+    public function apply(ZeroQuery $query, Model $model): void
+    {
+        $query->where('user_id', ZeroContext::USER_ID);
+    }
+}
+```
+
+Apply it with `#[ZeroForLaravel\Attributes\ZeroScopedBy([CurrentMemberships::class])]`
+on the model. Alternatively, register an instance or a named portable closure in
+the model's boot registration:
+
+```php
+protected static function booted(): void
+{
+    static::addZeroGlobalScope(new CurrentMemberships);
+    // Alternative to the class registration, not an additional requirement:
+    // static::addZeroGlobalScope('current-user', function (ZeroQuery $query): void {
+    //     $query->where('user_id', ZeroContext::USER_ID);
+    // });
+}
+```
+
+Registration order is inherited scopes, then model attributes, then boot
+registrations. This registry order also determines global default precedence.
+Scopes and closures must stay within the checked portable query subset; they are
+not a server-only escape hatch for arbitrary SQL or PHP.
+
+Remove a scope with `withoutGlobalScope(CurrentMemberships::class)` or
+`withoutGlobalScope('current-user')`. `withoutGlobalScopes()` removes all global
+scopes on that builder. Removing a scope removes both its conditions and its
+creation defaults; it is not merely a change to SQL filtering.
+
+Related models apply their scopes independently. Removing a scope from a parent
+does **not** remove its children's scopes. A related callback can deliberately
+remove that related model's scope:
+
+```php
+TodoList::zeroQuery()->with('memberships', fn (ZeroQuery $memberships) =>
+    $memberships->withoutGlobalScope(CurrentMemberships::class));
+```
+
+This is an explicit application-level visibility decision, not permission to
+expose arbitrary scope-removal controls to a client.
+
+## Membership-based todo sharing
+
+Do not replace shared-list access with an owner-only list filter. A membership
+connects the current user to a list; collaborators may read lists they do not own.
+Alongside `CurrentMemberships` above, define:
+
+```php
+final class AccessibleLists implements ZeroGlobalScope
+{
+    public function apply(ZeroQuery $query, Model $model): void
+    {
+        $query->whereHas('memberships')
+            ->withAttributes(['user_id' => ZeroContext::USER_ID], asConditions: false);
+    }
+}
+
+final class AccessibleTodos implements ZeroGlobalScope
+{
+    public function apply(ZeroQuery $query, Model $model): void
+    {
+        $query->whereHas('list');
+    }
+}
+```
+
+Attach the scopes to their respective opted-in Eloquent models (using the
+relationship methods described in [models](./models.mdx#eloquent-relationships-zero-includes)):
+
+```php
+use ZeroForLaravel\Attributes\ZeroScopedBy;
+use ZeroForLaravel\Concerns\HasZeroQueries;
+
+#[ZeroScopedBy([CurrentMemberships::class])]
+class ListMembership extends Model
+{
+    use HasZeroQueries;
+    // Expose the required id, list_id, and user_id columns.
+}
+
+#[ZeroScopedBy([AccessibleLists::class])]
+class TodoList extends Model
+{
+    use HasZeroQueries;
+    // Define memberships() and todos(); expose their correlation keys.
+}
+
+#[ZeroScopedBy([AccessibleTodos::class])]
+class Todo extends Model
+{
+    use HasZeroQueries;
+    // Define list(); expose list_id and the other replicated columns.
+}
+```
+
+The `whereHas` chain compiles into correlated existence predicates. Memberships
+are constrained to the current user; lists require a visible membership; todos
+require a visible list. The list's `user_id` is a **creation default only** because
+`asConditions: false` avoids an owner condition. Shared lists therefore remain
+visible to members who are not their creator. Create the creator's membership
+explicitly in the same authorized mutation; a default does not create one.
+
+`with('memberships')` includes matching rows; it does not replace the parent's
+`whereHas('memberships')` filter. Related scopes apply independently in both
+includes and parent filters. Register every target, and keep each model's column
+allowlist narrow. Unsupported relationship constraints fail generation.
+
+## Write authorization and defaults
+
+Read visibility does not grant write permission. Keep policies and Gates in the
+action or its FormRequest, and authorize foreign-key associations such as
+`list_id` separately. Reload and lock state-dependent records before reauthorization
+when needed. Ordinary Eloquent queries and relationships are not automatically
+constrained by Zero scopes, so a policy must not assume that they are.
+
+`withAttributes` supplies overridable creation defaults, not immutable ownership.
+Defaults apply to Zero creates, never stamp updates, and do not modify normal
+Eloquent creates outside Zero. Fields omitted from `$request->validated()` are not
+caller input; trusted explicit creation data can override a default. Validate and
+authorize any such override. See [creation defaults and precedence](./mutations.mdx#creation-defaults).
 
 ## Column exposure
 
-Read authorization decides which rows a client may receive. Every selected column
-on those rows is exposed through Zero, so define [column privacy](./models.mdx#columns-and-privacy)
-as well. A nonempty Eloquent `$visible` list restricts columns by default;
-`ZeroColumns` can supply a separate explicit replication allowlist.
-
-Keep ownership fields used by `authorize()` and `fillFromContext()` in that
-allowlist. Generation fails if those fields or registered relationship keys are
-excluded. `$fillable` and mutation policies do not hide replicated columns.
-
-The browser's context supplies local values and optimistic fills. Laravel resolves
-a fresh `ZeroContext` through `zero.context_resolver`; derive custom tenant values
-only after checking the authenticated user's membership. Never trust a tenant ID
-or user ID supplied in the browser to establish server access.
+Row visibility and column privacy are separate. Every replicated column on a
+visible row is exposed through Zero. Use [column allowlists](./models.mdx#columns-and-privacy)
+and the dedicated publication even when scopes filter rows. Generation rejects
+missing required keys rather than quietly publishing private columns. `$fillable`,
+FormRequests, and mutation policies do not hide replicated data.

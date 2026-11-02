@@ -31,7 +31,9 @@
             "desc",
             "cardinality",
             "dest",
-            "wayfinder"
+            "wayfinder",
+            "globals",
+            "doesnt"
         ]
     }
 }
