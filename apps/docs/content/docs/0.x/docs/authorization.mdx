@@ -44,7 +44,8 @@ than assuming a nullable context key is an authenticated identity.
 
 ## Global scope registration
 
-Implement the Zero-specific interface, not Eloquent's `Scope`:
+Implement the Zero-specific interface, not Eloquent's `Scope`. For a model whose
+rows are private to their owner:
 
 ```php
 use App\Enums\ZeroContext;
@@ -52,7 +53,7 @@ use Illuminate\Database\Eloquent\Model;
 use ZeroForLaravel\Query\ZeroQuery;
 use ZeroForLaravel\Scopes\ZeroGlobalScope;
 
-final class CurrentMemberships implements ZeroGlobalScope
+final class OwnedRows implements ZeroGlobalScope
 {
     public function apply(ZeroQuery $query, Model $model): void
     {
@@ -61,14 +62,14 @@ final class CurrentMemberships implements ZeroGlobalScope
 }
 ```
 
-Apply it with `#[ZeroForLaravel\Attributes\ZeroScopedBy([CurrentMemberships::class])]`
+Apply it with `#[ZeroForLaravel\Attributes\ZeroScopedBy([OwnedRows::class])]`
 on the model. Alternatively, register an instance or a named portable closure in
 the model's boot registration:
 
 ```php
 protected static function booted(): void
 {
-    static::addZeroGlobalScope(new CurrentMemberships);
+    static::addZeroGlobalScope(new OwnedRows);
     // Alternative to the class registration, not an additional requirement:
     // static::addZeroGlobalScope('current-user', function (ZeroQuery $query): void {
     //     $query->where('user_id', ZeroContext::USER_ID);
@@ -81,18 +82,18 @@ registrations. This registry order also determines global default precedence.
 Scopes and closures must stay within the checked portable query subset; they are
 not a server-only escape hatch for arbitrary SQL or PHP.
 
-Remove a scope with `withoutGlobalScope(CurrentMemberships::class)` or
+Remove a scope with `withoutGlobalScope(OwnedRows::class)` or
 `withoutGlobalScope('current-user')`. `withoutGlobalScopes()` removes all global
 scopes on that builder. Removing a scope removes both its conditions and its
 creation defaults; it is not merely a change to SQL filtering.
 
 Related models apply their scopes independently. Removing a scope from a parent
 does **not** remove its children's scopes. A related callback can deliberately
-remove that related model's scope:
+remove that related model's scope. For example, if documents register `OwnedRows`:
 
 ```php
-TodoList::zeroQuery()->with('memberships', fn (ZeroQuery $memberships) =>
-    $memberships->withoutGlobalScope(CurrentMemberships::class));
+Project::zeroQuery()->with('documents', fn (ZeroQuery $documents) =>
+    $documents->withoutGlobalScope(OwnedRows::class));
 ```
 
 This is an explicit application-level visibility decision, not permission to
@@ -102,14 +103,16 @@ expose arbitrary scope-removal controls to a client.
 
 Do not replace shared-list access with an owner-only list filter. A membership
 connects the current user to a list; collaborators may read lists they do not own.
-Alongside `CurrentMemberships` above, define:
+Keep `ListMembership` unscoped and put the current-user condition in the list's
+membership check:
 
 ```php
 final class AccessibleLists implements ZeroGlobalScope
 {
     public function apply(ZeroQuery $query, Model $model): void
     {
-        $query->whereHas('memberships')
+        $query->whereHas('memberships', fn (ZeroQuery $memberships) => $memberships
+            ->where('user_id', ZeroContext::USER_ID))
             ->withAttributes(['user_id' => ZeroContext::USER_ID], asConditions: false);
     }
 }
@@ -130,7 +133,6 @@ relationship methods described in [models](./models.mdx#eloquent-relationships-z
 use ZeroForLaravel\Attributes\ZeroScopedBy;
 use ZeroForLaravel\Concerns\HasZeroQueries;
 
-#[ZeroScopedBy([CurrentMemberships::class])]
 class ListMembership extends Model
 {
     use HasZeroQueries;
@@ -152,17 +154,22 @@ class Todo extends Model
 }
 ```
 
-The `whereHas` chain compiles into correlated existence predicates. Memberships
-are constrained to the current user; lists require a visible membership; todos
-require a visible list. The list's `user_id` is a **creation default only** because
+The `whereHas` chain compiles into correlated existence predicates. Lists require
+a membership belonging to the current user; todos require a visible list. The
+current-user condition applies only to the existence check, not to all membership
+queries. The list's `user_id` is a **creation default only** because
 `asConditions: false` avoids an owner condition. Shared lists therefore remain
 visible to members who are not their creator. Create the creator's membership
 explicitly in the same authorized mutation; a default does not create one.
 
-`with('memberships')` includes matching rows; it does not replace the parent's
-`whereHas('memberships')` filter. Related scopes apply independently in both
-includes and parent filters. Register every target, and keep each model's column
-allowlist narrow. Unsupported relationship constraints fail generation.
+`TodoList::zeroQuery()->with('memberships')` returns accessible lists with all their
+memberships, including collaborators. The include does not inherit the condition
+inside the parent's `whereHas` callback. A standalone `ListMembership::zeroQuery()`
+is unrestricted: constrain it explicitly if exposing one in a registered query.
+Browsers can invoke registered queries, not invent arbitrary authoritative queries.
+Related global scopes, when registered, apply independently in both includes and
+parent filters. Register every target, and keep each model's column allowlist
+narrow. Unsupported relationship constraints fail generation.
 
 ## Write authorization and defaults
 

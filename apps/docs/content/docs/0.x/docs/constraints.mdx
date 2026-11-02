@@ -71,9 +71,10 @@ Migration checklist:
    Audit removals: removing a scope removes both conditions and defaults. Parent
    removals do not propagate to related models.
 3. Preserve [membership-based todo sharing](./authorization.mdx#membership-based-todo-sharing):
-   memberships filter `user_id`; lists use `whereHas('memberships')` and a creator
-   default with `asConditions: false`; todos use `whereHas('list')`. An owner-only
-   list filter would break collaborator access.
+   leave memberships unscoped; lists check the current user's `user_id` inside a
+   `whereHas('memberships', ...)` callback and use a creator default with
+   `asConditions: false`; todos use `whereHas('list')`. Membership includes can then
+   return all collaborators. An owner-only list filter would break collaborator access.
 4. Convert relationship declarations and includes, keep target models opted in,
    review private-column allowlists, and move local query helpers to `#[ZeroScope]`.
    Clone branched builders explicitly and check higher-order OR grouping.

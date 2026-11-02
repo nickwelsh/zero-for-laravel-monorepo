@@ -85,15 +85,10 @@ export const definitions = {
             "list_id",
             "user_id"
         ],
-        "scopeFingerprint": "51190ca30c508e08e4d7bf15dca4adb181a44e2faf23a15929c7e691c64b1f94",
+        "scopeFingerprint": "35786c7117b4e38d0f169239752ce71158266ae2f6e4aa230fbbb87bd699c0e3",
         "creationDefaults": {
             "op": "merge",
-            "values": [
-                {
-                    "op": "merge",
-                    "values": []
-                }
-            ]
+            "values": []
         },
         "idGenerator": "uuid",
         "timestamps": {
@@ -254,7 +249,7 @@ export const definitions = {
             "name",
             "user_id"
         ],
-        "scopeFingerprint": "7a6effaf1eb159c95e272c89e33f7380fac3d3d436e93d20cbf9fc3339675377",
+        "scopeFingerprint": "5693259b05a51871f9436a55805674a4b6735b95aacad987038a41e41c7747a5",
         "creationDefaults": {
             "op": "merge",
             "values": [

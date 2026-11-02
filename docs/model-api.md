@@ -31,8 +31,10 @@ by class/name with `withoutGlobalScope`, or all with `withoutGlobalScopes`;
 removal drops conditions and defaults. Related scopes apply independently and can
 be removed inside callbacks; parent removals do not propagate.
 
-For shared todos, memberships filter `user_id` to current context, lists require
-`whereHas('memberships')`, and todos require `whereHas('list')`. Lists set a creator
+For shared todos, memberships are unscoped. Lists use `whereHas('memberships', ...)`
+with a callback filtering `user_id` to current context, and todos require
+`whereHas('list')`. Including memberships returns all collaborators on an accessible
+list; standalone membership queries need explicit constraints if exposed. Lists set a creator
 default with `withAttributes(['user_id' => ZeroContext::USER_ID], asConditions: false)`
 so collaborator access is not narrowed to owners. These are removable read scopes,
 not immutable write authorization. Keep policies, Gates, FormRequest association
