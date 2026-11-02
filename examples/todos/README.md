@@ -177,11 +177,17 @@ You can also register accounts through the starter kit.
 ## Authorization
 
 A list has one owner and explicit memberships, including its owner. List queries
-use `ZeroDefinition::authorizeRelation('memberships')`; memberships are visible only to their
-user. Todo queries use `ZeroDefinition::authorizeRelation('list')`. Policies enforce writes,
-and FormRequests validate destination-list access, preventing a member from moving
-a todo into someone else's private list. Deleting a list cascades its todos and
-memberships. Sharing adds membership by registered email; duplicate shares are safe.
+use a Zero global scope with `whereHas('memberships', ...)` whose callback checks
+`user_id` against `ZeroContext::USER_ID`. `ListMembership` has no global scope, so
+`TodoList::zeroQuery()->with('memberships')` can return every collaborator on an
+accessible list. Standalone membership queries must be constrained explicitly if
+exposed; the browser can only invoke registered server-authored queries. Todo
+queries use a global `whereHas('list')` scope. The list's creator default uses
+`withAttributes(..., asConditions: false)` so it does not restrict sharing to owners.
+Policies enforce writes, and FormRequests validate destination-list access,
+preventing a member from moving a todo into someone else's private list. Deleting
+a list cascades its todos and memberships. Sharing adds membership by registered
+email; duplicate shares are safe.
 
 `DashboardController` declares the list query, its related todos, ordering, and live
 window. The Inertia adapter injects plain typed live rows. `TodoController`,

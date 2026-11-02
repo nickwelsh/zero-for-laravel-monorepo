@@ -19,7 +19,7 @@ use ZeroForLaravel\Metadata\ModelRegistry;
 use ZeroForLaravel\Mutation\ControllerMutationRegistry;
 use ZeroForLaravel\Mutation\OperationException;
 use ZeroForLaravel\Query\QueryCompiler;
-use ZeroForLaravel\ZeroContext;
+use ZeroForLaravel\ResolvedContext;
 
 function runTodoMutation(User $user, string $controller, string $method, array $input = [], array $route = []): array
 {
@@ -36,7 +36,7 @@ function runTodoMutation(User $user, string $controller, string $method, array $
     $args = ['version' => $program->fingerprint, 'input' => $input, 'route' => $route,
         'prepared' => ['timestamp' => 1700000000123, 'ids' => array_map(fn () => (string) Str::uuid(), $program->sites)]];
 
-    return $models->connection()->transaction(fn () => $registry->execute($program->name(), $args, new ZeroContext(['user_id' => $user->id])));
+    return $models->connection()->transaction(fn () => $registry->execute($program->name(), $args, new ResolvedContext(['user_id' => $user->id], (string) $user->id)));
 }
 
 test('creating a list returns its stable identity and adds its owner as a member', function () {
@@ -122,12 +122,14 @@ test('deleting a list cascades its todos and memberships', function () {
     $this->assertDatabaseCount('list_memberships', 0);
 });
 
-test('query declarations enforce membership at list and todo roots', function () {
-    $owner = User::factory()->create();
+test('query declarations restrict lists and todos but include all collaborators', function () {
+    $member = User::factory()->create();
     $compiler = new QueryCompiler(new ModelRegistry([TodoList::class, Todo::class, ListMembership::class]));
-    $context = new ZeroContext(['user_id' => $owner->id]);
-    $list = $compiler->compileDeclaration(TodoList::zeroQuery(), $context);
+    $context = new ResolvedContext(['user_id' => $member->id], (string) $member->id);
+    $list = $compiler->compileDeclaration(TodoList::zeroQuery()->with('memberships'), $context);
     $todo = $compiler->compileDeclaration(Todo::zeroQuery(), $context);
-    expect(data_get($list, 'where.related.subquery.where.right.value'))->toBe($owner->id);
-    expect(data_get($todo, 'where.related.subquery.where.related.subquery.where.right.value'))->toBe($owner->id);
+    expect(data_get($list, 'where.related.subquery.where.right.value'))->toBe($member->id);
+    expect(data_get($todo, 'where.related.subquery.where.related.subquery.where.right.value'))->toBe($member->id);
+    expect(data_get($list, 'related.0.subquery'))->not->toHaveKey('where');
+    expect($compiler->compileDeclaration(ListMembership::zeroQuery(), $context))->not->toHaveKey('where');
 });

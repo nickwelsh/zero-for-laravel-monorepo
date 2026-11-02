@@ -44,9 +44,11 @@ queries receive visibility predicates. A browser cannot supply an authoritative 
 Zero global scopes are removable by trusted application declarations, not immutable
 write authorization. Inherited scopes register before attributes, then boot
 registrations. Related scopes are independent: removing a parent scope does not
-remove child scopes. Shared todo access follows current-user memberships, then
-lists with a visible membership, then todos with a visible list; creator defaults
-must not add owner-only list predicates. Keep policies, Gates, and association checks.
+remove child scopes. Shared todo lists check for a membership belonging to the
+current user inside `whereHas('memberships', ...)`; todos require a visible list.
+Memberships are unscoped, so includes can return all collaborators. Exposed standalone
+membership queries need explicit constraints. Creator defaults must not add
+owner-only list predicates. Keep policies, Gates, and association checks.
 
 Mutations use the same native protocol for generated, custom, and disabled optimism.
 Laravel executes the registered action boundary within the upstream transaction.

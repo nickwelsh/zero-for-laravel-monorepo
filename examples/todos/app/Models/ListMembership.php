@@ -6,8 +6,6 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Model;
-use App\Zero\CurrentMembership;
-use ZeroForLaravel\Attributes\ZeroScopedBy;
 use ZeroForLaravel\Concerns\HasZeroQueries;
 
 /**
@@ -15,7 +13,6 @@ use ZeroForLaravel\Concerns\HasZeroQueries;
  * @property string $list_id
  * @property int $user_id
  */
-#[ZeroScopedBy([CurrentMembership::class])]
 class ListMembership extends Model
 {
     use HasUuids;

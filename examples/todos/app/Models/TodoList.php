@@ -4,11 +4,11 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Enums\ZeroContext;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use ZeroForLaravel\Concerns\HasZeroQueries;
-use App\Enums\ZeroContext;
 use ZeroForLaravel\Query\ZeroQuery;
 
 /**
@@ -43,7 +43,9 @@ class TodoList extends Model
     protected static function booted(): void
     {
         static::addZeroGlobalScope('membership', function (ZeroQuery $query): void {
-            $query->whereHas('memberships')->withAttributes(['user_id' => ZeroContext::USER_ID], asConditions: false);
+            $query->whereHas('memberships', fn (ZeroQuery $memberships) => $memberships
+                ->where('user_id', ZeroContext::USER_ID))
+                ->withAttributes(['user_id' => ZeroContext::USER_ID], asConditions: false);
         });
 
         static::created(function (self $list): void {

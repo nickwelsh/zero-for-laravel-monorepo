@@ -85,7 +85,7 @@ Use enum cases in supported builder value positions for context references;
 Other backed domain enum cases remain literals.
 
 Use Zero global scopes for row visibility and creation defaults. For example, a
-shared list scope must require a visible membership, not creator ownership:
+shared list scope must require the current user's membership, not creator ownership:
 
 ```php
 use App\Enums\ZeroContext;
@@ -97,7 +97,8 @@ final class AccessibleLists implements ZeroGlobalScope
 {
     public function apply(ZeroQuery $query, Model $model): void
     {
-        $query->whereHas('memberships')
+        $query->whereHas('memberships', fn (ZeroQuery $memberships) => $memberships
+            ->where('user_id', ZeroContext::USER_ID))
             ->withAttributes(['user_id' => ZeroContext::USER_ID], asConditions: false);
     }
 }
@@ -109,8 +110,9 @@ Inherited scopes register before model attributes, then boot registrations.
 `withoutGlobalScope(ClassOrName)` and `withoutGlobalScopes()` remove both the
 scope's conditions and defaults, not related models' scopes.
 
-For shared todos, scope `ListMembership.user_id` to the current context; scope
-`TodoList` with `whereHas('memberships')` as above; scope `Todo` with `whereHas('list')`.
+For shared todos, leave `ListMembership` unscoped; scope `TodoList` with the explicit
+membership check above, and scope `Todo` with `whereHas('list')`. Including a list's
+memberships can then return all collaborators, not only the current user's row.
 The creator default must use `asConditions: false` so collaborators still see the
 list. [The membership example](apps/docs/content/docs/0.x/docs/authorization.mdx#membership-based-todo-sharing)
 shows the complete scope chain. Scope removal is a trusted application decision,
