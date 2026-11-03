@@ -20,7 +20,8 @@ interface Token {
 
 function tokenize(input: string): Array<Token> {
     const tokens: Array<Token> = [];
-    const pattern = /\s+|(?<punct>[(){}-])|(?<quote>"(?:\\.|[^"\\])*")|(?<word>[^\s(){}"]+)/gu;
+    // Match only at the current offset instead of retrying malformed phrases at later quotes.
+    const pattern = /\s+|(?<punct>[(){}-])|(?<quote>"(?:\\.|[^"\\])*")|(?<word>[^\s(){}"]+)/guy;
     let consumed = 0;
     for (const match of input.matchAll(pattern)) {
         if (match.index !== consumed) {
