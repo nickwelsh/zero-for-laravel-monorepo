@@ -32,6 +32,7 @@ final class ZeroServiceProvider extends ServiceProvider
     {
         $this->app->register(\Laravel\Surveyor\SurveyorServiceProvider::class);
         $this->app->register(\Laravel\Ranger\RangerServiceProvider::class);
+        $this->app->register(Permissions\PermissionServiceProvider::class);
         $this->app->singletonIf(Generation\SchemaDriver::class, Generation\ZodSchemaDriver::class);
         $this->mergeConfigFrom(__DIR__.'/../config/zero.php', 'zero');
         $this->app->singleton(Query\RegisteredQueries::class, fn (): Query\RegisteredQueries => Query\RegisteredQueries::load(config()->string('zero.controller_output')));
