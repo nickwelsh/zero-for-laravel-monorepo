@@ -20,6 +20,7 @@ final readonly class PortableModel
         public array $branches,
         public array $conditions,
         public string $fingerprint,
+        public string $runtimeMatcher,
     ) {}
 
     public static function compile(string $source, Binding $binding): self
@@ -85,7 +86,8 @@ final readonly class PortableModel
             throw new LogicException('Portable Casbin roles require g = _, _ or the scoped g = _, _, _.');
         }
 
-        $branches = Matcher::parse($sections['matchers']['m'] ?? '')->branches();
+        $matcher = Matcher::parse($sections['matchers']['m'] ?? '');
+        $branches = $matcher->branches();
         $conditions = ['any'];
         foreach ($branches as $branch) {
             $required = ['r.obj.type=p.obj', 'r.act=p.act'];
@@ -159,7 +161,7 @@ final readonly class PortableModel
             }
         }
 
-        return new self($policy, $scoped, $arity, $deny, $branches, array_values(array_unique($conditions)), hash('sha256', $source));
+        return new self($policy, $scoped, $arity, $deny, $branches, array_values(array_unique($conditions)), hash('sha256', $source), $matcher->strictExpression());
     }
 
     /** @param list<string> $policy */

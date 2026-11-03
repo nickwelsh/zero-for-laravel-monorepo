@@ -102,6 +102,36 @@ final readonly class Matcher
         return $this->value;
     }
 
+    /** PHP-Casbin uses loose string equality by default; portable models require strict comparisons. */
+    public function strictExpression(): string
+    {
+        if ($this->kind === 'field') {
+            $field = $this->field();
+
+            // Escape variable names here, never inside literal strings.
+            return $field[0].'_'.substr($field, 2);
+        }
+
+        if ($this->kind === 'literal') {
+            return json_encode($this->value, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        }
+
+        $children = array_map(fn (self $child): string => $child->strictExpression(), $this->children);
+        if ($this->kind === 'role') {
+            return 'g('.implode(', ', $children).')';
+        }
+
+        if ($this->kind === 'not') {
+            return '!('.$children[0].')';
+        }
+
+        $operator = match ($this->kind) {
+            '==' => '===', '!=' => '!==', default => $this->kind
+        };
+
+        return '('.$children[0].' '.$operator.' '.$children[1].')';
+    }
+
     /** @param list<string> $tokens */
     private static function expression(array $tokens, int &$position, int $minimum = 0): self
     {

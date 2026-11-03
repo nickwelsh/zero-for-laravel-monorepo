@@ -54,7 +54,7 @@ final readonly class PermissionManager
         if ($freshUser instanceof Authenticatable && $freshResource instanceof Model) {
             $subject = Binding::subject($freshUser);
             $object = $binding->object($freshResource);
-            $enforcer = $manager->enforcer();
+            $enforcer = $manager->enforcer($binding);
             $fields = $enforcer->getModel()['r']['r']->tokens ?? throw new LogicException('Missing Casbin request definition.');
             $allowed = in_array('r_dom', $fields, true)
                 ? $enforcer->enforce($subject, $binding->domain($freshResource), $object, $action)
@@ -69,11 +69,25 @@ final readonly class PermissionManager
         return (new AuthorizationResponse($allowed))->withStatus($allowed ? null : $status);
     }
 
-    public function enforcer(): Enforcer
+    public function enforcer(?Binding $binding = null): Enforcer
     {
         $model = new CasbinModel;
         $source = $this->source();
         $model->loadModelFromText($source);
+        if ($binding instanceof Binding) {
+            try {
+                $portable = PortableModel::compile($source, $binding);
+            } catch (LogicException) {
+                // Wider Casbin models remain server-only and keep their native evaluation semantics.
+                $portable = null;
+            }
+
+            if ($portable instanceof PortableModel && isset($model['m']['m'])) {
+                $matcher = $model['m']['m'];
+                $matcher->value = $portable->runtimeMatcher;
+            }
+        }
+
         $stored = $this->connection()->table('permission_models')->where('id', $this->name)->first();
         if ($stored !== null && $stored->fingerprint !== hash('sha256', $source)) {
             throw new LogicException('Casbin model changed. Rebuild permission projections and regenerate contracts before serving queries.');
@@ -160,6 +174,22 @@ final readonly class PermissionManager
         $connection = $this->connection();
 
         return $connection->transaction(function () use ($connection, $fingerprint, $type, $fields, $add): bool {
+            $projections = new ProjectionManager;
+            $projections->lock();
+            if ($connection->getSchemaBuilder()->hasTable('permission_installation')) {
+                $projections->assertReady();
+                foreach (array_keys(config()->array('permissions.resources')) as $class) {
+                    if (is_string($class) && is_subclass_of($class, Model::class)) {
+                        $binding = Binding::resource($class);
+                        if ($binding->model === $this->name) {
+                            $projections->validateRule(PortableModel::compile($this->source(), $binding), $type, $fields);
+                        }
+                    }
+                }
+
+                $connection->statement("SET LOCAL zero.permissions_write = 'on'");
+            }
+
             $connection->table('permission_models')->insertOrIgnore(['id' => $this->name, 'fingerprint' => $fingerprint, 'revision' => 0]);
             $state = $connection->table('permission_models')->where('id', $this->name)->lockForUpdate()->first();
             if ($state === null || $state->fingerprint !== $fingerprint) {
@@ -176,6 +206,10 @@ final readonly class PermissionManager
                 $changed = $connection->table('permission_rules')->insertOrIgnore($row) > 0;
             } else {
                 $changed = $connection->table('permission_rules')->where('id', $id)->delete() > 0;
+            }
+
+            if ($connection->getDriverName() === 'pgsql' && $connection->getSchemaBuilder()->hasTable('permission_installation')) {
+                $connection->statement("SET LOCAL zero.permissions_write = 'off'");
             }
 
             if ($changed) {

@@ -17,6 +17,7 @@ final class PermissionServiceProvider extends ServiceProvider
     public function boot(): void
     {
         if ($this->app->runningInConsole()) {
+            $this->commands([RebuildPermissionsCommand::class]);
             $this->publishes([
                 __DIR__.'/../../config/permissions.php' => config_path('permissions.php'),
                 __DIR__.'/../../config/permissions' => config_path('permissions'),

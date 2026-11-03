@@ -121,4 +121,9 @@ final readonly class Binding
     {
         return (object) ['type' => $this->type, 'id' => self::id($resource->getKey()), ...self::facts($resource, $this->attributes)];
     }
+
+    public function projectionTable(): string
+    {
+        return 'permission_resources_'.substr(hash('sha256', $this->class), 0, 16);
+    }
 }
