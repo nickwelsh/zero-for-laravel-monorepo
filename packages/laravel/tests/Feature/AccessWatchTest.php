@@ -250,11 +250,14 @@ test('access registration runs under the projection transaction lock and never r
 
 test('browser session cookies survive access registration and the replayed web middleware', function (): void {
     /** @var PostgresTestCase $this */
+    $sessions = sys_get_temp_dir().'/zero-access-sessions-'.bin2hex(random_bytes(8));
+    File::ensureDirectoryExists($sessions);
     config([
         'app.key' => 'base64:'.base64_encode(str_repeat('a', 32)),
         'auth.providers.users.model' => PermissionUser::class,
         'session.driver' => 'file',
-        'session.files' => sys_get_temp_dir(),
+        'session.files' => $sessions,
+        'session.lottery' => [1, 1],
     ]);
     Auth::forgetGuards();
     $kernel = resolve(Kernel::class);
@@ -272,14 +275,14 @@ test('browser session cookies survive access registration and the replayed web m
         ->middleware(['web', 'auth', SubstituteBindings::class]);
     Route::post('/session-access', [AccessController::class, 'store'])
         ->middleware([CaptureTransportCookies::class, 'web', 'auth']);
-    $login = $this->postJson('/access-session-login')->assertOk();
-    $session = $login->json('session');
-    $cookie = $login->getCookie(config()->string('session.cookie'), false);
-    if (! is_string($session) || $cookie === null) {
-        throw new LogicException('Expected a browser session cookie.');
-    }
-
     try {
+        $login = $this->postJson('/access-session-login')->assertOk();
+        $session = $login->json('session');
+        $cookie = $login->getCookie(config()->string('session.cookie'), false);
+        if (! is_string($session) || $cookie === null) {
+            throw new LogicException('Expected a browser session cookie.');
+        }
+
         $value = $cookie->getValue();
         if ($value === null) {
             throw new LogicException('Expected an encrypted session cookie value.');
@@ -289,7 +292,7 @@ test('browser session cookies survive access registration and the replayed web m
         $this->withUnencryptedCookie($cookie->getName(), $value)
             ->postJson('/session-access', accessWatchInput())->assertCreated()->assertJsonPath('state', 'allowed');
     } finally {
-        File::delete(sys_get_temp_dir().'/'.$session);
+        File::deleteDirectory($sessions);
     }
 });
 

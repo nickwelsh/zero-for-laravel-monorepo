@@ -31,7 +31,14 @@ abstract class DevelopmentTestCase extends PostgresTestCase
 
         config()->set('zero.output', $this->fixture.'/generated.ts');
         config()->set('zero.dev.replica', $this->fixture.'/replica.db');
-        config()->set('zero.dev.port', 54848);
+
+        $socket = stream_socket_server('tcp://0.0.0.0:0');
+        if ($socket === false) {
+            throw new LogicException('Could not allocate a fixture port.');
+        }
+
+        config()->set('zero.dev.port', (int) explode(':', (string) stream_socket_get_name($socket, false))[1]);
+        fclose($socket);
     }
 
     protected function tearDown(): void
@@ -108,12 +115,13 @@ test('startup encodes PostgreSQL credentials, respects callback prefixes and for
 });
 
 test('occupied ports fail without starting or killing a process', function (): void {
-    $socket = stream_socket_server('tcp://0.0.0.0:54848');
+    $socket = stream_socket_server('tcp://0.0.0.0:0');
     if ($socket === false) {
-        throw new LogicException('Fixture port unavailable.');
+        throw new LogicException('Could not allocate a fixture port.');
     }
 
     try {
+        config()->set('zero.dev.port', (int) explode(':', (string) stream_socket_get_name($socket, false))[1]);
         Process::fake();
         expect(Artisan::call('zero:dev'))->toBe(1);
         expect(Artisan::output())->toContain('occupied');
