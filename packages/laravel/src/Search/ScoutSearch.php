@@ -7,7 +7,7 @@ namespace ZeroForLaravel\Search;
 use Closure;
 use Illuminate\Database\Eloquent\Model;
 use LogicException;
-use ZeroForLaravel\ZeroContext;
+use ZeroForLaravel\ResolvedContext;
 
 /** Optional Scout/Typesense metadata. It never exports credentials or authorization closures. */
 final class ScoutSearch
@@ -21,7 +21,7 @@ final class ScoutSearch
     /** @var list<string> */
     private array $filters = [];
 
-    /** @var (Closure(ZeroContext): string)|null */
+    /** @var (Closure(ResolvedContext): string)|null */
     private ?Closure $scope = null;
 
     /** @param class-string<Model> $model */
@@ -79,7 +79,7 @@ final class ScoutSearch
     }
 
     /** Required only for the authenticated transport. Scoped browser keys remain an alternative. */
-    /** @param Closure(ZeroContext): string $scope */
+    /** @param Closure(ResolvedContext): string $scope */
     public function scope(Closure $scope): self
     {
         $this->scope = $scope;
@@ -87,7 +87,7 @@ final class ScoutSearch
         return $this;
     }
 
-    public function filter(ZeroContext $context): string
+    public function filter(ResolvedContext $context): string
     {
         if (! $this->scope instanceof Closure) {
             throw new LogicException('The search transport requires an explicit metadata authorization scope.');

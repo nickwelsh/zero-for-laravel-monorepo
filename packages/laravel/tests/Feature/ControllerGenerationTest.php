@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace ZeroForLaravel\Tests\Feature;
 
+use Illuminate\Foundation\Auth\User;
+use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Validation\ValidationException;
 use Laravel\Surveyor\SurveyorServiceProvider;
@@ -11,19 +13,21 @@ use LogicException;
 use ZeroForLaravel\Generation\ControllerDiscovery;
 use ZeroForLaravel\Generation\ControllerQueryCompiler;
 use ZeroForLaravel\Generation\ControllerQueryGenerator;
+use ZeroForLaravel\Generation\RequestContract;
 use ZeroForLaravel\Generation\ZodSchemaDriver;
 use ZeroForLaravel\Metadata\ModelRegistry;
-use ZeroForLaravel\Query\Query;
 use ZeroForLaravel\Query\QueryCompiler;
 use ZeroForLaravel\Query\RegisteredQuery;
+use ZeroForLaravel\Query\ZeroQuery;
+use ZeroForLaravel\ResolvedContext;
+use ZeroForLaravel\Tests\Fixtures\ChoiceQueryRequest;
 use ZeroForLaravel\Tests\Fixtures\QueryController;
 use ZeroForLaravel\Tests\OwnerTestCase as TestCase;
-use ZeroForLaravel\ZeroContext;
 
 uses(TestCase::class);
 
 beforeEach(function (): void {
-    $alice = (new \Illuminate\Foundation\Auth\User)->setKeyType('string')->forceFill(['id' => 'alice']);
+    $alice = (new User)->setKeyType('string')->forceFill(['id' => 'alice']);
     request()->setUserResolver(fn () => $alice);
 });
 
@@ -31,13 +35,13 @@ test('finite FormRequest choices generate literal unions and runtime options wit
     app()->register(SurveyorServiceProvider::class);
     // QueryDirection is declared alongside this fixture controller.
     class_exists(QueryController::class);
-    $contract = \ZeroForLaravel\Generation\RequestContract::value(\ZeroForLaravel\Tests\Fixtures\ChoiceQueryRequest::class);
+    $contract = RequestContract::value(ChoiceQueryRequest::class);
     expect($contract->fields['direction']->choices())->toBe(['asc', 'desc'])
         ->and($contract->fields['priority']->choices())->toBe([2, 7])
         ->and($contract->fields['status']->choices())->toBe(['active', 'completed'])
         ->and($contract->fields['direction']->typescript())->toBe('"asc" | "desc" | null')
         ->and($contract->fields['direction']->optional)->toBeTrue();
-    $schema = (new ZodSchemaDriver)->object(['input' => 'request:'.\ZeroForLaravel\Tests\Fixtures\ChoiceQueryRequest::class]);
+    $schema = (new ZodSchemaDriver)->object(['input' => 'request:'.ChoiceQueryRequest::class]);
     expect($schema)->toContain('z.literal(2)', 'z.literal(7)', 'z.literal("active")', '.nullable().optional()');
 });
 
@@ -63,13 +67,14 @@ test('registered controller queries preserve input branches without executing th
 
     foreach (['', '0', 'actual'] as $title) {
         $query = $factory(['title' => $title]);
-        if (! $query instanceof Query) {
+        if (! $query instanceof ZeroQuery) {
             throw new LogicException('Expected query declaration.');
         }
 
-        expect(array_key_exists('where', $query->ast()))->toBe($title !== '');
+        $ast = (clone $query)->withoutGlobalScopes()->ast();
+        expect(array_key_exists('where', $ast))->toBe($title !== '');
         if ($title !== '') {
-            expect(data_get($query->ast(), 'where.right.value'))->toBe($title);
+            expect(data_get($ast, 'where.right.value'))->toBe($title);
         }
     }
 
@@ -88,7 +93,7 @@ test('registered controller queries preserve input branches without executing th
 
         $registered = $registrations[$definition->name()];
         $compiler = new QueryCompiler(resolve(ModelRegistry::class));
-        $context = new ZeroContext(['user_id' => 'alice']);
+        $context = new ResolvedContext(['user_id' => 'alice'], 'alice');
         $ast = $registered->compile(['title' => '0'], $context, $compiler);
         expect(json_encode(data_get($ast, 'where.conditions.0'), JSON_THROW_ON_ERROR))->toContain('permission_index', 'user:alice');
         expect(data_get($ast, 'where.conditions.2.right.value'))->toBe('0');
@@ -96,7 +101,7 @@ test('registered controller queries preserve input branches without executing th
             expect(fn (): array => $registered->compile($invalid, $context, $compiler))->toThrow(ValidationException::class);
         }
     } finally {
-        \Illuminate\Support\Facades\File::delete($path);
+        File::delete($path);
     }
 
     expect(fn () => resolve(ControllerQueryCompiler::class)->compile(QueryController::class, 'unsafe'))

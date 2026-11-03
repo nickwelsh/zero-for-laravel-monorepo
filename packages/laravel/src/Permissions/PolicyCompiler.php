@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace ZeroForLaravel\Permissions;
 
 use Illuminate\Auth\Access\Gate as LaravelGate;
+use Illuminate\Auth\Access\Response;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletingScope;
 use Illuminate\Support\Facades\Gate;
@@ -22,6 +23,7 @@ use PhpParser\ParserFactory;
 use ReflectionMethod;
 use ReflectionNamedType;
 use ReflectionProperty;
+use ZeroForLaravel\Concerns\HasPolicyVisibility;
 
 final class PolicyCompiler
 {
@@ -45,7 +47,7 @@ final class PolicyCompiler
         }
 
         $scope = new ReflectionMethod($model, 'scopeVisibleTo');
-        $supportedScope = new ReflectionMethod(\ZeroForLaravel\Concerns\HasPolicyVisibility::class, 'scopeVisibleTo');
+        $supportedScope = new ReflectionMethod(HasPolicyVisibility::class, 'scopeVisibleTo');
         if ($scope->getFileName() !== $supportedScope->getFileName() || $scope->getStartLine() !== $supportedScope->getStartLine()) {
             throw new LogicException('Custom visibleTo scopes are server-only; portable queries cannot replace application SQL.');
         }
@@ -96,7 +98,7 @@ final class PolicyCompiler
         $action = $ability;
         if ($return instanceof Expr\ConstFetch && in_array($return->name->toLowerString(), ['true', 'false'], true)) {
             $constant = $return->name->toLowerString() === 'true';
-        } elseif ($return instanceof Expr\StaticCall && $return->class instanceof Name && $return->class->toString() === \Illuminate\Auth\Access\Response::class
+        } elseif ($return instanceof Expr\StaticCall && $return->class instanceof Name && $return->class->toString() === Response::class
             && $return->name instanceof Identifier && in_array($return->name->name, ['allow', 'deny'], true) && $return->args === []) {
             $constant = $return->name->name === 'allow';
         } else {

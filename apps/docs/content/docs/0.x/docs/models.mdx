@@ -28,7 +28,8 @@ class Task extends Model
 }
 ```
 
-Register participating models and relationship targets explicitly in `zero.models`.
+Register participating models and relationship targets in `zero.models`, or discover
+models using `HasZeroQueries` from configured roots when that allowlist is empty.
 Relationships used by supported queries are discovered from ordinary Eloquent
 methods; no `zero()` method or `ZeroDefinition` is needed. Use
 `Task::zeroQuery()->visibleTo($request->user())` for protected reads, and scope related
@@ -46,15 +47,36 @@ PostgreSQL publication. Nonempty `$visible` is the default allowlist.
 explicit `ZeroColumns` allowlist. Accessors and appended properties are not stored
 columns and do not become replicated values.
 
-Primary keys, enabled timestamps, trusted context fields, and relationship
+Primary keys, enabled timestamps, query/default columns, and relationship
 keys must remain available. Missing required columns fail generation instead of
 silently expanding exposure. `$fillable` separately controls write fields; it does
-not hide replicated data. Ownership, primary keys, and lifecycle timestamps are
-not patchable business input.
+not hide replicated data. Primary keys and lifecycle timestamps are not patchable
+business input. Authorize ownership and association changes explicitly in controllers.
 
 Authority-only attributes may remain private in maintained permission projections.
-They do not need to become public business columns. Declare trusted creation fills
-separately in `zero.mutation_context`, keyed by model and column.
+They do not need to become public business columns.
+
+## Zero scopes and creation defaults
+
+Use `#[ZeroScope]` on a nonpublic method accepting `ZeroQuery` to define local
+query construction. It may return the supplied builder or `void`. Eloquent scopes
+remain separate. Zero builders are mutable; aliases share changes, and `clone`
+creates an independent branch. Use `with()`, `whereHas()` and `whereDoesntHave()`
+for relationships, and query-builder callbacks for grouped `where()` conditions.
+
+`ZeroGlobalScope` implementations can be registered using `#[ZeroScopedBy]` or
+`addZeroGlobalScope()`. Globals remain AND constraints outside caller OR groups.
+`withoutGlobalScope()` / `withoutGlobalScopes()` remove their predicates and defaults.
+These business scopes do not replace explicit policy visibility.
+
+`withAttributes(['user_id' => ZeroContext::USER_ID], asConditions: false)` supplies
+creation-only defaults from the application's typed context enum. Without
+`asConditions: false`, the attributes also constrain reads. Register a creator
+default in `booted()` with `addZeroGlobalScope()` when needed. Explicit creation
+attributes override defaults; updates do not receive them. These defaults are
+not an ownership authorization boundary. Context enum cases are symbolic;
+`ZeroContext::USER_ID->value` is just a literal string. See
+[configuration](./configuration.mdx) for the attributed resolver contract.
 
 UUID/ULID identities support generated optimistic creation. Numeric identities
 can use explicitly disabled optimism for authoritative creation. See

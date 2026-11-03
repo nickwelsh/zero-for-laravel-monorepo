@@ -6,6 +6,7 @@ namespace ZeroForLaravel\Console;
 
 use Illuminate\Console\Command;
 use ZeroForLaravel\Metadata\ModelRegistry;
+use ZeroForLaravel\Scopes\ScopeRegistry;
 
 final class ExposureCommand extends Command
 {
@@ -17,7 +18,7 @@ final class ExposureCommand extends Command
     {
         $report = [];
         foreach ($registry->all() as $model) {
-            $report[$model->name] = $model->toArray() + ['class' => $model->class, 'policyVisibility' => $model->policyVisibility];
+            $report[$model->name] = $model->toArray() + ['class' => $model->class, 'policyVisibility' => $model->policyVisibility, 'globalScopes' => array_keys(ScopeRegistry::globals($model))];
         }
 
         if ($this->option('json')) {
@@ -27,7 +28,8 @@ final class ExposureCommand extends Command
                 $this->info($model->name.' → '.$model->table);
                 $this->line('  Published: '.implode(', ', array_keys($model->columns)));
                 $this->line('  Visibility: '.($model->policyVisibility ? 'Laravel policy via visibleTo / captured Gate' : 'explicitly public'));
-                $this->line('  Server fills: '.json_encode($model->serverFill, JSON_THROW_ON_ERROR));
+                $this->line('  Global Zero scopes: '.implode(', ', array_keys(ScopeRegistry::globals($model))));
+                $this->line('  Creation defaults: '.json_encode($model->toArray()['creationDefaults'], JSON_THROW_ON_ERROR));
                 $this->line('  Relationships: '.implode(', ', array_keys($model->relations)));
             }
         }

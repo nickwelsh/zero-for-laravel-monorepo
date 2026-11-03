@@ -1,16 +1,15 @@
 <?php
 
 declare(strict_types=1);
-
-use ZeroForLaravel\Http\ContextResolver;
+use App\Enums\ZeroContext;
+use App\Zero\ResolveZeroContext;
 
 return [
-    // Explicit publication allowlist. An empty list publishes no application models.
+    // Empty discovers models using HasZeroQueries under app/Models.
     'models' => [],
+    'discovery' => [],
     // Separate publication opt-in from visibility. Missing policy bindings never mean public reads.
     'public_models' => [],
-    // Trusted creation fills, keyed by model class; never accepted as mutation input.
-    'mutation_context' => [],
     'output' => resource_path('js/zero/generated.ts'),
     // TypeScript module root for the opt-in WayfinderServiceProvider (not a filesystem path).
     'wayfinder_import' => '@/zero',
@@ -27,8 +26,9 @@ return [
     'api_key' => env('ZERO_API_KEY'),
     'route_prefix' => 'zero',
     'middleware' => ['api', 'auth'],
-    // Bind this class (or replace it) to add trusted tenant context.
-    'context_resolver' => ContextResolver::class,
+    // Application-owned enum and attributed resolver methods. Values are never sampled during generation.
+    'context' => ZeroContext::class,
+    'context_resolver' => ResolveZeroContext::class,
     'dev' => [
         'port' => (int) env('ZERO_PORT', 4848),
         'replica' => storage_path('app/zero/replica.db'),

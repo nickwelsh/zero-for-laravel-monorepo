@@ -52,7 +52,7 @@ visibility. Authorizing a root is not blanket permission for its related rows.
 ```php
 TodoList::zeroQuery()
     ->visibleTo($request->user())
-    ->related('todos', fn ($todos) => $todos->visibleTo($request->user()));
+    ->with('todos', fn ($todos) => $todos->visibleTo($request->user()));
 ```
 
 The default denied status is `permissions.denied_status` (403). Choose 404 globally
@@ -253,8 +253,10 @@ a browser prediction as authorization for reads, writes or watch registration.
 ## Migrating the previous API
 
 Remove model `zero()` methods and `ZeroDefinition` imports. Move publication to
-`zero.models`, deliberate public reads to `zero.public_models`, trusted creation
-fills to `zero.mutation_context`, and search to the registered search integration.
+`zero.models` or trait discovery, deliberate public reads to `zero.public_models`,
+creation defaults to `withAttributes()` with typed application context, and search
+to `zeroSearch()` or the registered search integration. Defaults do not enforce
+ownership: explicit creation attributes override defaults, and updates are not stamped.
 Replace scalar/relation authorization and server-scope closures with ordinary
 policies plus explicit visibility on every protected query path. Backfill old ACL
 tables into managed grants; do not maintain two permission authorities. Use

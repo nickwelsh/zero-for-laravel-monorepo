@@ -6,11 +6,15 @@ namespace ZeroForLaravel\Tests\Feature;
 
 use Carbon\CarbonImmutable;
 use Closure;
+use Illuminate\Contracts\Http\Kernel;
 use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Middleware\SubstituteBindings;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Schema;
@@ -26,7 +30,7 @@ use ZeroForLaravel\Access\AccessController;
 use ZeroForLaravel\Generation\ControllerQueryCompiler;
 use ZeroForLaravel\Generation\ControllerQueryGenerator;
 use ZeroForLaravel\Generation\ZodSchemaDriver;
-use ZeroForLaravel\Http\ContextResolver;
+use ZeroForLaravel\Http\CaptureTransportCookies;
 use ZeroForLaravel\Metadata\ModelRegistry;
 use ZeroForLaravel\Permissions\Casbin;
 use ZeroForLaravel\Permissions\PermissionSchema;
@@ -35,6 +39,7 @@ use ZeroForLaravel\Permissions\ProjectionManager;
 use ZeroForLaravel\Publication\PublicationManager;
 use ZeroForLaravel\Query\RegisteredQueries;
 use ZeroForLaravel\Query\RegisteredQuery;
+use ZeroForLaravel\Tests\Fixtures\ContextResolver;
 use ZeroForLaravel\Tests\Fixtures\PermissionAdminPolicy;
 use ZeroForLaravel\Tests\Fixtures\PermissionList;
 use ZeroForLaravel\Tests\Fixtures\PermissionQueryController;
@@ -206,8 +211,12 @@ beforeEach(function (): void {
 });
 
 afterEach(function (): void {
+    if (! getenv('ZERO_TEST_PG_DATABASE')) {
+        return;
+    }
+
     Sleep::fake(false);
-    \Illuminate\Support\Facades\Date::setTestNow();
+    Date::setTestNow();
     foreach (DB::select("SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND tablename LIKE 'permission_%'") as $row) {
         if ($row instanceof stdClass && is_string($row->tablename)) {
             Schema::dropIfExists($row->tablename);
@@ -248,13 +257,13 @@ test('browser session cookies survive access registration and the replayed web m
         'session.files' => sys_get_temp_dir(),
     ]);
     Auth::forgetGuards();
-    $kernel = resolve(\Illuminate\Contracts\Http\Kernel::class);
+    $kernel = resolve(Kernel::class);
     if (! $kernel instanceof \Illuminate\Foundation\Http\Kernel) {
         throw new LogicException('Expected the Laravel HTTP kernel.');
     }
 
-    $kernel->prependToMiddlewarePriority(\ZeroForLaravel\Http\CaptureTransportCookies::class);
-    Route::post('/access-session-login', function (): \Illuminate\Http\JsonResponse {
+    $kernel->prependToMiddlewarePriority(CaptureTransportCookies::class);
+    Route::post('/access-session-login', function (): JsonResponse {
         Auth::login(PermissionUser::findOrFail(42));
 
         return response()->json(['session' => session()->getId()]);
@@ -262,7 +271,7 @@ test('browser session cookies survive access registration and the replayed web m
     Route::get('/access-lists/{list}', [PermissionQueryController::class, 'show'])
         ->middleware(['web', 'auth', SubstituteBindings::class]);
     Route::post('/session-access', [AccessController::class, 'store'])
-        ->middleware([\ZeroForLaravel\Http\CaptureTransportCookies::class, 'web', 'auth']);
+        ->middleware([CaptureTransportCookies::class, 'web', 'auth']);
     $login = $this->postJson('/access-session-login')->assertOk();
     $session = $login->json('session');
     $cookie = $login->getCookie(config()->string('session.cookie'), false);
@@ -280,7 +289,7 @@ test('browser session cookies survive access registration and the replayed web m
         $this->withUnencryptedCookie($cookie->getName(), $value)
             ->postJson('/session-access', accessWatchInput())->assertCreated()->assertJsonPath('state', 'allowed');
     } finally {
-        \Illuminate\Support\Facades\File::delete(sys_get_temp_dir().'/'.$session);
+        File::delete(sys_get_temp_dir().'/'.$session);
     }
 });
 
@@ -447,17 +456,17 @@ test('quota expiry and release bound durable watches without losing generation i
 test('reconnect renews selected active owned watches but never abandoned foreign or expired leases', function (): void {
     config(['permissions.access.ttl_seconds' => 10]);
     $start = CarbonImmutable::now()->startOfSecond();
-    \Illuminate\Support\Facades\Date::setTestNow($start);
+    Date::setTestNow($start);
     $active = accessWatchId(\Pest\Laravel\postJson('/zero/access', accessWatchInput(generation: 'active')));
     $abandoned = accessWatchId(\Pest\Laravel\postJson('/zero/access', accessWatchInput(generation: 'abandoned')));
-    \Illuminate\Support\Facades\Date::setTestNow($start->addSeconds(8));
+    Date::setTestNow($start->addSeconds(8));
     expect(accessWatchStates(\Pest\Laravel\getJson('/zero/access/events?watches='.$active))[0]['state'])->toBe('allowed');
     expect(DB::table('permission_access_watches')->where('id', $active)->value('expires_at'))->toBe($start->addSeconds(18)->format('Y-m-d H:i:s'));
     \Pest\Laravel\actingAs(PermissionUser::findOrFail(84));
     \Pest\Laravel\getJson('/zero/access/events?watches='.$active)->assertNotFound();
     expect(DB::table('permission_access_watches')->where('id', $active)->value('expires_at'))->toBe($start->addSeconds(18)->format('Y-m-d H:i:s'));
     \Pest\Laravel\actingAs(PermissionUser::findOrFail(42));
-    \Illuminate\Support\Facades\Date::setTestNow($start->addSeconds(12));
+    Date::setTestNow($start->addSeconds(12));
     expect(accessWatchStates(\Pest\Laravel\getJson('/zero/access/events?watches='.$active))[0]['state'])->toBe('allowed');
     \Pest\Laravel\getJson('/zero/access/events?watches='.$abandoned)->assertNotFound();
     expect(DB::table('permission_access_watches')->where('id', $abandoned)->value('expires_at'))->toBe($start->addSeconds(10)->format('Y-m-d H:i:s'));

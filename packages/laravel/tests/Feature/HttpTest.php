@@ -15,9 +15,10 @@ use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Testing\PendingCommand;
 use LogicException;
-use ZeroForLaravel\Http\ContextResolver;
+use ZeroForLaravel\Context\ContextDefinition;
 use ZeroForLaravel\Metadata\ModelRegistry;
 use ZeroForLaravel\Tests\Fixtures\ControllerMutationController;
+use ZeroForLaravel\Tests\Fixtures\Module\OutsideTask;
 use ZeroForLaravel\Tests\Fixtures\QueryController;
 use ZeroForLaravel\Tests\Fixtures\Task;
 use ZeroForLaravel\Tests\HttpTestCase;
@@ -32,14 +33,14 @@ test('annotated mutations cannot bypass native preparation through ordinary HTTP
     expect(Task::count())->toBe(0);
 });
 
-test('context preserves numeric identifiers while protocol user id is a string', function (): void {
+test('context follows its declared type and protocol user id is a string', function (): void {
     /** @var HttpTestCase $this */
     $user = (new User)->forceFill(['id' => 42]);
     $request = Request::create('/zero/query', 'POST');
     $request->setUserResolver(fn () => $user);
 
-    $context = (new ContextResolver)($request);
-    $this->assertSame(42, $context->get('user_id'));
+    $context = ContextDefinition::configured()->resolve($request);
+    $this->assertSame('42', $context->get('user_id'));
     $this->assertSame('42', $context->userId());
 });
 
@@ -124,13 +125,10 @@ class InvalidContextResolver
     }
 }
 
-test('configured context resolvers must return trusted context', function (): void {
-    /** @var HttpTestCase $this */
+test('configured context resolvers must map every declared field', function (): void {
     config()->set('zero.context_resolver', InvalidContextResolver::class);
-    \Pest\Laravel\withoutExceptionHandling();
-    $this->withHeader('X-Api-Key', 'private-test-secret')
-        ->postJson('/zero/query', ['transform', []]);
-})->throws(LogicException::class, 'must return ZeroContext');
+    ContextDefinition::configured();
+})->throws(LogicException::class, 'Missing #[ResolvesContext]');
 
 test('automatic publication synchronization skips SQLite migrations', function (): void {
     /** @var HttpTestCase $this */
@@ -147,7 +145,7 @@ test('react generation binds the contracts and preserves editable connection con
         $command = $this->artisan('zero:generate', ['--output' => $path, '--react' => true]);
         $this->assertInstanceOf(PendingCommand::class, $command);
         $command->assertSuccessful()->run();
-        expect(file_get_contents($directory.'/generated.react.ts'))->toContain('createZeroProvider(schema, mutators, options, true, {actions, preparation})', '"./generated"');
+        expect(file_get_contents($directory.'/generated.react.ts'))->toContain('createZeroProvider<Context>(schema, mutators, options, true, {actions, preparation}, contextContract)', '"./generated"');
         file_put_contents($directory.'/zero.config.ts', '// Application-owned options');
         $command = $this->artisan('zero:generate', ['--output' => $path, '--react' => true]);
         $this->assertInstanceOf(PendingCommand::class, $command);
@@ -169,14 +167,17 @@ test('react generation binds the contracts and preserves editable connection con
     }
 });
 
-test('only explicitly allowlisted modular models are exposed and discovery roots are ignored', function (): void {
+test('trait-based modular discovery still requires explicit read visibility and respects the model allowlist', function (): void {
     config()->set('zero.models', []);
     config()->set('zero.discovery', [['path' => __DIR__.'/../Fixtures/Module', 'namespace' => 'ZeroForLaravel\\Tests\\Fixtures\\Module']]);
 
     app()->forgetInstance(ModelRegistry::class);
-    expect(resolve(ModelRegistry::class)->all())->toBe([]);
-    config(['zero.models' => [\ZeroForLaravel\Tests\Fixtures\Module\OutsideTask::class],
-        'zero.public_models' => [\ZeroForLaravel\Tests\Fixtures\Module\OutsideTask::class]]);
+    expect(fn (): ModelRegistry => resolve(ModelRegistry::class))->toThrow(LogicException::class, 'explicit zero.public_models');
+    config(['zero.public_models' => [OutsideTask::class]]);
+    app()->forgetInstance(ModelRegistry::class);
+    expect(array_keys(resolve(ModelRegistry::class)->all()))->toBe(['OutsideTask']);
+    config(['zero.models' => [OutsideTask::class],
+        'zero.public_models' => [OutsideTask::class]]);
     app()->forgetInstance(ModelRegistry::class);
     $registry = resolve(ModelRegistry::class);
     expect(array_keys($registry->all()))->toBe(['OutsideTask']);

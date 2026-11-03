@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace ZeroForLaravel\Generation\Mutations;
 
+use Carbon\CarbonImmutable;
 use DateTimeInterface;
 use LogicException;
 use PHPStan\PhpDocParser\Ast\ConstExpr\ConstExprStringNode;
@@ -221,7 +222,7 @@ final readonly class ValueContract
                 throw new LogicException('Expected a validated date value.');
             }
 
-            $date = \Carbon\CarbonImmutable::parse($value, 'UTC')->utc();
+            $date = CarbonImmutable::parse($value, 'UTC')->utc();
 
             return $date->format($this->kind === 'dateOnly' ? 'Y-m-d' : 'Y-m-d\TH:i:s.v\Z');
         }

@@ -7,13 +7,15 @@ namespace ZeroForLaravel\Mutation;
 use Closure;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\UniqueConstraintViolationException;
+use Illuminate\Support\Facades\Date;
 use LogicException;
 use Ramsey\Uuid\Uuid;
-use ZeroForLaravel\ContextField;
+use ZeroForLaravel\Context\ContextReference;
 use ZeroForLaravel\Metadata\ModelMetadata;
 use ZeroForLaravel\Metadata\ModelRegistry;
+use ZeroForLaravel\Query\ZeroQuery;
+use ZeroForLaravel\ResolvedContext;
 use ZeroForLaravel\Support\Input;
-use ZeroForLaravel\ZeroContext;
 
 /** Invocation-local stable metadata. Never placed in FormRequest business input. */
 final readonly class Mutation
@@ -22,7 +24,7 @@ final readonly class Mutation
      * @param  array{ids:array<string,string>,timestamp:int}  $prepared
      * @param  Closure(Model):Model|null  $rebind
      */
-    public function __construct(private ModelRegistry $models, private array $prepared, private ZeroContext $context, private ?Closure $rebind = null) {}
+    public function __construct(private ModelRegistry $models, private array $prepared, private ResolvedContext $context, private ?Closure $rebind = null) {}
 
     /**
      * @template T
@@ -35,26 +37,9 @@ final readonly class Mutation
         return $guard();
     }
 
-    /** @return array<string, string>
-     */
-    public static function contextFills(string $class): array
+    public function context(string $field): string|int|float|bool|null
     {
-        $configured = config()->array('zero.mutation_context', [])[$class] ?? [];
-        if (! is_array($configured)) {
-            throw new LogicException('Mutation context fills must be configured as a column map.');
-        }
-
-        $fills = [];
-        foreach ($configured as $column => $context) {
-            if (! is_string($column) || ! preg_match('/^[a-zA-Z_][a-zA-Z0-9_]*$/D', $column)
-                || (! is_string($context) && ! $context instanceof ContextField)) {
-                throw new LogicException('Mutation context fills must map database columns to trusted context keys.');
-            }
-
-            $fills[$column] = $context instanceof ContextField ? $context->value : $context;
-        }
-
-        return $fills;
+        return $this->context->get($field);
     }
 
     public function timestamp(): int
@@ -86,19 +71,19 @@ final readonly class Mutation
      *
      * @param  class-string<T>  $class
      * @param  array<string,mixed>  $data
+     * @param  array<string,mixed>|null  $defaults
      * @return T
      */
-    public function create(string $class, array $data, string $key): Model
+    public function create(string $class, array $data, string $key, ?array $defaults = null): Model
     {
         $meta = $this->metadata($class);
         $model = new $class;
         $this->connection($model);
         // Preserve Eloquent mass assignment; prepared keys are not request fields.
+        $defaults ??= (new ZeroQuery($meta, $this->models))->pendingAttributes();
+        $data = Input::object(ContextReference::resolve(ContextReference::normalize([...$defaults, ...$data]), $this->context), 'data');
         Input::keys($data, $meta->writable, 'data');
         $model->fill($data);
-        foreach ($meta->serverFill as $field => $source) {
-            $model->setAttribute($field, $this->context->get($source));
-        }
 
         if ($meta->idGenerator !== null) {
             $site = array_key_exists($key, $this->prepared['ids']) ? $key : 'key:'.$key;
@@ -110,7 +95,7 @@ final readonly class Mutation
         }
 
         foreach (array_filter([$meta->createdAt, $meta->updatedAt]) as $field) {
-            $model->setAttribute($field, \Illuminate\Support\Facades\Date::createFromTimestampMs($this->timestamp()));
+            $model->setAttribute($field, Date::createFromTimestampMs($this->timestamp()));
         }
 
         if (! $model->saveOrFail()) {
@@ -145,9 +130,9 @@ final readonly class Mutation
         $this->connection($model);
         $meta = $this->metadata($model::class);
         Input::keys($data, $meta->writable, 'data');
-        $model->fill($data);
+        $model->fill(Input::object(ContextReference::resolve(ContextReference::normalize($data), $this->context), 'data'));
         if ($meta->updatedAt !== null) {
-            $model->setAttribute($meta->updatedAt, \Illuminate\Support\Facades\Date::createFromTimestampMs($this->timestamp()));
+            $model->setAttribute($meta->updatedAt, Date::createFromTimestampMs($this->timestamp()));
         }
 
         if (! $model->saveOrFail()) {
@@ -166,6 +151,7 @@ final readonly class Mutation
      */
     public function findUnique(string $class, array $unique): ?Model
     {
+        $unique = Input::object(ContextReference::resolve(ContextReference::normalize($unique), $this->context), 'unique');
         $model = new $class;
         $this->connection($model);
         UniqueMutationKey::validate($this->metadata($class), array_keys($unique));

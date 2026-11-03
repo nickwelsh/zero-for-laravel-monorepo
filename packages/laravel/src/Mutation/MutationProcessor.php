@@ -11,8 +11,8 @@ use Illuminate\Validation\ValidationException;
 use LogicException;
 use Throwable;
 use ZeroForLaravel\Metadata\ModelRegistry;
+use ZeroForLaravel\ResolvedContext;
 use ZeroForLaravel\Support\Input;
-use ZeroForLaravel\ZeroContext;
 
 /** @phpstan-type Invocation array{clientID: non-empty-string, name: non-empty-string, type: 'custom', id: int, timestamp: numeric-string|int|float, args: list<mixed>} */
 final readonly class MutationProcessor
@@ -23,7 +23,7 @@ final readonly class MutationProcessor
      * @param  array<string, mixed>  $params
      * @return array<string, mixed>
      */
-    public function process(mixed $body, array $params, ZeroContext $context): array
+    public function process(mixed $body, array $params, ResolvedContext $context): array
     {
         try {
             $body = Input::object($body, 'push');
@@ -87,7 +87,7 @@ final readonly class MutationProcessor
      * @param  Invocation  $mutation
      * @return array<string, mixed>
      */
-    private function apply(string $group, array $mutation, ZeroContext $context): array
+    private function apply(string $group, array $mutation, ResolvedContext $context): array
     {
         $id = ['clientID' => $mutation['clientID'], 'id' => $mutation['id']];
         $failure = null;

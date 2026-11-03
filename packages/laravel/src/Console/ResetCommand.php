@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace ZeroForLaravel\Console;
 
 use Illuminate\Console\Command;
+use Illuminate\Database\Connection;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Process;
 use LogicException;
@@ -153,7 +154,7 @@ final class ResetCommand extends Command
 
             return self::FAILURE;
         } finally {
-            if ($advisory && $connection instanceof \Illuminate\Database\Connection) {
+            if ($advisory && $connection instanceof Connection) {
                 $connection->select('SELECT pg_advisory_unlock(hashtextextended(?, 0))', ['zero-for-laravel:dev:'.config()->string('zero.app_id')]);
             }
 

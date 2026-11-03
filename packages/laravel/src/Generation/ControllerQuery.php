@@ -4,12 +4,14 @@ declare(strict_types=1);
 
 namespace ZeroForLaravel\Generation;
 
+use Illuminate\Database\Eloquent\Model;
+
 /** A query extracted without invoking its HTTP controller. */
 final readonly class ControllerQuery
 {
     /** @param array<string, string> $parameters
      * @param  array<string, string>  $ordinary
-     * @param  list<array{parameter: string, class: class-string<\Illuminate\Database\Eloquent\Model>, ability: string, fingerprint: string}>  $guards
+     * @param  list<array{parameter: string, class: class-string<Model>, ability: string, fingerprint: string}>  $guards
      */
     public function __construct(
         public string $action,
@@ -33,11 +35,11 @@ final readonly class ControllerQuery
 
     public function php(): string
     {
-        return 'static fn (array $args): \\ZeroForLaravel\\Query\\Query => '.$this->expression->emit(false);
+        return 'static fn (array $args): \\ZeroForLaravel\\Query\\ZeroQuery => '.$this->expression->emit(false);
     }
 
     public function typescript(): string
     {
-        return '({args}) => '.$this->expression->emit(true);
+        return '({args, ctx}) => '.$this->expression->emit(true);
     }
 }

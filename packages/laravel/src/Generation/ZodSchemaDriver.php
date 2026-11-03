@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace ZeroForLaravel\Generation;
 
 use LogicException;
+use ZeroForLaravel\Query\QueryInput;
 
 final readonly class ZodSchemaDriver implements SchemaDriver
 {
@@ -72,10 +73,10 @@ final readonly class ZodSchemaDriver implements SchemaDriver
         }
 
         if (str_starts_with($type, 'enum:')) {
-            return 'z.union(['.implode(', ', array_map(fn (string|int $value): string => 'z.literal('.json_encode($value, JSON_THROW_ON_ERROR).')', \ZeroForLaravel\Query\QueryInput::enumValues($type))).'])';
+            return 'z.union(['.implode(', ', array_map(fn (string|int $value): string => 'z.literal('.json_encode($value, JSON_THROW_ON_ERROR).')', QueryInput::enumValues($type))).'])';
         }
 
-        return match (\ZeroForLaravel\Query\QueryInput::scalarType($type)) {
+        return match (QueryInput::scalarType($type)) {
             'string' => 'z.string()',
             'bool' => 'z.boolean()',
             'float' => 'z.number().finite()',

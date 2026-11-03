@@ -5,10 +5,18 @@ description: The checked v0.5 subset and native integration boundaries.
 
 - Pin Zero client and cache to **1.11.3**.
 - One upstream connection, unprefixed public tables, one model per table, unique
-  model short names, and explicitly registered relationship targets.
+  model short names, and independently opted-in relationship targets. Discovery
+  uses `HasZeroQueries`, or register models explicitly in `zero.models`.
 - Query construction follows native ZQL; arbitrary Eloquent SQL and arbitrary
   PHP-to-TypeScript translation are not supported. Unsupported controller code
   fails generation rather than running during analysis.
+- `ZeroQuery` is a mutable, separate builder, not an Eloquent builder. Portable
+  local/global scopes, `with` includes, and `whereHas` filters are checked during
+  generation. Unsupported relationship constraints fail; they do not auto-enroll
+  targets, expand column visibility, or silently lose constraints.
+- Application context uses a configured string-backed enum and exactly one public
+  attributed resolver method per case. Native scalar/nullable return types define
+  the contract; generation reflects them without invoking resolver methods.
 - Generated mutations support checked expressions, branching, bounded keyed loops,
   shared helpers, transaction reads/writes, authorization guards, and JSON results.
   Use custom or disabled optimism deliberately for unsupported PHP.
@@ -21,10 +29,65 @@ description: The checked v0.5 subset and native integration boundaries.
   absence is not proof of authoritative nonexistence, and there are no implicit
   browser transaction savepoints for late fallback.
 - Gates, policies, middleware, FormRequest hooks, and full validation remain
-  authoritative PHP. Local prediction is not an access-control boundary.
+  authoritative PHP. Arbitrary hooks/events do not automatically run optimistically;
+  use custom or disabled optimism for nonportable behavior. Local prediction is
+  not an access-control boundary.
 - External work needs application-owned after-commit/outbox and idempotency
   discipline. Native outcome recovery is not a user-facing persistent inbox or
   restoration of JavaScript promises after a browser reload.
 
 Generated names include contract fingerprints. Deploy matching PHP and TypeScript
 artifacts; unknown/stale operation contracts reject instead of acquiring new semantics.
+
+## Migrating existing 0.x applications
+
+This is a clean breaking 0.x API change, not a compatibility layer. There is no
+`ZeroDefinition` fallback and no `related()` alias. Move the old declarations to
+their new owners before regenerating:
+
+| Previous declaration                               | Replacement                                                                                                                                                          |
+| -------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `public static zero(): ZeroDefinition`             | Opt models in with `HasZeroQueries` or `zero.models`; use Zero scopes, column attributes, and normal Eloquent relationships.                                         |
+| `ContextField::UserId` or magic context references | Application enum case such as `App\Enums\ZeroContext::USER_ID` in supported value positions; `->value` deliberately means a literal.                                 |
+| Package `ZeroContext` runtime values               | `ResolvedContext`; keep this distinct from the application-owned context enum.                                                                                       |
+| Resolver returning an untyped context bag          | Configure `context` and `context_resolver`; one public `#[ResolvesContext(...)]` method per case with a native scalar/nullable return type.                          |
+| Implicit user context from identity                | Pass both `userID` and generated typed `context`; Laravel independently resolves trusted values.                                                                     |
+| `authorize('user_id', '=', ...)`                   | An ordinary Laravel policy with a portable Casbin owner binding and explicit `visibleTo($user)` on protected queries.                                                |
+| `authorizeRelation('memberships')`                 | Backfill existing ACLs into managed scoped grants; use the policy's `view` ability through `visibleTo($user)` on roots and related paths.                            |
+| `publicReads()`                                    | Explicit `zero.public_models` allowlisting; still review columns and write authorization.                                                                            |
+| Mandatory `enforceServerScope(...)`                | Ordinary policies and explicit visibility for authorization; checked Zero global scopes for portable business constraints.                                           |
+| `serverFill` / `fillFromContext`                   | `withAttributes([...])` creation defaults; use `asConditions: false` for defaults that must not filter reads. These are overridable, not immutable field protection. |
+| `relations('todos')` metadata                      | Supported Eloquent relationship methods between opted-in models; targets and required keys remain explicit.                                                          |
+| `related('todos', callback)`                       | `with('todos', callback)` for includes; `whereHas('todos', callback)` filters parent rows. Native `related`/`EXISTS` stay internal.                                  |
+| Immutable builder reuse                            | Mutable `ZeroQuery`; explicitly clone a base query before independent branches.                                                                                      |
+| Eloquent local scopes reused as Zero scopes        | Protected `#[ZeroScope]` methods taking `ZeroQuery`; call `Todo::completed()` or `Todo::zeroQuery()->completed()`. Eloquent relations stay Eloquent.                 |
+| Search on `ZeroDefinition`                         | Optional `public static zeroSearch(): ScoutSearch`; Typesense authorization remains separate.                                                                        |
+
+Migration checklist:
+
+1. Define and configure the [context enum and resolver](./configuration.mdx#typed-context-and-resolver).
+   Check every case has one method, and pass all generated context fields to the provider.
+2. Move authorization into [ordinary policies and explicit visibility](./authorization.mdx#one-policy-for-rest-and-zero).
+   Add `HasPolicyVisibility`; use `visibleTo($user)` on every protected root,
+   include and existence path. Keep business constraints in checked Zero scopes.
+   Audit scope removals: removing a business scope removes its conditions and
+   defaults, but cannot remove explicit policy visibility.
+3. Preserve shared access by backfilling old memberships into
+   [managed scoped grants](./authorization.mdx#configure-bindings-and-managed-grants).
+   Assign owner and reader roles in each list domain; do not add an owner-only
+   filter that excludes collaborators. Install/rebuild private projections and
+   use managed transactional grant writes as the single permission authority.
+4. Convert relationship declarations and includes, keep target models opted in,
+   review private-column allowlists, and move local query helpers to `#[ZeroScope]`.
+   Clone branched builders explicitly and check higher-order OR grouping.
+5. Audit [creation defaults](./mutations.mdx#creation-defaults): global registry
+   order, then root/local call order, then explicit creation data. Nested predicates
+   and higher-order OR scopes supply no parent defaults. Defaults apply to Zero
+   create branches, not updates or ordinary Eloquent. Fields absent from
+   FormRequest `validated()` are not caller input; trusted explicit values can win.
+6. Keep write policies, Gates, and association checks. Do not rely on defaults,
+   removable scopes, or arbitrary FormRequest hooks/events to enforce optimism.
+   Choose custom/disabled optimism for nonportable PHP.
+7. Regenerate matching PHP/client contracts once the migrated application is ready,
+   review publication changes, and verify member/nonmember reads, related scopes,
+   scope removal, creation overrides, and unchanged update behavior before rollout.

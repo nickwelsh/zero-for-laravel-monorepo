@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace ZeroForLaravel\Generation;
 
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
+use Laravel\Surveyor\Analyzed\ClassLikeResult;
 use Laravel\Surveyor\Analyzer\Analyzer;
 use Laravel\Surveyor\Types\ArrayType;
 use Laravel\Surveyor\Types\StringType;
@@ -32,7 +34,7 @@ final class RequestContract
             $analyzer = resolve(Analyzer::class);
             $analyzer->analyzeClass($class);
             $result = $analyzer->result();
-            $type = $result instanceof \Laravel\Surveyor\Analyzed\ClassLikeResult ? $result->getMethod('rules')?->returnType() : null;
+            $type = $result instanceof ClassLikeResult ? $result->getMethod('rules')?->returnType() : null;
         }
 
         if (! $type instanceof ArrayType) {
@@ -153,7 +155,7 @@ final class RequestContract
                 if ($rule->value instanceof Node\Scalar\String_) {
                     $values[] = new StringType($rule->value->value);
                 } elseif (! $rule->value instanceof Node\Expr\StaticCall || ! $rule->value->class instanceof Node\Name
-                    || $rule->value->class->toString() !== \Illuminate\Validation\Rule::class
+                    || $rule->value->class->toString() !== Rule::class
                     || ! $rule->value->name instanceof Node\Identifier || ! in_array($rule->value->name->name, ['enum', 'in'], true)) {
                     return null;
                 }

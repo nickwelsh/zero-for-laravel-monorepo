@@ -27,11 +27,31 @@ contains installation commands, migrations, authentication, sharing, and the loc
 Composer/pnpm wiring. Its application requires PHP 8.4.1+.
 
 Configure Laravel's PostgreSQL connection and migrate the application's tables.
-Define each participating model's visibility and add `HasZeroQueries`, then declare
-queries and mutations on registered controller routes. Generate against that database:
+Define the application's string-backed `App\Enums\ZeroContext` enum and attributed
+resolver, then set both `context` and `context_resolver` in `config/zero.php`.
+Follow the [typed context setup](./configuration.mdx#typed-context-and-resolver);
+generation reflects signatures rather than executing resolver methods.
+
+Opt models in with `HasZeroQueries` discovery or an explicit `zero.models` list.
+Define column allowlists and supported Eloquent relationships. Protect private
+models with ordinary Laravel policies, `HasPolicyVisibility`, and explicit
+`visibleTo($request->user())` on each protected query path. Public models must be
+listed deliberately in `zero.public_models`. See
+[policy bindings and managed grants](./authorization.mdx#configure-bindings-and-managed-grants)
+for RBAC/ABAC setup and transactional sharing. Zero global scopes remain useful
+for business constraints and creation defaults; they do not replace visibility.
+
+Publish permissions configuration and migrations, configure the subject/resource
+bindings, migrate, and backfill any existing ACLs into managed grants. Rebuild the
+private projections before generation. Declare queries and mutations on registered
+controller routes, then generate against that database:
 
 ```sh
 php artisan vendor:publish --tag=zero-config
+php artisan vendor:publish --tag=permissions-config
+php artisan vendor:publish --tag=permissions-migrations
+php artisan migrate
+php artisan permissions:rebuild
 php artisan zero:generate --react
 php artisan zero:sync-publication --dry-run
 ```
@@ -44,7 +64,10 @@ the [cache and authentication boundary](./replication.mdx#configure-zero-cache),
 and set the public cache URL in the generated editable `zero.config.ts`.
 For local startup and diagnostics, see [local development](./local-development.mdx).
 
-Define [model visibility](./models.mdx), declare [controller queries](./queries.mdx),
+Define [models and scopes](./models.mdx), declare [controller queries](./queries.mdx),
 and register [controller mutations](./mutations.mdx). Install the
-[Inertia adapter](./react.mdx) in the page resolver. Deploy generated PHP and
-TypeScript together, and use `zero:generate --check` to detect stale output.
+[Inertia adapter](./react.mdx) in the page resolver and pass both `userID` and typed
+`context` to the provider. Keep policies, Gates, and FormRequest association checks;
+creation defaults do not authorize writes. Deploy generated PHP and TypeScript
+together, and use `zero:generate --check` to detect stale output. Existing 0.x
+applications should follow the [breaking migration mappings](./constraints.mdx#migrating-existing-0x-applications).

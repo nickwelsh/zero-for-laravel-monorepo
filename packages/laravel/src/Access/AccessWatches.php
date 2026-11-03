@@ -18,13 +18,13 @@ use LogicException;
 use stdClass;
 use Symfony\Component\HttpKernel\Exception\HttpExceptionInterface;
 use Throwable;
+use ZeroForLaravel\Context\ContextDefinition;
 use ZeroForLaravel\Permissions\Binding;
 use ZeroForLaravel\Permissions\ProjectionManager;
 use ZeroForLaravel\Query\QueryCompiler;
 use ZeroForLaravel\Query\RegisteredQueries;
 use ZeroForLaravel\Query\RegisteredQuery;
 use ZeroForLaravel\Support\Input;
-use ZeroForLaravel\ZeroContext;
 
 /**
  * Server-only registrations. The projection lock serializes Gates and registration
@@ -226,9 +226,8 @@ final readonly class AccessWatches
     {
         $actor = $this->freshActor($request);
         $this->asActor($request, $actor, function () use ($request, $query, $args, $actor): void {
-            $resolver = resolve(config()->string('zero.context_resolver'));
-            $identity = is_callable($resolver) ? $resolver($request) : null;
-            if (! $identity instanceof ZeroContext || $identity->userId() !== Binding::id($actor->getAuthIdentifier())) {
+            $identity = ContextDefinition::configured()->resolve($request);
+            if ($identity->userId() !== Binding::id($actor->getAuthIdentifier())) {
                 throw new LogicException('Access watches require the authenticated permission subject identity.');
             }
 

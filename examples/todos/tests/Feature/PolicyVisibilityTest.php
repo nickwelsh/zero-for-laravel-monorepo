@@ -11,7 +11,7 @@ use ZeroForLaravel\Generation\ControllerQueryCompiler;
 use ZeroForLaravel\Generation\TypeScriptGenerator;
 use ZeroForLaravel\Metadata\ModelRegistry;
 use ZeroForLaravel\Query\QueryCompiler;
-use ZeroForLaravel\ZeroContext;
+use ZeroForLaravel\ResolvedContext;
 
 test('dashboard declarations explicitly protect roots and descendants without exposing authority columns', function () {
     $queries = app(ControllerQueryCompiler::class)->compile(DashboardController::class, 'index');
@@ -45,9 +45,9 @@ test('maintained list and todo visibility agrees with Gates through sharing revo
     }
 
     $compiler = new QueryCompiler(app(ModelRegistry::class));
-    $context = new ZeroContext(['user_id' => $reader->id]);
+    $context = new ResolvedContext(['user_id' => $reader->id], (string) $reader->id);
     $ast = $compiler->compileDeclaration(TodoList::zeroQuery()->visibleTo($reader)
-        ->related('todos', fn ($todos) => $todos->visibleTo($reader)), $context);
+        ->with('todos', fn ($todos) => $todos->visibleTo($reader)), $context);
     $encoded = json_encode($ast, JSON_THROW_ON_ERROR);
     expect($encoded)->toContain('permission_resources_', 'permission_index', 'user:'.$reader->id);
 

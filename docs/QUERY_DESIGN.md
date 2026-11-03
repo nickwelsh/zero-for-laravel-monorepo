@@ -12,6 +12,16 @@ decoded `QueryData` props, editable FormRequest inputs, URL synchronization, and
 supported constraints are documented in [the contract guide](model-api.md) and
 [the React guide](../apps/docs/content/docs/0.x/docs/react.mdx).
 
+The accepted 0.x context/scopes/relationships redesign supersedes the original
+builder spellings and immutability decision: use mutable `ZeroQuery`, explicit
+clones for branches, portable local/global Zero scopes, `with` includes, and
+`whereHas` parent filters. Application-owned context enums and attributed resolver
+signatures replace package context keys; runtime values use `ResolvedContext`.
+Relationships come from opted-in Eloquent models, without silent target enrollment
+or private-column exposure. Native ZQL remains the compilation target, not a
+promise to translate arbitrary Eloquent or PHP. See the
+[migration mappings](../apps/docs/content/docs/0.x/docs/constraints.mdx#migrating-existing-0x-applications).
+
 ## 1. Agreed decisions
 
 | Area                | Decision                                                                                                                                                                                                       |
@@ -159,8 +169,8 @@ The inventory includes, but is not limited to:
 | Column comparisons   | Equality shorthand and explicit operators, with the native operand restrictions.                                            |
 | Operators            | The full native operator set, including membership, string matching, null tests, and their negations.                       |
 | Expressions          | `cmp`, `cmpLit`, `and`, `or`, `not`, and nested expression factories.                                                       |
-| Relationship filters | `whereExists`, expression-level `exists`, nested refinements, and supported options.                                        |
-| Related results      | `related`, nested related queries, relationship cardinality, and callback refinements.                                      |
+| Relationship filters | Laravel-facing `whereHas` lowers to native existence predicates, with checked refinements.                                  |
+| Related results      | Laravel-facing `with` lowers to native related queries, with relationship cardinality and callback refinements.             |
 | Ordering             | Multiple order terms and native ordering behavior.                                                                          |
 | Bounds               | `limit`, `start`, and inclusive/exclusive cursor behavior.                                                                  |
 | Cardinality          | Collection results and `.one()`, including no-match behavior.                                                               |
@@ -173,11 +183,11 @@ ZQL runtime operations such as materialization, preloading, and running client q
 
 ### 3.2 Expressions and related data
 
-The PHP form should remain recognizable to someone familiar with native ZQL:
+The Laravel-facing form uses includes and parent filters over checked relationships:
 
 ```php
 use ZeroForLaravel\Query\ExpressionBuilder;
-use ZeroForLaravel\Query\Query;
+use ZeroForLaravel\Query\ZeroQuery;
 
 $query = Person::zeroQuery()
     ->where(fn (ExpressionBuilder $expression) => $expression->and(
@@ -187,26 +197,26 @@ $query = Person::zeroQuery()
             $expression->cmp('last_name', 'ILIKE', 'ann%'),
         ),
     ))
-    ->whereExists('notes', fn (Query $notes) => $notes
+    ->whereHas('notes', fn (ZeroQuery $notes) => $notes
         ->where('pinned', true))
-    ->related('notes', fn (Query $notes) => $notes
+    ->with('notes', fn (ZeroQuery $notes) => $notes
         ->orderBy('created_at', 'desc')
         ->orderBy('id', 'desc')
         ->limit(5))
     ->orderBy('id', 'asc');
 ```
 
-The example uses proposed builder class names and assumes a `notes` relationship and a `PersonStatus::Active` case. Native operator spellings are canonical. Any accepted Laravel-style aliases, such as lowercase `like`, must normalize explicitly without changing behavior.
+The example assumes a supported Eloquent `notes` relationship between opted-in models and a `PersonStatus::Active` domain enum case. Native operator spellings are canonical. Only checked expression/relationship constraints are portable; unsupported constructs fail rather than silently changing behavior. Native `related` remains internal, not a public alias.
 
-### 3.3 Immutability and missing values
+### 3.3 Mutability and missing values
 
-Builder operations return new query values, matching native ZQL's compositional model. Reusing a base query must not accidentally modify another declaration:
+The accepted redesign uses a mutable PHP `ZeroQuery` builder, separate from Eloquent. Explicitly clone a base query before creating independent declarations:
 
 ```php
 $baseQuery = Person::zeroQuery()->where('status', PersonStatus::Active);
 
-$ascending = $baseQuery->orderBy('created_at', 'asc');
-$descending = $baseQuery->orderBy('created_at', 'desc');
+$ascending = (clone $baseQuery)->orderBy('created_at', 'asc');
+$descending = (clone $baseQuery)->orderBy('created_at', 'desc');
 ```
 
 PHP has no JavaScript `undefined` value. The internal representation therefore needs a distinct missing-value state where native semantics require one. It must not collapse absent input, explicit `null`, and an ordinary scalar into the same value. Public helper names for expressing optional operands remain an API spelling detail.
@@ -670,7 +680,7 @@ For example, after a record moves out of a parent or tenant, the subscription mu
 
 Automatically convert eligible route-bound models that are returned directly as page props and are configured for Zero. Preserve ordinary Inertia serialization for models outside the integration's eligibility rules. Do not indiscriminately turn every Eloquent object, collection, resource, or nested array into a subscription.
 
-Loaded Eloquent relations, ad hoc attributes, and computed accessors on the bound instance are not automatically live query includes. Use an explicit query with `related()` when the page needs related live data. A future explicit snapshot escape hatch can retain ordinary Inertia data when needed; its public spelling is not specified here.
+Loaded Eloquent relations, ad hoc attributes, and computed accessors on the bound instance are not automatically live query includes. Use an explicit Zero query with `with()` when the page needs related live data. Eloquent relationship builders remain Eloquent and cannot invoke Zero scopes. A future explicit snapshot escape hatch can retain ordinary Inertia data when needed; its public spelling is not specified here.
 
 If binding cannot find the model during the HTTP request, Laravel's usual 404 or configured missing callback applies. If the record is deleted or becomes inaccessible later, the existing page receives the live query's completed no-result or authorization-error state. The original successful HTTP response is not retroactively turned into a 404.
 

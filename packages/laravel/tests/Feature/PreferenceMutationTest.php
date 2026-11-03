@@ -6,9 +6,12 @@ namespace ZeroForLaravel\Tests\Feature;
 
 use Closure;
 use Illuminate\Auth\Access\AuthorizationException;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Foundation\Auth\User;
 use Illuminate\Routing\Middleware\SubstituteBindings;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Schema;
@@ -25,13 +28,16 @@ use ZeroForLaravel\Metadata\ModelRegistry;
 use ZeroForLaravel\Mutation\ControllerMutationRegistry;
 use ZeroForLaravel\Mutation\ControllerMutationRuntime;
 use ZeroForLaravel\Mutation\Mutation;
+use ZeroForLaravel\ResolvedContext;
+use ZeroForLaravel\Tests\Fixtures\Comment;
 use ZeroForLaravel\Tests\Fixtures\MutationPreference;
 use ZeroForLaravel\Tests\Fixtures\PreferenceMutationController;
+use ZeroForLaravel\Tests\Fixtures\Tag;
 use ZeroForLaravel\Tests\Fixtures\Task;
+use ZeroForLaravel\Tests\Fixtures\TaskList;
 use ZeroForLaravel\Tests\OwnerPostgresTestCase as PostgresTestCase;
 use ZeroForLaravel\Tests\OwnerTestCase;
 use ZeroForLaravel\Tests\TestCase;
-use ZeroForLaravel\ZeroContext;
 
 uses(getenv('ZERO_TEST_PG_DATABASE') ? PostgresTestCase::class : OwnerTestCase::class);
 
@@ -58,7 +64,7 @@ test('compiled preference writes preserve opt outs and read preceding writes', f
     $subscribe = $compiler->compile(PreferenceMutationController::class, 'subscribe');
     $unsubscribe = $compiler->compile(PreferenceMutationController::class, 'unsubscribe');
     $id = (string) Str::uuid();
-    $mutation = new Mutation($models, ['timestamp' => 1700000000123, 'ids' => ['key:preference' => $id, 'key:unsubscribe' => (string) Str::uuid()]], new ZeroContext([]));
+    $mutation = new Mutation($models, ['timestamp' => 1700000000123, 'ids' => ['key:preference' => $id, 'key:unsubscribe' => (string) Str::uuid()]], new ResolvedContext([]));
     DB::transaction(function () use ($subscribe, $unsubscribe, $mutation, $id): void {
         $runtime = new ControllerMutationRuntime($mutation);
         expect($runtime->run($subscribe->operations, ['mutation' => $mutation]))->toBeTrue();
@@ -68,17 +74,17 @@ test('compiled preference writes preserve opt outs and read preceding writes', f
         expect($runtime->run($subscribe->operations, ['mutation' => $mutation]))->toBeFalse();
         expect(MutationPreference::count())->toBe(1);
         expect(MutationPreference::firstOrFail()->note)->toBe('keep');
-        expect(fn (): \Illuminate\Database\Eloquent\Model => $mutation->insertUnlessExists(MutationPreference::class, ['recipient' => 'alice', 'issue' => 'issue'], ['id' => 'bad'], 'preference'))->toThrow(ValidationException::class);
+        expect(fn (): Model => $mutation->insertUnlessExists(MutationPreference::class, ['recipient' => 'alice', 'issue' => 'issue'], ['id' => 'bad'], 'preference'))->toThrow(ValidationException::class);
         expect(fn (): ?\Illuminate\Database\Eloquent\Model => $mutation->findUnique(MutationPreference::class, ['recipient' => 'alice']))->toThrow(LogicException::class);
     });
 });
 
 test('preference primitives enforce transaction boundaries and model event cancellation', function (): void {
     $models = new ModelRegistry([MutationPreference::class]);
-    $mutation = new Mutation($models, ['timestamp' => 1700000000123, 'ids' => ['key:preference' => (string) Str::uuid()]], new ZeroContext([]));
+    $mutation = new Mutation($models, ['timestamp' => 1700000000123, 'ids' => ['key:preference' => (string) Str::uuid()]], new ResolvedContext([]));
     expect(fn (): ?\Illuminate\Database\Eloquent\Model => $mutation->findUnique(MutationPreference::class, ['recipient' => 'alice', 'issue' => 'issue']))->toThrow(LogicException::class);
     MutationPreference::creating(fn (): false => false);
-    expect(fn () => DB::transaction(fn (): \Illuminate\Database\Eloquent\Model => $mutation->insertUnlessExists(MutationPreference::class, ['recipient' => 'alice', 'issue' => 'issue'], ['subscribed' => true], 'preference')))->toThrow(ValidationException::class, 'cancelled');
+    expect(fn () => DB::transaction(fn (): Model => $mutation->insertUnlessExists(MutationPreference::class, ['recipient' => 'alice', 'issue' => 'issue'], ['subscribed' => true], 'preference')))->toThrow(ValidationException::class, 'cancelled');
     expect(MutationPreference::count())->toBe(0);
 });
 
@@ -91,9 +97,12 @@ test('assignment distinguishes omitted null same and changed recipients and roll
         $this->createTables();
     }
 
+    $user = (new User)->setKeyType('string')->forceFill(['id' => 'actor']);
+    \Pest\Laravel\actingAs($user);
+    request()->setUserResolver(fn (): User => $user);
     app()->register(SurveyorServiceProvider::class);
     Route::post('/assign/{task}', [PreferenceMutationController::class, 'assign'])->middleware(SubstituteBindings::class);
-    $models = new ModelRegistry([Task::class, \ZeroForLaravel\Tests\Fixtures\TaskList::class, \ZeroForLaravel\Tests\Fixtures\Tag::class, \ZeroForLaravel\Tests\Fixtures\Comment::class, MutationPreference::class]);
+    $models = new ModelRegistry([Task::class, TaskList::class, Tag::class, Comment::class, MutationPreference::class]);
     $program = (new ControllerMutationCompiler((new ParserFactory)->createForNewestSupportedVersion(), $models))->compile(PreferenceMutationController::class, 'assign');
     $file = tempnam(sys_get_temp_dir(), 'assignment-');
     try {
@@ -108,7 +117,7 @@ test('assignment distinguishes omitted null same and changed recipients and roll
             throw new LogicException('Expected generated registry.');
         }
     } finally {
-        \Illuminate\Support\Facades\File::delete($file);
+        File::delete($file);
     }
 
     $a = (string) Str::uuid();
@@ -124,7 +133,7 @@ test('assignment distinguishes omitted null same and changed recipients and roll
     $execute = function (array $input) use ($models, $program, $registry, $task): void {
         $wire = ['version' => $program->fingerprint, 'input' => $input, 'route' => ['task' => $task->id],
             'prepared' => ['timestamp' => 1700000000123, 'ids' => array_combine(array_keys($program->sites), array_map(fn (): string => (string) Str::uuid(), $program->sites))]];
-        expect($models->connection()->transaction(fn (): array => $registry->execute($program->name(), $wire, new ZeroContext(['user_id' => 'actor']))))->toBe(['data' => ['id' => $task->id]]);
+        expect($models->connection()->transaction(fn (): array => $registry->execute($program->name(), $wire, new ResolvedContext(['user_id' => 'actor'], 'actor'))))->toBe(['data' => ['id' => $task->id]]);
     };
     $execute([]);
     expect($task->fresh()?->list_id)->toBe($a);
@@ -162,7 +171,7 @@ test('PostgreSQL committed competing insert preserves conditional intent and sav
     }
 
     $models = new ModelRegistry([MutationPreference::class]);
-    $mutation = new Mutation($models, ['timestamp' => 1700000000123, 'ids' => ['key:preference' => (string) Str::uuid()]], new ZeroContext([]));
+    $mutation = new Mutation($models, ['timestamp' => 1700000000123, 'ids' => ['key:preference' => (string) Str::uuid()]], new ResolvedContext([]));
     config(['database.connections.competitor' => config('database.connections.testing')]);
     $winner = (string) Str::uuid();
     MutationPreference::creating(function () use ($winner, $upsert): void {

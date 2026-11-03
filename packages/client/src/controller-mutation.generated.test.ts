@@ -4,9 +4,8 @@ import { ZeroContext, useQuery } from '@rocicorp/zero/react';
 import { createElement, type ReactNode } from 'react';
 import { renderHook, waitFor } from '@testing-library/react';
 import { expect, expectTypeOf, it } from 'vite-plus/test';
-import { schema, definitions } from '../../../tests/interop/generated';
+import { schema, definitions, type Context } from '../../../tests/interop/generated';
 import { createControllerMutationBindings } from './controller-mutation.fixture';
-import type { ClientContext } from './contract';
 import { createZeroBindings, useZero } from '../../../tests/interop/controller-react.generated';
 import {
     projected as projectedAction,
@@ -59,7 +58,7 @@ it('executes the PHP-generated typed bindings without application-authored codec
     expect(() => store.prepare({ title: 'Valid', reference: 'not-a-uuid' })).toThrow();
     expect(() => store.prepare({ title: '😀'.repeat(100) })).not.toThrow();
 
-    const zero = new Zero<typeof schema, undefined, ClientContext>({
+    const zero = new Zero<typeof schema, undefined, Context>({
         schema,
         mutators: generated.mutators,
         context: { user_id: 'alice' },
@@ -108,7 +107,7 @@ it('executes the PHP-generated typed bindings without application-authored codec
         });
         try {
             expect(observed.result.current.zero).toBe(zero);
-            expectTypeOf(observed.result.current.zero).toEqualTypeOf<Zero<typeof schema, undefined, ClientContext>>();
+            expectTypeOf(observed.result.current.zero).toEqualTypeOf<Zero<typeof schema, undefined, Context>>();
             await waitFor(() => expect(observed.result.current.rows.map((row) => row.id)).toEqual([id]));
         } finally {
             observed.unmount();
@@ -138,8 +137,8 @@ it('executes the PHP-generated typed bindings without application-authored codec
 });
 
 it('generated conditional creation and explicit creation sites consume prepared identities', async () => {
-    const generated = createControllerMutationBindings(schema, definitions, projections);
-    const zero = new Zero<typeof schema, undefined, ClientContext>({
+    const generated = createControllerMutationBindings<typeof schema, Context>(schema, definitions, projections);
+    const zero = new Zero<typeof schema, undefined, Context>({
         schema,
         mutators: generated.mutators,
         context: { user_id: 'alice' },
@@ -163,7 +162,7 @@ it('generated conditional creation and explicit creation sites consume prepared 
 });
 
 it('keyed repeated creation encodes dates before enqueue and preserves identity when input order changes', async () => {
-    const generated = createControllerMutationBindings(schema, definitions, projections);
+    const generated = createControllerMutationBindings<typeof schema, Context>(schema, definitions, projections);
     const bulk = generated.actions[`${prefix}bulk`];
     const input = {
         items: [
@@ -180,7 +179,7 @@ it('keyed repeated creation encodes dates before enqueue and preserves identity 
     expect(() => bulk.prepare({ items: Array.from({ length: 21 }, () => input.items[0]!) })).toThrow();
     let expected: unknown;
     for (const reverse of [false, true]) {
-        const zero = new Zero<typeof schema, undefined, ClientContext>({
+        const zero = new Zero<typeof schema, undefined, Context>({
             schema,
             mutators: generated.mutators,
             context: { user_id: 'alice' },

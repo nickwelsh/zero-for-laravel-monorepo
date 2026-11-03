@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace ZeroForLaravel\Tests\Feature;
 
+use Illuminate\Auth\GenericUser;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
@@ -66,7 +67,7 @@ beforeEach(function (): void {
 });
 
 afterEach(function (): void {
-    if (DB::getFacadeRoot() === null) {
+    if (! getenv('ZERO_TEST_PG_DATABASE')) {
         return;
     }
 
@@ -149,7 +150,7 @@ test('prediction subject facts are refreshed from the authenticated database ide
 
     $feed = Predictions::forUser($alice, [['resource' => PermissionList::class, 'ability' => 'view']]);
     expect((array) $feed['subject']['attributes'])->toBe(['department_id' => 'engineering', 'is_admin' => false]);
-    expect(fn (): array => Predictions::forUser(new \Illuminate\Auth\GenericUser(['id' => 84]), []))
+    expect(fn (): array => Predictions::forUser(new GenericUser(['id' => 84]), []))
         ->toThrow(LogicException::class, 'authenticated Eloquent subject');
 });
 

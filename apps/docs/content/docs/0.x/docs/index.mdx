@@ -4,13 +4,17 @@ description: Build controller-first live queries and mutations on native Zero.
 ---
 
 Follow [getting started](./getting-started.mdx), then define your
-[models](./models.mdx) and [authorization](./authorization.mdx).
+[models, local scopes, and relationships](./models.mdx) and
+[policies and explicit visibility](./authorization.mdx). Configure the
+[typed application context resolver](./configuration.mdx#typed-context-and-resolver)
+before generating contracts. Existing applications can use the
+[0.x migration mappings](./constraints.mdx#migrating-existing-0x-applications).
 
 ## Read and write data
 
-- [Queries](./queries.mdx): controller-declared ZQL and live pagination.
+- [Queries](./queries.mdx): mutable Zero builders, `with` includes, `whereHas` filters, and live pagination.
 - [React](./react.mdx): providers and automatically injected Inertia live props.
-- [Mutations](./mutations.mdx): checked controller actions, FormRequests, and native results.
+- [Mutations](./mutations.mdx): checked controller actions, creation defaults, FormRequests, and native results.
 - [Related writes](./related-writes.mdx): transactional parent/child operations.
 - [Shared operations](./shared-operations.mdx): helpers and preference concurrency.
 - [Rows and casts](./records-and-casts.mdx): plain data, dates, enums, and result codecs.

@@ -1,6 +1,7 @@
 <?php
 
 declare(strict_types=1);
+use App\Models\User;
 
 return [
     'connection' => null,
@@ -21,7 +22,7 @@ return [
     ],
     'models' => ['default' => __DIR__.'/permissions/scoped-rbac-abac.conf'],
     'subject' => [
-        'class' => App\Models\User::class,
+        'class' => User::class,
         'prefix' => 'user:',
         'attributes' => [],
     ],

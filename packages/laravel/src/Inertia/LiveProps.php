@@ -4,13 +4,19 @@ declare(strict_types=1);
 
 namespace ZeroForLaravel\Inertia;
 
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Routing\Route;
 use Inertia\AlwaysProp;
 use Inertia\ProvidesInertiaProperties;
 use Inertia\RenderContext;
 use LogicException;
-use ZeroForLaravel\Query\Query;
+use ZeroForLaravel\Http\ControllerRouteDispatcher;
+use ZeroForLaravel\Metadata\ModelRegistry;
+use ZeroForLaravel\Permissions\PolicyCompiler;
+use ZeroForLaravel\Query\QueryInput;
 use ZeroForLaravel\Query\RegisteredQueries;
+use ZeroForLaravel\Query\RegisteredQuery;
+use ZeroForLaravel\Query\ZeroQuery;
 
 final readonly class LiveProps implements ProvidesInertiaProperties
 {
@@ -43,15 +49,15 @@ final readonly class LiveProps implements ProvidesInertiaProperties
         $boundProps = [];
         if ($route instanceof Route) {
             foreach ($props as $key => $value) {
-                if (! $value instanceof \Illuminate\Database\Eloquent\Model || ! in_array($value, $route->parameters(), true)) {
+                if (! $value instanceof Model || ! in_array($value, $route->parameters(), true)) {
                     continue;
                 }
 
-                $registry = resolve(\ZeroForLaravel\Metadata\ModelRegistry::class);
+                $registry = resolve(ModelRegistry::class);
                 foreach ($registry->all() as $model) {
                     if ($value::class === $model->class) {
                         $boundProps[$key] = $value;
-                        $props[$key] = (new Query($model, $registry))->where($model->key, $value->getKey())->one();
+                        $props[$key] = (new ZeroQuery($model, $registry))->where($model->key, $value->getKey())->one();
                         break;
                     }
                 }
@@ -59,7 +65,7 @@ final readonly class LiveProps implements ProvidesInertiaProperties
         }
 
         $partial = $context->request->header('X-Inertia-Partial-Component') === $context->component;
-        $live = array_filter($props, fn (mixed $value): bool => $value instanceof Query);
+        $live = array_filter($props, fn (mixed $value): bool => $value instanceof ZeroQuery);
         foreach ($live as $key => $value) {
             if (array_key_exists($key, $this->shared)) {
                 throw new LogicException("Shared prop {$key} collides with a live query.");
@@ -83,7 +89,7 @@ final readonly class LiveProps implements ProvidesInertiaProperties
         // Omitted props have no entry and retain their binding on partial visits.
         $bindings = $partial ? array_fill_keys(array_keys(array_diff_key($props, $live)), null) : [];
         foreach ($live as $prop => $declaration) {
-            $matches = array_filter($registrations, fn (\ZeroForLaravel\Query\RegisteredQuery $query): bool => $query->prop === $prop && $query->component === $context->component);
+            $matches = array_filter($registrations, fn (RegisteredQuery $query): bool => $query->prop === $prop && $query->component === $context->component);
             if (count($matches) !== 1) {
                 throw new LogicException("Missing or ambiguous live prop {$prop}. Run zero:generate.");
             }
@@ -100,13 +106,13 @@ final readonly class LiveProps implements ProvidesInertiaProperties
 
             // These are the actual Laravel-bound values, in the same positional
             // order used by the controller dispatcher, never parsed from a URL.
-            $args = \ZeroForLaravel\Query\QueryInput::arguments($registration->parameters, $context->request, $route, $registration->inputContracts);
+            $args = QueryInput::arguments($registration->parameters, $context->request, $route, $registration->inputContracts);
             $generated = $registration->declaration($args);
             if (json_encode([$generated->ast(), $generated->format()], JSON_THROW_ON_ERROR) !== json_encode([$declaration->ast(), $declaration->format()], JSON_THROW_ON_ERROR)) {
                 throw new LogicException("Live prop {$prop} differs from its generated contract. Run zero:generate.");
             }
 
-            $args['__route'] = \ZeroForLaravel\Http\ControllerRouteDispatcher::identity($route);
+            $args['__route'] = ControllerRouteDispatcher::identity($route);
             $args['__routeArgs'] = (object) $route->originalParameters();
             foreach ($registration->parameters as $parameter => $type) {
                 if (str_starts_with($type, 'request:')) {
@@ -117,7 +123,7 @@ final readonly class LiveProps implements ProvidesInertiaProperties
             $bindings[$prop] = ['query' => $name, 'args' => (object) $args];
             if ($registration->guards !== []) {
                 $guard = $registration->guards[0];
-                $plan = (new \ZeroForLaravel\Permissions\PolicyCompiler)->compile($guard['class'], $guard['ability']);
+                $plan = (new PolicyCompiler)->compile($guard['class'], $guard['ability']);
                 $bindings[$prop]['access'] = ['status' => $plan->deniedStatus];
             }
 

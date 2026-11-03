@@ -7,14 +7,22 @@ namespace ZeroForLaravel\Tests\Feature;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\SoftDeletes;
+use Illuminate\Foundation\Auth\User;
+use Illuminate\Validation\ValidationException;
 use LogicException;
 use ZeroForLaravel\Attributes\ZeroColumns;
 use ZeroForLaravel\Attributes\ZeroExclude;
 use ZeroForLaravel\Attributes\ZeroIncludeColumns;
-use ZeroForLaravel\ContextField;
+use ZeroForLaravel\Concerns\HasPolicyVisibility;
+use ZeroForLaravel\Concerns\HasZeroQueries;
 use ZeroForLaravel\Generation\TypeScriptGenerator;
 use ZeroForLaravel\Metadata\ModelRegistry;
+use ZeroForLaravel\Query\QueryCompiler;
+use ZeroForLaravel\Query\ZeroQuery;
+use ZeroForLaravel\ResolvedContext;
+use ZeroForLaravel\Tests\Fixtures\OwnerPermissions;
 use ZeroForLaravel\Tests\Fixtures\VisibleTask;
+use ZeroForLaravel\Tests\Fixtures\ZeroContext;
 use ZeroForLaravel\Tests\OwnerTestCase as TestCase;
 
 uses(TestCase::class);
@@ -24,8 +32,7 @@ beforeEach(function (): void {
         ExplicitVisibleTask::class, IncludedVisibleTask::class, IncludedExcludedVisibleTask::class,
         BoundedVisibleTask::class, VirtualVisibleTask::class, EmptyVisibleTask::class,
         MissingVisibleKey::class, MissingVisibleTimestamp::class, MissingVisibleDeletedAt::class,
-        MissingVisibleFill::class, MissingVisibleRelationKey::class],
-        'zero.mutation_context.'.MissingVisibleFill::class => ['user_id' => ContextField::UserId]]);
+        MissingVisibleFill::class, MissingVisibleRelationKey::class]]);
 });
 
 test('visible columns restrict metadata, writable inputs and the generated client schema', function (): void {
@@ -64,8 +71,16 @@ test('required columns omitted from visible fail closed', function (Model $model
     'primary key' => [fn (): Model => new MissingVisibleKey, 'id'],
     'timestamps' => [fn (): Model => new MissingVisibleTimestamp, 'created_at'],
     'soft delete timestamp' => [fn (): Model => new MissingVisibleDeletedAt, 'deleted_at'],
-    'server fill' => [fn (): Model => new MissingVisibleFill, 'user_id'],
 ]);
+
+test('creation defaults cannot expose omitted visible columns', function (): void {
+    $registry = new ModelRegistry([MissingVisibleFill::class]);
+    $model = $registry->get('MissingVisibleFill');
+    expect($model->columns)->not->toHaveKey('user_id');
+    expect(fn (): array => (new ZeroQuery($model, $registry))->ast())->toThrow(ValidationException::class);
+    expect(fn (): string => (new TypeScriptGenerator)->generate($registry))
+        ->toThrow(LogicException::class, 'Creation defaults require an exposed, fillable, non-metadata column.');
+});
 
 test('required relationship keys are checked when the relationship is collected', function (): void {
     $registry = new ModelRegistry([MissingVisibleRelationKey::class]);
@@ -73,20 +88,24 @@ test('required relationship keys are checked when the relationship is collected'
 })->throws(LogicException::class, 'required column list_id');
 
 test('private ownership facts stay out of browser columns while policy visibility still uses them', function (): void {
-    \ZeroForLaravel\Tests\Fixtures\OwnerPermissions::configure([ReadOnlyOwnerTask::class]);
+    OwnerPermissions::configure([ReadOnlyOwnerTask::class]);
     $registry = new ModelRegistry([ReadOnlyOwnerTask::class]);
     $model = $registry->get('ReadOnlyOwnerTask');
     expect($model->columns)->not->toHaveKeys(['user_id', 'secret']);
     $source = (new TypeScriptGenerator)->generate($registry);
-    expect($source)->not->toContain('user_id', 'owner_id', 'permission_index');
-    $actor = (new \Illuminate\Foundation\Auth\User)->setKeyType('string')->forceFill(['id' => 'alice']);
-    $query = (new \ZeroForLaravel\Query\Query($model, $registry))->visibleTo($actor);
-    $ast = (new \ZeroForLaravel\Query\QueryCompiler($registry))->compileDeclaration($query, new \ZeroForLaravel\ZeroContext(['user_id' => 'alice']));
+    expect($source)->not->toContain('owner_id', 'permission_index');
+    $actor = (new User)->setKeyType('string')->forceFill(['id' => 'alice']);
+    $query = (new ZeroQuery($model, $registry))->visibleTo($actor);
+    $ast = (new QueryCompiler($registry))->compileDeclaration($query, new ResolvedContext(['user_id' => 'alice'], 'alice'));
     expect(json_encode($ast, JSON_THROW_ON_ERROR))->toContain('a_owner_id', 'permission_index');
 });
 
-class ReadOnlyOwnerTask extends \ZeroForLaravel\Tests\Fixtures\Task
+class ReadOnlyOwnerTask extends Model
 {
+    use HasPolicyVisibility, HasZeroQueries, SoftDeletes;
+
+    protected $table = 'tasks';
+
     protected $hidden = ['secret', 'user_id'];
 }
 
@@ -140,7 +159,17 @@ class MissingVisibleDeletedAt extends VisibleTask
     use SoftDeletes;
 }
 
-class MissingVisibleFill extends VisibleTask {}
+class MissingVisibleFill extends VisibleTask
+{
+    use HasZeroQueries;
+
+    protected static function booted(): void
+    {
+        static::addZeroGlobalScope('creator', function (ZeroQuery $query): void {
+            $query->withAttributes(['user_id' => ZeroContext::USER_ID], asConditions: false);
+        });
+    }
+}
 
 class MissingVisibleRelationKey extends VisibleTask
 {

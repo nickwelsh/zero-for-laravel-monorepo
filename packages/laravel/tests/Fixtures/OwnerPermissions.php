@@ -11,7 +11,6 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Schema;
 use LogicException;
-use ZeroForLaravel\ContextField;
 use ZeroForLaravel\Permissions\Binding;
 use ZeroForLaravel\Permissions\Casbin;
 use ZeroForLaravel\Permissions\PermissionSchema;
@@ -31,7 +30,6 @@ final class OwnerPermissions
             'permissions.subject.attributes' => [],
             'permissions.denied_status' => 403,
             'zero.public_models' => [...config()->array('zero.public_models', []), VisibleTask::class, MutationPreference::class],
-            'zero.mutation_context' => [Task::class => ['user_id' => ContextField::UserId]],
         ]);
         $resources = [];
         foreach ($classes as $class) {

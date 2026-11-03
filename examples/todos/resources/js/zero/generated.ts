@@ -2,6 +2,8 @@
 import {table, string, number, boolean, json, relationships, createSchema} from '@rocicorp/zero';
 import type {ContractMap, ModelRow} from '@nickwelsh/zero-for-laravel';
 
+export type Context = {readonly "user_id": number;};
+export const contextContract = {"user_id":{"type":"int","nullable":false}} as const;
 const table0 = table("todo_lists").columns({
   "id": string(),
   "user_id": number(),
@@ -77,19 +79,24 @@ export const definitions = {
                 "default": null
             }
         },
-        "serverFill": {},
         "writable": [
             "list_id",
             "title",
             "completed"
         ],
+        "scopeFingerprint": "35786c7117b4e38d0f169239752ce71158266ae2f6e4aa230fbbb87bd699c0e3",
+        "creationDefaults": {
+            "op": "merge",
+            "values": []
+        },
         "idGenerator": "uuid",
         "timestamps": {
             "created": "created_at",
             "updated": "updated_at",
             "deleted": null
         },
-        "relations": {}
+        "relations": {},
+        "relationConstraints": {}
     },
     "TodoList": {
         "name": "TodoList",
@@ -137,12 +144,33 @@ export const definitions = {
                 "default": null
             }
         },
-        "serverFill": {
-            "user_id": "user_id"
-        },
         "writable": [
-            "name"
+            "name",
+            "user_id"
         ],
+        "scopeFingerprint": "2f0354f35f7762d687719a371f35a2ca17653f34a4608b43816b528c5cc3fd4d",
+        "creationDefaults": {
+            "op": "merge",
+            "values": [
+                {
+                    "op": "merge",
+                    "values": [
+                        {
+                            "op": "object",
+                            "items": [
+                                {
+                                    "key": "user_id",
+                                    "value": {
+                                        "op": "context",
+                                        "field": "user_id"
+                                    }
+                                }
+                            ]
+                        }
+                    ]
+                }
+            ]
+        },
         "idGenerator": "uuid",
         "timestamps": {
             "created": "created_at",
@@ -164,6 +192,12 @@ export const definitions = {
                         "table": "todos"
                     }
                 ]
+            }
+        },
+        "relationConstraints": {
+            "todos": {
+                "wheres": [],
+                "orders": []
             }
         }
     }

@@ -22,7 +22,7 @@ use ZeroForLaravel\Metadata\ModelRegistry;
 use ZeroForLaravel\Mutation\ControllerMutationRegistry;
 use ZeroForLaravel\Mutation\OperationException;
 use ZeroForLaravel\Permissions\PolicyCompiler;
-use ZeroForLaravel\ZeroContext;
+use ZeroForLaravel\ResolvedContext;
 
 function runTodoMutation(User $user, string $controller, string $method, array $input = [], array $route = []): array
 {
@@ -39,7 +39,7 @@ function runTodoMutation(User $user, string $controller, string $method, array $
     $args = ['version' => $program->fingerprint, 'input' => $input, 'route' => $route,
         'prepared' => ['timestamp' => 1700000000123, 'ids' => array_map(fn () => (string) Str::uuid(), $program->sites)]];
 
-    return $models->connection()->transaction(fn () => $registry->execute($program->name(), $args, new ZeroContext(['user_id' => $user->id])));
+    return $models->connection()->transaction(fn () => $registry->execute($program->name(), $args, new ResolvedContext(['user_id' => $user->id], (string) $user->id)));
 }
 
 test('creating a list returns its identity and grants only its authenticated owner access', function () {

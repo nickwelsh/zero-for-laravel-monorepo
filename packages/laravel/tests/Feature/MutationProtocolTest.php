@@ -7,8 +7,11 @@ namespace ZeroForLaravel\Tests\Feature;
 use Closure;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Foundation\Auth\User;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Route;
+use Laravel\Surveyor\SurveyorServiceProvider;
 use LogicException;
 use PhpParser\ParserFactory;
 use stdClass;
@@ -19,16 +22,17 @@ use ZeroForLaravel\Http\ControllerRouteDispatcher;
 use ZeroForLaravel\Metadata\ModelRegistry;
 use ZeroForLaravel\Mutation\ControllerMutationRegistry;
 use ZeroForLaravel\Mutation\MutationProcessor;
+use ZeroForLaravel\ResolvedContext;
 use ZeroForLaravel\Tests\Fixtures\ControllerMutationController;
 use ZeroForLaravel\Tests\Fixtures\Task;
 use ZeroForLaravel\Tests\OwnerPostgresTestCase as PostgresTestCase;
-use ZeroForLaravel\ZeroContext;
 
 uses(PostgresTestCase::class);
 
 beforeEach(function (): void {
     /** @var PostgresTestCase $this */
-    app()->register(\Laravel\Surveyor\SurveyorServiceProvider::class);
+    $this->actingAs((new User)->setKeyType('string')->forceFill(['id' => 'alice']));
+    app()->register(SurveyorServiceProvider::class);
     $models = new ModelRegistry($this->models());
     app()->instance(ModelRegistry::class, $models);
     $programs = [];
@@ -47,7 +51,7 @@ beforeEach(function (): void {
 
         app()->instance(ControllerMutationRegistry::class, $factory($models, new ControllerRouteDispatcher));
     } finally {
-        \Illuminate\Support\Facades\File::delete($file);
+        File::delete($file);
     }
 });
 
@@ -68,7 +72,7 @@ function mutationProtocolProgram(string $method): MutationProgram
 function mutationProtocolProcess(array $mutations, ?array $params = null, int $version = 1): array
 {
     $user = (new User)->setKeyType('string')->forceFill(['id' => 'alice']);
-    $request = \Illuminate\Http\Request::create('/zero/mutate', 'POST');
+    $request = Request::create('/zero/mutate', 'POST');
     $request->setUserResolver(fn (): User => $user);
 
     app()->instance('request', $request);
@@ -77,7 +81,7 @@ function mutationProtocolProcess(array $mutations, ?array $params = null, int $v
     return $processor->process([
         'clientGroupID' => 'group-a', 'pushVersion' => $version, 'timestamp' => 1,
         'requestID' => 'request-a', 'mutations' => $mutations,
-    ], $params ?? ['appID' => 'test', 'schema' => 'zero_test_0'], new ZeroContext(['user_id' => 'alice']));
+    ], $params ?? ['appID' => 'test', 'schema' => 'zero_test_0'], new ResolvedContext(['user_id' => 'alice'], 'alice'));
 }
 
 /** @param array<string, mixed> $input

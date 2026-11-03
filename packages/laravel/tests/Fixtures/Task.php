@@ -4,13 +4,17 @@ declare(strict_types=1);
 
 namespace ZeroForLaravel\Tests\Fixtures;
 
+use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
+use Illuminate\Support\Carbon;
 use ZeroForLaravel\Concerns\HasPolicyVisibility;
+use ZeroForLaravel\Concerns\HasZeroQueries;
+use ZeroForLaravel\Query\ZeroQuery;
 
 /**
  * @property string $id
@@ -18,14 +22,14 @@ use ZeroForLaravel\Concerns\HasPolicyVisibility;
  * @property string|null $list_id
  * @property string $title
  * @property bool $done
- * @property \Carbon\CarbonImmutable|null $completed_at
- * @property \Illuminate\Support\Carbon $created_at
+ * @property CarbonImmutable|null $completed_at
+ * @property Carbon $created_at
  */
 class Task extends Model
 {
     use HasPolicyVisibility;
     use HasUuids, SoftDeletes;
-    use \ZeroForLaravel\Concerns\HasZeroQueries;
+    use HasZeroQueries;
 
     protected $table = 'tasks';
 
@@ -55,6 +59,13 @@ class Task extends Model
     public function comments(): HasMany
     {
         return $this->hasMany(Comment::class, 'task_id');
+    }
+
+    protected static function booted(): void
+    {
+        static::addZeroGlobalScope('creator', function (ZeroQuery $query): void {
+            $query->withAttributes(['user_id' => ZeroContext::USER_ID], asConditions: false);
+        });
     }
 
     protected function casts(): array

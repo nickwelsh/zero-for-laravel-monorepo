@@ -15,11 +15,12 @@ use JsonException;
 use LogicException;
 use stdClass;
 use Symfony\Component\HttpKernel\Exception\HttpExceptionInterface;
+use ZeroForLaravel\Context\ContextDefinition;
 use ZeroForLaravel\Generation\Mutations\MutationProgram;
 use ZeroForLaravel\Http\ControllerRouteDispatcher;
 use ZeroForLaravel\Metadata\ModelRegistry;
+use ZeroForLaravel\ResolvedContext;
 use ZeroForLaravel\Support\Input;
-use ZeroForLaravel\ZeroContext;
 
 /**
  * Receives only trusted, generated registrations, never an AST from the browser.
@@ -55,7 +56,7 @@ final readonly class ControllerMutationRegistry
      *
      * @return array{data?:mixed}
      */
-    public function execute(string $name, mixed $arguments, ZeroContext $context): array
+    public function execute(string $name, mixed $arguments, ResolvedContext $context): array
     {
         $entry = $this->registrations[$name] ?? throw new OperationException('unknown_mutation', 'Unsupported mutation version.');
         $contract = $entry['contract'];
@@ -96,7 +97,12 @@ final readonly class ControllerMutationRegistry
                     throw new LogicException('Controller mutation must run within the native transaction.');
                 }
 
-                $mutation = new Mutation($this->models, $prepared, $context, fn (Model $locked): Model => $this->rebind($route, $locked));
+                $resolved = ContextDefinition::configured()->resolve($request);
+                if ($resolved->userId() !== $context->userId()) {
+                    throw new AuthorizationException('Controller identity differs from the authenticated Zero identity.');
+                }
+
+                $mutation = new Mutation($this->models, $prepared, $resolved, fn (Model $locked): Model => $this->rebind($route, $locked));
                 if ($contract['optimism'] !== 'generated') {
                     $previous = app()->bound(Mutation::class) ? resolve(Mutation::class) : null;
                     app()->instance(Mutation::class, $mutation);

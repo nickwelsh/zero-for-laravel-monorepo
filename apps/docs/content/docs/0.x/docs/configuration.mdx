@@ -14,29 +14,75 @@ The source defaults live in
 
 ## Laravel settings
 
-| Key                           | Default                                      | Purpose                                                                                           |
-| ----------------------------- | -------------------------------------------- | ------------------------------------------------------------------------------------------------- |
-| `models`                      | `[]`                                         | Explicit model publication allowlist; empty means no application models.                          |
-| `public_models`               | `[]`                                         | Explicitly public read models; publication alone never grants read access.                        |
-| `mutation_context`            | `[]`                                         | Model-keyed trusted creation fills, excluded from writable input.                                 |
-| `output`                      | `resources/js/zero/generated.ts`             | Generated schema, metadata, and plain row types; query/mutation modules are written alongside it. |
-| `controller_output`           | `bootstrap/zero-queries.php`                 | Authoritative controller query registrations.                                                     |
-| `mutation_output`             | `bootstrap/zero-mutations.php`               | Authoritative controller mutation registrations.                                                  |
-| `react`                       | `false`                                      | Also generate the React wrapper and check it for drift.                                           |
-| `wayfinder_import`            | `@/zero`                                     | TypeScript module root for the opt-in Wayfinder page converter; not a filesystem path.            |
-| `sync_publication_on_migrate` | `false`                                      | Synchronize the dedicated publication after successful PostgreSQL `up` migration batches.         |
-| `publication`                 | `ZERO_PUBLICATION` or `laravel_zero`         | Dedicated PostgreSQL publication managed by the package.                                          |
-| `app_id`                      | `ZERO_APP_ID` or `zero`                      | Application identity shared with Zero cache.                                                      |
-| `upstream_schema`             | `ZERO_UPSTREAM_SCHEMA` or `zero_0`           | Zero-owned bookkeeping schema; match the cache's `<app-id>_0`.                                    |
-| `api_key`                     | `ZERO_API_KEY`                               | Private cache API key; never include it in browser code.                                          |
-| `route_prefix`                | `zero`                                       | Prefix for query and mutation endpoints.                                                          |
-| `middleware`                  | `['api', 'auth']`                            | Authenticate the end user independently of cache authentication.                                  |
-| `context_resolver`            | `ZeroForLaravel\Http\ContextResolver::class` | Resolve trusted `ZeroContext`; by default supplies the authenticated `user_id`.                   |
+| Key                           | Default                              | Purpose                                                                                           |
+| ----------------------------- | ------------------------------------ | ------------------------------------------------------------------------------------------------- |
+| `models`                      | `[]`                                 | Discover concrete models using `HasZeroQueries`, or explicitly list participating models.         |
+| `public_models`               | `[]`                                 | Explicitly public read models; publication alone never grants read access.                        |
+| `discovery`                   | `[]`                                 | Optional discovery roots with `path` and `namespace`; used when `models` is empty.                |
+| `output`                      | `resources/js/zero/generated.ts`     | Generated schema, metadata, and plain row types; query/mutation modules are written alongside it. |
+| `controller_output`           | `bootstrap/zero-queries.php`         | Authoritative controller query registrations.                                                     |
+| `mutation_output`             | `bootstrap/zero-mutations.php`       | Authoritative controller mutation registrations.                                                  |
+| `react`                       | `false`                              | Also generate the React wrapper and check it for drift.                                           |
+| `wayfinder_import`            | `@/zero`                             | TypeScript module root for the opt-in Wayfinder page converter; not a filesystem path.            |
+| `sync_publication_on_migrate` | `false`                              | Synchronize the dedicated publication after successful PostgreSQL `up` migration batches.         |
+| `publication`                 | `ZERO_PUBLICATION` or `laravel_zero` | Dedicated PostgreSQL publication managed by the package.                                          |
+| `app_id`                      | `ZERO_APP_ID` or `zero`              | Application identity shared with Zero cache.                                                      |
+| `upstream_schema`             | `ZERO_UPSTREAM_SCHEMA` or `zero_0`   | Zero-owned bookkeeping schema; match the cache's `<app-id>_0`.                                    |
+| `api_key`                     | `ZERO_API_KEY`                       | Private cache API key; never include it in browser code.                                          |
+| `route_prefix`                | `zero`                               | Prefix for query and mutation endpoints.                                                          |
+| `middleware`                  | `['api', 'auth']`                    | Authenticate the end user independently of cache authentication.                                  |
+| `context`                     | `App\Enums\ZeroContext::class`       | Application-owned string-backed enum declaring context fields.                                    |
+| `context_resolver`            | `App\Zero\ResolveZeroContext::class` | One public attributed resolver method per enum case.                                              |
 
 Register relationship targets even if they expose no top-level queries or writes.
 Choose the middleware and guard appropriate to your application. Session
 configuration needs the cookie-forwarding and CSRF setup in
 [generation and replication](./replication.mdx).
+
+## Typed context and resolver
+
+Define an application-owned enum and an attributed resolver; generation reflects
+their signatures without executing request-specific methods:
+
+```php
+// app/Enums/ZeroContext.php
+namespace App\Enums;
+
+enum ZeroContext: string
+{
+    case USER_ID = 'user_id';
+}
+```
+
+```php
+// app/Zero/ResolveZeroContext.php
+namespace App\Zero;
+
+use App\Enums\ZeroContext;
+use Illuminate\Http\Request;
+use ZeroForLaravel\Attributes\ResolvesContext;
+
+final class ResolveZeroContext
+{
+    #[ResolvesContext(ZeroContext::USER_ID)]
+    public function userId(Request $request): ?string
+    {
+        $id = $request->user()?->getAuthIdentifier();
+
+        return $id === null ? null : (string) $id;
+    }
+}
+```
+
+Configure both classes using `context` and `context_resolver`. Every enum case
+requires exactly one mapping. Methods return native `string`, `int`, `float`, or
+`bool`, optionally nullable; service parameters use Laravel DI. Use configured
+enum cases directly in query values and `withAttributes()` for symbolic context
+references. `ZeroContext::USER_ID->value` remains a literal string.
+
+At runtime `ResolvedContext` carries validated values separately from the
+authenticated Zero `userID`. Identity is never inferred from a context field.
+Neither context nor creation defaults replace permission checks.
 
 ## Artisan commands
 
@@ -79,13 +125,15 @@ route/context fields as filters. See [editable live inputs](./react.mdx#editable
 
 ## Modular model registration
 
-`zero.models` is the sole publication allowlist, including models from modules:
+Use an explicit `zero.models` allowlist for models from modules:
 
 ```php
 'models' => [App\Models\Task::class, Modules\Tasks\Models\Label::class],
 ```
 
-No directory scan implicitly exposes Eloquent models.
+When `models` is empty, discovery finds concrete models using `HasZeroQueries`
+under `app/Models`, or configured `discovery` roots. Discovery does not make a
+model's reads public: require a permission binding or explicit `public_models` entry.
 Explicit visibility, required keys, `$visible` replication allowlists, and override
 precedence remain enforced. No modular-framework dependency is required.
 Use `zero:exposure` to inspect the resulting columns and permissions.

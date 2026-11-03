@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace ZeroForLaravel\Tests\Feature;
 
+use Illuminate\Routing\Middleware\SubstituteBindings;
+use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
 use Inertia\ProvidesInertiaProperties;
@@ -16,6 +18,8 @@ use ZeroForLaravel\Generation\ZodSchemaDriver;
 use ZeroForLaravel\Inertia\ZeroInertiaServiceProvider;
 use ZeroForLaravel\Metadata\ModelRegistry;
 use ZeroForLaravel\Query\RegisteredQueries;
+use ZeroForLaravel\Tests\Fixtures\OwnerPermissions;
+use ZeroForLaravel\Tests\Fixtures\OwnerUser;
 use ZeroForLaravel\Tests\Fixtures\QueryController;
 use ZeroForLaravel\Tests\Fixtures\Task;
 use ZeroForLaravel\Tests\OwnerTestCase as TestCase;
@@ -23,8 +27,8 @@ use ZeroForLaravel\Tests\OwnerTestCase as TestCase;
 uses(TestCase::class);
 
 beforeEach(function (): void {
-    \ZeroForLaravel\Tests\Fixtures\OwnerPermissions::install();
-    \Pest\Laravel\actingAs(\ZeroForLaravel\Tests\Fixtures\OwnerUser::findOrFail('alice'));
+    OwnerPermissions::install();
+    \Pest\Laravel\actingAs(OwnerUser::findOrFail('alice'));
 });
 
 test('Inertia omits live result props in HTML, visits, and partial responses', function (): void {
@@ -46,7 +50,7 @@ test('Inertia omits live result props in HTML, visits, and partial responses', f
         Inertia::share('appName', 'Example');
         Route::get('/tasks/{title}', [QueryController::class, 'index']);
         Route::get('/alternate/{search}', [QueryController::class, 'index']);
-        Route::get('/bound/{task:title}', [QueryController::class, 'show'])->middleware(\Illuminate\Routing\Middleware\SubstituteBindings::class);
+        Route::get('/bound/{task:title}', [QueryController::class, 'show'])->middleware(SubstituteBindings::class);
         $task = Task::create(['user_id' => 'alice', 'title' => 'slug']);
         $this->get('/bound/slug', ['X-Inertia' => 'true'])->assertOk()
             ->assertJsonMissingPath('props.task')
@@ -78,8 +82,8 @@ test('Inertia omits live result props in HTML, visits, and partial responses', f
         \Pest\Laravel\withoutExceptionHandling();
         expect(fn () => $this->get('/tasks/0'))->toThrow(LogicException::class, 'collides');
     } finally {
-        \Illuminate\Support\Facades\File::delete($directory.'/queries.php');
-        \Illuminate\Support\Facades\File::delete($directory.'/app.blade.php');
+        File::delete($directory.'/queries.php');
+        File::delete($directory.'/app.blade.php');
         rmdir($directory);
     }
 });

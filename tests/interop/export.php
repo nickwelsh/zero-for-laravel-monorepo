@@ -4,19 +4,26 @@ declare(strict_types=1);
 
 require __DIR__.'/../../packages/laravel/vendor/autoload.php';
 
+use Illuminate\Foundation\Auth\User;
+use PhpParser\ParserFactory;
+use ZeroForLaravel\Generation\ControllerQueryCompiler;
+use ZeroForLaravel\Generation\ControllerQueryGenerator;
 use ZeroForLaravel\Generation\TypeScriptGenerator;
+use ZeroForLaravel\Generation\ZodSchemaDriver;
 use ZeroForLaravel\Metadata\ModelRegistry;
-use ZeroForLaravel\Query\Query;
+use ZeroForLaravel\Query\MissingValue;
 use ZeroForLaravel\Query\QueryCompiler;
+use ZeroForLaravel\Query\ZeroQuery;
+use ZeroForLaravel\ResolvedContext;
+use ZeroForLaravel\Tests\Fixtures\QueryController;
 use ZeroForLaravel\Tests\OwnerTestCase as TestCase;
-use ZeroForLaravel\ZeroContext;
 
 $fixture = new class('bootFixture') extends TestCase
 {
     public function bootFixture(): ModelRegistry
     {
         $this->setUp();
-        $alice = (new Illuminate\Foundation\Auth\User)->setKeyType('string')->forceFill(['id' => 'alice']);
+        $alice = (new User)->setKeyType('string')->forceFill(['id' => 'alice']);
         request()->setUserResolver(fn () => $alice);
         $registry = new ModelRegistry($this->models());
         app()->instance(ModelRegistry::class, $registry);
@@ -34,7 +41,7 @@ $fixture = new class('bootFixture') extends TestCase
 $registry = $fixture->bootFixture();
 
 /** Public construction AST, excluding trusted PHP-only actor markers. */
-function publicAst(Query $query): array
+function publicAst(ZeroQuery $query): array
 {
     $strip = function (array $value) use (&$strip): array {
         unset($value['__visibility'], $value['__ability']);
@@ -52,16 +59,16 @@ function publicAst(Query $query): array
 if (($argv[1] ?? null) === 'generate') {
     echo (new TypeScriptGenerator)->generate($registry);
 } elseif (in_array($argv[1] ?? null, ['controller', 'controller-module'], true)) {
-    $compiler = new ZeroForLaravel\Generation\ControllerQueryCompiler((new PhpParser\ParserFactory)->createForHostVersion(), $registry);
-    $definition = $compiler->compile(ZeroForLaravel\Tests\Fixtures\QueryController::class, 'index')[0];
-    $filtered = $compiler->compile(ZeroForLaravel\Tests\Fixtures\QueryController::class, 'filtered')[0];
-    $relationships = $compiler->compile(ZeroForLaravel\Tests\Fixtures\QueryController::class, 'relationships')[0];
-    $window = $compiler->compile(ZeroForLaravel\Tests\Fixtures\QueryController::class, 'window')[0];
-    $pages = $compiler->compile(ZeroForLaravel\Tests\Fixtures\QueryController::class, 'pages')[0];
-    $sorted = $compiler->compile(ZeroForLaravel\Tests\Fixtures\QueryController::class, 'sorted')[0];
-    $schemas = new ZeroForLaravel\Generation\ZodSchemaDriver;
+    $compiler = new ControllerQueryCompiler((new ParserFactory)->createForHostVersion(), $registry);
+    $definition = $compiler->compile(QueryController::class, 'index')[0];
+    $filtered = $compiler->compile(QueryController::class, 'filtered')[0];
+    $relationships = $compiler->compile(QueryController::class, 'relationships')[0];
+    $window = $compiler->compile(QueryController::class, 'window')[0];
+    $pages = $compiler->compile(QueryController::class, 'pages')[0];
+    $sorted = $compiler->compile(QueryController::class, 'sorted')[0];
+    $schemas = new ZodSchemaDriver;
     if ($argv[1] === 'controller-module') {
-        echo (new ZeroForLaravel\Generation\ControllerQueryGenerator($schemas))->typescript([$definition, $filtered, $relationships, $window, $pages, $sorted], './generated');
+        echo (new ControllerQueryGenerator($schemas))->typescript([$definition, $filtered, $relationships, $window, $pages, $sorted], './generated');
         exit;
     }
     $factory = eval('return '.$definition->php().';');
@@ -82,6 +89,7 @@ if (($argv[1] ?? null) === 'generate') {
     $windowQuery = $windowFactory([]);
     echo json_encode([
         'name' => $definition->name(),
+        'context' => ['user_id' => 'alice'],
         'sorted' => ['typescript' => $sorted->typescript(), 'schema' => $schemas->object($sorted->parameters)],
         'typescript' => $definition->typescript(), 'schema' => $schemas->object($definition->parameters), 'cases' => $cases,
         'filtered' => ['typescript' => $filtered->typescript(), 'schema' => $schemas->object($filtered->parameters), 'cases' => $filteredCases],
@@ -89,49 +97,56 @@ if (($argv[1] ?? null) === 'generate') {
         'window' => ['typescript' => $window->typescript(), 'ast' => publicAst($windowQuery)],
     ], JSON_THROW_ON_ERROR);
 } elseif (($argv[1] ?? null) === 'declarations') {
-    $query = new Query($registry->get('Task'), $registry);
+    $query = (new ZeroQuery($registry->get('Task'), $registry))->withoutGlobalScopes();
     $queries = [
-        'unbounded' => $query->all(),
-        'zeroLimit' => $query->limit(0),
-        'one' => $query->where('id', 'task-a')->one(),
-        'cursor' => $query->orderBy('title', 'desc')->orderBy('id', 'asc')->start(['title' => '0', 'id' => 'task-a'], ['inclusive' => true])->limit(7),
-        'exclusive' => $query->orderBy('id', 'asc')->start(['id' => 'task-a']),
-        'relationships' => $query->related('comments', fn ($q) => $q->where('body', 'NOT ILIKE', '%private%')->orderBy('id', 'desc')->limit(3))->related('list'),
-        'junction' => $query->related('tags', fn ($q) => $q->where('name', 'IN', ['0', 'work'])),
-        'exists' => $query->whereExists('comments', fn ($q) => $q->where('body', 'NOT LIKE', 'secret%'), ['flip' => false]),
-        'scalar' => $query->whereExists('list', fn ($q) => $q->where('id', 'list-a'), ['scalar' => true]),
-        'junctionExists' => $query->whereExists('tags', fn ($q) => $q->where('name', 'work'), ['flip' => true]),
-        'negation' => $query->where(fn ($eb) => $eb->not($eb->or($eb->cmp('done', false), $eb->exists('comments', fn ($q) => $q->where('body', 'hidden'))))),
-        'literals' => $query->where(fn ($eb) => $eb->or($eb->cmpLit('0', '=', '0'), $eb->and($eb->cmpLit(0, '!=', 1), $eb->cmp('list_id', 'IS', null)))),
-        'emptyGroups' => $query->where(fn ($eb) => $eb->and($eb->or(), $eb->cmp('done', true))),
-        'missing' => $query->where(fn ($eb) => $eb->or(ZeroForLaravel\Query\MissingValue::Missing, $eb->cmp('id', ZeroForLaravel\Query\MissingValue::Missing))),
+        'unbounded' => clone $query,
+        'zeroLimit' => (clone $query)->limit(0),
+        'one' => (clone $query)->where('id', 'task-a')->one(),
+        'cursor' => (clone $query)->orderBy('title', 'desc')->orderBy('id', 'asc')->start(['title' => '0', 'id' => 'task-a'], ['inclusive' => true])->limit(7),
+        'exclusive' => (clone $query)->orderBy('id', 'asc')->start(['id' => 'task-a']),
+        'relationships' => (clone $query)->with('comments', fn ($q) => $q->withoutGlobalScopes()->where('body', 'NOT ILIKE', '%private%')->orderBy('id', 'desc')->limit(3))->with('list', fn ($q) => $q->withoutGlobalScopes()),
+        'junction' => (clone $query)->with('tags', fn ($q) => $q->withoutGlobalScopes()->where('name', 'IN', ['0', 'work'])),
+        'exists' => (clone $query)->whereExists('comments', fn ($q) => $q->withoutGlobalScopes()->where('body', 'NOT LIKE', 'secret%'), ['flip' => false]),
+        'scalar' => (clone $query)->whereExists('list', fn ($q) => $q->withoutGlobalScopes()->where('id', 'list-a'), ['scalar' => true]),
+        'junctionExists' => (clone $query)->whereExists('tags', fn ($q) => $q->withoutGlobalScopes()->where('name', 'work'), ['flip' => true]),
+        'negation' => (clone $query)->where('done', '!=', false)->whereDoesntHave('comments', fn ($q) => $q->withoutGlobalScopes()->where('body', 'hidden')),
+        'nullEquality' => (clone $query)->where('list_id', null),
+        'nullInequality' => (clone $query)->where('list_id', '!=', null),
     ];
     foreach (['=', '!=', '<', '<=', '>', '>=', 'LIKE', 'NOT LIKE', 'ILIKE', 'NOT ILIKE'] as $operator) {
-        $queries[$operator] = $query->where('title', $operator, '0');
+        $queries[$operator] = (clone $query)->where('title', $operator, '0');
     }
     foreach (['IN', 'NOT IN'] as $operator) {
-        $queries[$operator] = $query->where('title', $operator, ['0', 'two']);
+        $queries[$operator] = (clone $query)->where('title', $operator, ['0', 'two']);
     }
     foreach (['IS', 'IS NOT'] as $operator) {
-        $queries[$operator] = $query->where('list_id', $operator, null);
+        $queries[$operator] = (clone $query)->where('list_id', $operator, null);
     }
-    echo json_encode(array_map(fn ($q) => ['ast' => $q->ast(), 'format' => $q->format()], $queries), JSON_THROW_ON_ERROR);
+    $output = array_map(fn ($q) => ['ast' => $q->ast(), 'format' => $q->format()], $queries);
+    $eb = $query->expressionBuilder();
+    foreach ([
+        'literals' => $eb->or($eb->cmpLit('0', '=', '0'), $eb->and($eb->cmpLit(0, '!=', 1), $eb->cmp('list_id', 'IS', null))),
+        'emptyGroups' => $eb->and($eb->or(), $eb->cmp('done', true)),
+        'missing' => $eb->or(MissingValue::Missing, $eb->cmp('id', MissingValue::Missing)),
+    ] as $name => $condition) {
+        $output[$name] = ['ast' => ['table' => 'tasks', 'where' => $condition->toArray()], 'format' => $query->format()];
+    }
+    echo json_encode($output, JSON_THROW_ON_ERROR);
 } elseif (($argv[1] ?? null) === 'authorized') {
     $alice = request()->user();
-    $query = (new Query($registry->get('Task'), $registry))->visibleTo($alice);
+    $query = (new ZeroQuery($registry->get('Task'), $registry))->visibleTo($alice);
     $queries = [
-        'root' => $query,
-        'related' => $query->related('list', fn ($q) => $q->visibleTo($alice))->related('comments', fn ($q) => $q->visibleTo($alice)->limit(3)),
-        'junction' => $query->whereExists('tags', fn ($q) => $q->visibleTo($alice)->where('id', 'owned')),
-        'groups' => $query->where(fn ($eb) => $eb->or(
-            $eb->exists('tags', fn ($q) => $q->visibleTo($alice)->where('name', 'Reading')),
-            $eb->exists('tags', fn ($q) => $q->visibleTo($alice)->where('name', 'Other')),
-        )),
+        'root' => clone $query,
+        'related' => (clone $query)->with('list', fn ($q) => $q->visibleTo($alice))->with('comments', fn ($q) => $q->visibleTo($alice)->limit(3)),
+        'junction' => (clone $query)->whereExists('tags', fn ($q) => $q->visibleTo($alice)->where('id', 'owned')),
+        'groups' => (clone $query)->where(fn ($q) => $q
+            ->whereHas('tags', fn ($q) => $q->visibleTo($alice)->where('name', 'Reading'))
+            ->orWhere(fn ($q) => $q->whereHas('tags', fn ($q) => $q->visibleTo($alice)->where('name', 'Other')))),
     ];
     $compiler = new QueryCompiler($registry);
-    $context = new ZeroContext(['user_id' => 'alice']);
+    $context = new ResolvedContext(['user_id' => 'alice'], 'alice');
     $asts = array_map(fn ($q) => $compiler->compileDeclaration($q, $context), $queries);
-    $asts['scope'] = $compiler->compileDeclaration($query->where(fn ($op) => $op->or($op->cmp('done', true), $op->cmp('title', 'shared'))), $context);
+    $asts['scope'] = $compiler->compileDeclaration((clone $query)->where(fn ($q) => $q->where('done', true)->orWhere('title', 'shared')), $context);
     echo json_encode($asts, JSON_THROW_ON_ERROR);
 } else {
     throw new RuntimeException('Unknown controller interop fixture mode.');

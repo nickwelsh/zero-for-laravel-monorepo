@@ -7,6 +7,7 @@ namespace ZeroForLaravel\Tests\Feature;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Events\MigrationsEnded;
 use Illuminate\Database\Migrations\Migrator;
+use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
@@ -109,10 +110,10 @@ test('a migration can release column membership without resolving final metadata
     app()->forgetInstance(ModelRegistry::class);
     PublicationManager::releaseTable('tasks', 'testing');
     expect($resolved)->toBeFalse();
-    Schema::table('tasks', fn (\Illuminate\Database\Schema\Blueprint $table) => $table->dropColumn('title'));
+    Schema::table('tasks', fn (Blueprint $table) => $table->dropColumn('title'));
     expect(DB::select("SELECT tablename FROM pg_publication_tables WHERE pubname = 'laravel_zero_test_publication'"))->toBe([]);
     // A later successful migration supplies the final model's required column.
-    Schema::table('tasks', fn (\Illuminate\Database\Schema\Blueprint $table) => $table->string('title'));
+    Schema::table('tasks', fn (Blueprint $table) => $table->string('title'));
     Event::dispatch(new MigrationsEnded('up'));
     $columns = DB::scalar("SELECT attnames::text FROM pg_publication_tables WHERE pubname = 'laravel_zero_test_publication'");
     expect($columns)->toContain('title');

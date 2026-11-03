@@ -15,9 +15,9 @@ final class DashboardController extends Controller
     {
         $values = $input->validated();
         $lists = TodoList::zeroQuery()->visibleTo($input->user())
-            ->related('todos', fn ($todos) => $todos->visibleTo($input->user())->orderBy('created_at', 'asc')->orderBy('id', 'asc'));
+            ->with('todos', fn ($todos) => $todos->visibleTo($input->user())->orderBy('created_at', 'asc')->orderBy('id', 'asc'));
         if (isset($values['status']) && $values['status'] !== 'all') {
-            $lists = TodoList::zeroQuery()->visibleTo($input->user())->related('todos', fn ($todos) => $todos
+            $lists = TodoList::zeroQuery()->visibleTo($input->user())->with('todos', fn ($todos) => $todos
                 ->visibleTo($input->user())
                 ->where('completed', $values['status'] === 'completed')
                 ->orderBy('created_at', 'asc')->orderBy('id', 'asc'));

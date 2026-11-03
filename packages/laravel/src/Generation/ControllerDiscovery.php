@@ -8,6 +8,7 @@ use Closure;
 use Laravel\Ranger\Components\Route;
 use LogicException;
 use ReflectionMethod;
+use ZeroForLaravel\Attributes\ZeroMutation;
 
 /** Ranger owns registered route discovery; the checked compiler owns live declarations. */
 final readonly class ControllerDiscovery
@@ -47,7 +48,7 @@ final readonly class ControllerDiscovery
             }
 
             $action = $route->controller().'@'.$route->method();
-            if (isset($programs[$action]) || (new ReflectionMethod($route->controller(), $route->method()))->getAttributes(\ZeroForLaravel\Attributes\ZeroMutation::class) === []) {
+            if (isset($programs[$action]) || (new ReflectionMethod($route->controller(), $route->method()))->getAttributes(ZeroMutation::class) === []) {
                 return;
             }
 

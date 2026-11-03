@@ -2,16 +2,15 @@
 
 declare(strict_types=1);
 
+use App\Enums\ZeroContext;
 use App\Models\Todo;
 use App\Models\TodoList;
-use ZeroForLaravel\ContextField;
-use ZeroForLaravel\Http\ContextResolver;
+use App\Zero\ResolveZeroContext;
 
 return [
     // Only these domain models may enter Zero's browser schema.
     'models' => [TodoList::class, Todo::class],
     'public_models' => [],
-    'mutation_context' => [TodoList::class => ['user_id' => ContextField::UserId]],
     'output' => resource_path('js/zero/generated.ts'),
     'react' => true,
     // Synchronize after successful, non-pretend PostgreSQL migration batches.
@@ -22,6 +21,6 @@ return [
     'api_key' => env('ZERO_API_KEY'),
     'route_prefix' => 'zero',
     'middleware' => ['web', 'auth'],
-    // Bind this class (or replace it) to add trusted tenant context.
-    'context_resolver' => ContextResolver::class,
+    'context' => ZeroContext::class,
+    'context_resolver' => ResolveZeroContext::class,
 ];

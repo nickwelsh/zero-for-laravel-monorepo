@@ -1,4 +1,5 @@
 import type { ReadonlyJSONValue } from '@rocicorp/zero';
+import type { MutationNode } from './controller-mutation';
 
 export interface Column {
     readonly type: 'string' | 'number' | 'boolean' | 'json';
@@ -21,9 +22,11 @@ export interface Relation {
     }[];
 }
 
-export type ClientContext = Readonly<Record<string, string | number | boolean | null>> & {
-    readonly user_id: string | number | null;
-};
+export type ClientContext = Readonly<Record<string, string | number | boolean | null>>;
+
+export type ContextContract = Readonly<
+    Record<string, { readonly type: 'string' | 'int' | 'float' | 'bool'; readonly nullable: boolean }>
+>;
 
 /** Schema, casts, and visibility shared by generated controller contracts. */
 export interface ModelContract {
@@ -39,7 +42,11 @@ export interface ModelContract {
     readonly table: string;
     readonly key: string;
     readonly columns: Readonly<Record<string, Column>>;
-    readonly serverFill: Readonly<Record<string, string>>;
+    readonly scopeFingerprint: string;
+    readonly creationDefaults: MutationNode;
+    readonly relationConstraints: Readonly<
+        Record<string, { readonly wheres: readonly ReadonlyJSONValue[]; readonly orders: readonly ReadonlyJSONValue[] }>
+    >;
     readonly writable: readonly string[];
     readonly idGenerator: 'uuid' | 'ulid' | null;
     readonly timestamps: {

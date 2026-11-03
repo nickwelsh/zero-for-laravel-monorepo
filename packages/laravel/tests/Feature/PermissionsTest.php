@@ -4,8 +4,11 @@ declare(strict_types=1);
 
 namespace ZeroForLaravel\Tests\Feature;
 
+use Illuminate\Auth\Access\Response;
 use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Routing\Middleware\SubstituteBindings;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Schema;
@@ -17,8 +20,11 @@ use ZeroForLaravel\Permissions\Casbin;
 use ZeroForLaravel\Permissions\PermissionManager;
 use ZeroForLaravel\Permissions\PermissionSchema;
 use ZeroForLaravel\Permissions\PermissionServiceProvider;
+use ZeroForLaravel\Permissions\PolicyCompiler;
+use ZeroForLaravel\Permissions\PolicyPlan;
 use ZeroForLaravel\Tests\Fixtures\PermissionAdminPolicy;
 use ZeroForLaravel\Tests\Fixtures\PermissionList;
+use ZeroForLaravel\Tests\Fixtures\PermissionListPolicy;
 use ZeroForLaravel\Tests\Fixtures\PermissionUser;
 use ZeroForLaravel\Tests\TestCase;
 
@@ -55,17 +61,17 @@ beforeEach(function (): void {
         Gate::authorize('view', $list);
 
         return $list;
-    })->middleware(\Illuminate\Routing\Middleware\SubstituteBindings::class);
+    })->middleware(SubstituteBindings::class);
     Route::patch('/permission-lists/{list}', function (PermissionList $list) {
         Gate::authorize('update', $list);
 
         return response()->noContent();
-    })->middleware(\Illuminate\Routing\Middleware\SubstituteBindings::class);
+    })->middleware(SubstituteBindings::class);
     Route::delete('/permission-lists/{list}', function (PermissionList $list) {
         Gate::authorize('delete', $list);
 
         return response()->noContent();
-    })->middleware(\Illuminate\Routing\Middleware\SubstituteBindings::class);
+    })->middleware(SubstituteBindings::class);
 });
 
 test('ordinary discovered policies protect REST without resolving Zero or generated registrations', function (): void {
@@ -150,7 +156,7 @@ test('attribute decisions refresh persisted facts and normal Laravel admin overr
 });
 
 test('portable policy compilation follows normal policy remapping and denial overrides', function (): void {
-    $compiler = new \ZeroForLaravel\Permissions\PolicyCompiler;
+    $compiler = new PolicyCompiler;
     $original = $compiler->compile(PermissionList::class);
     expect($original->action)->toBe('view');
     expect($original->deniedStatus)->toBe(403);
@@ -160,22 +166,22 @@ test('portable policy compilation follows normal policy remapping and denial ove
     expect($remapped->adminAttribute)->toBe('is_admin');
     expect($remapped->fingerprint)->not->toBe($original->fingerprint);
     Gate::before(fn (): bool => true);
-    expect(fn (): \ZeroForLaravel\Permissions\PolicyPlan => $compiler->compile(PermissionList::class))->toThrow(LogicException::class, 'Global Gate before/after hooks');
+    expect(fn (): PolicyPlan => $compiler->compile(PermissionList::class))->toThrow(LogicException::class, 'Global Gate before/after hooks');
 });
 
 test('portable compilation rejects missing abilities and arbitrary policy bodies even for admins', function (): void {
-    $compiler = new \ZeroForLaravel\Permissions\PolicyCompiler;
+    $compiler = new PolicyCompiler;
     Gate::policy(PermissionList::class, stdClass::class);
-    expect(fn (): \ZeroForLaravel\Permissions\PolicyPlan => $compiler->compile(PermissionList::class))->toThrow(LogicException::class, 'requires a Laravel policy');
-    $policy = new class extends \ZeroForLaravel\Tests\Fixtures\PermissionListPolicy
+    expect(fn (): PolicyPlan => $compiler->compile(PermissionList::class))->toThrow(LogicException::class, 'requires a Laravel policy');
+    $policy = new class extends PermissionListPolicy
     {
-        public function view(PermissionUser $user, PermissionList $list): \Illuminate\Auth\Access\Response
+        public function view(PermissionUser $user, PermissionList $list): Response
         {
             return Casbin::inspect($user, 'view', $list)->withStatus(404);
         }
     };
     Gate::policy(PermissionList::class, $policy::class);
-    expect(fn (): \ZeroForLaravel\Permissions\PolicyPlan => $compiler->compile(PermissionList::class))->toThrow(LogicException::class, 'denial overrides');
+    expect(fn (): PolicyPlan => $compiler->compile(PermissionList::class))->toThrow(LogicException::class, 'denial overrides');
 });
 
 test('unsupported Casbin expressions fail explicitly instead of becoming an unrestricted query', function (string $expression, string $diagnostic): void {
@@ -188,9 +194,9 @@ test('unsupported Casbin expressions fail explicitly instead of becoming an unre
     file_put_contents($path, preg_replace('/^m = .+$/m', 'm = '.$expression, $source));
     config(['permissions.models.default' => $path]);
     try {
-        expect(fn (): \ZeroForLaravel\Permissions\PolicyPlan => (new \ZeroForLaravel\Permissions\PolicyCompiler)->compile(PermissionList::class))->toThrow(LogicException::class, $diagnostic);
+        expect(fn (): PolicyPlan => (new PolicyCompiler)->compile(PermissionList::class))->toThrow(LogicException::class, $diagnostic);
     } finally {
-        \Illuminate\Support\Facades\File::delete($path);
+        File::delete($path);
     }
 })->with([
     'eval' => ['eval(p.cond)', 'custom functions, eval and clock'],
@@ -213,7 +219,7 @@ test('published model families produce ordinary Gate decisions and portable plan
 
     expect(Gate::forUser($alice)->allows('view', $list))->toBeTrue();
     expect(Gate::forUser($bob)->allows('view', $list))->toBeFalse();
-    expect((new \ZeroForLaravel\Permissions\PolicyCompiler)->compile(PermissionList::class)->action)->toBe('view');
+    expect((new PolicyCompiler)->compile(PermissionList::class)->action)->toBe('view');
 })->with([
     'ACL' => ['global-acl', 'user:42, todo-list, view, any, allow', ''],
     'global RBAC' => ['global-rbac', 'role:reader, todo-list, view, any, allow', 'user:42, role:reader'],

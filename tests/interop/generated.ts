@@ -2,6 +2,8 @@
 import {table, string, number, boolean, json, relationships, createSchema} from '@rocicorp/zero';
 import type {ContractMap, ModelRow} from '@nickwelsh/zero-for-laravel';
 
+export type Context = {readonly "user_id": string | null;};
+export const contextContract = {"user_id":{"type":"string","nullable":true}} as const;
 const table0 = table("comments").columns({
   "id": string(),
   "task_id": string(),
@@ -81,15 +83,20 @@ export const definitions = {
                 "default": null
             }
         },
-        "serverFill": {},
         "writable": [],
+        "scopeFingerprint": "35786c7117b4e38d0f169239752ce71158266ae2f6e4aa230fbbb87bd699c0e3",
+        "creationDefaults": {
+            "op": "merge",
+            "values": []
+        },
         "idGenerator": null,
         "timestamps": {
             "created": null,
             "updated": null,
             "deleted": null
         },
-        "relations": {}
+        "relations": {},
+        "relationConstraints": {}
     },
     "Tag": {
         "name": "Tag",
@@ -121,15 +128,20 @@ export const definitions = {
                 "default": null
             }
         },
-        "serverFill": {},
         "writable": [],
+        "scopeFingerprint": "35786c7117b4e38d0f169239752ce71158266ae2f6e4aa230fbbb87bd699c0e3",
+        "creationDefaults": {
+            "op": "merge",
+            "values": []
+        },
         "idGenerator": null,
         "timestamps": {
             "created": null,
             "updated": null,
             "deleted": null
         },
-        "relations": {}
+        "relations": {},
+        "relationConstraints": {}
     },
     "Task": {
         "name": "Task",
@@ -210,15 +222,40 @@ export const definitions = {
                 "default": null
             }
         },
-        "serverFill": {
-            "user_id": "user_id"
-        },
         "writable": [
+            "user_id",
             "list_id",
             "title",
             "done",
             "completed_at"
         ],
+        "scopeFingerprint": "fae932e1cd8b0385d7e7593e3e09afcba51d8494c277942e13f57de06da3d7fb",
+        "creationDefaults": {
+            "op": "merge",
+            "values": [
+                {
+                    "op": "merge",
+                    "values": [
+                        {
+                            "op": "object",
+                            "items": [
+                                {
+                                    "key": "user_id",
+                                    "value": {
+                                        "op": "context",
+                                        "field": "user_id"
+                                    }
+                                }
+                            ]
+                        }
+                    ]
+                },
+                {
+                    "op": "merge",
+                    "values": []
+                }
+            ]
+        },
         "idGenerator": "uuid",
         "timestamps": {
             "created": "created_at",
@@ -280,6 +317,20 @@ export const definitions = {
                     }
                 ]
             }
+        },
+        "relationConstraints": {
+            "list": {
+                "wheres": [],
+                "orders": []
+            },
+            "tags": {
+                "wheres": [],
+                "orders": []
+            },
+            "comments": {
+                "wheres": [],
+                "orders": []
+            }
         }
     },
     "TaskList": {
@@ -312,8 +363,12 @@ export const definitions = {
                 "default": null
             }
         },
-        "serverFill": {},
         "writable": [],
+        "scopeFingerprint": "35786c7117b4e38d0f169239752ce71158266ae2f6e4aa230fbbb87bd699c0e3",
+        "creationDefaults": {
+            "op": "merge",
+            "values": []
+        },
         "idGenerator": null,
         "timestamps": {
             "created": null,
@@ -335,6 +390,12 @@ export const definitions = {
                         "table": "tasks"
                     }
                 ]
+            }
+        },
+        "relationConstraints": {
+            "tasks": {
+                "wheres": [],
+                "orders": []
             }
         }
     }

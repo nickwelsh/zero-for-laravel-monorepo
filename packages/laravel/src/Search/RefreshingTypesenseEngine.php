@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace ZeroForLaravel\Search;
 
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
 use InvalidArgumentException;
 use Laravel\Scout\Engines\TypesenseEngine;
@@ -15,14 +16,14 @@ use Typesense\Exceptions\ObjectNotFound;
 /** Opt in through Scout's engine manager; covers queued and synchronous indexing. */
 final class RefreshingTypesenseEngine extends TypesenseEngine
 {
-    /** @param \Illuminate\Database\Eloquent\Collection<int, Model> $models */
+    /** @param Collection<int, Model> $models */
     public function update($models): void
     {
         parent::update($models);
         $this->changed($models);
     }
 
-    /** @param \Illuminate\Database\Eloquent\Collection<int, Model> $models */
+    /** @param Collection<int, Model> $models */
     public function delete($models): void
     {
         parent::delete($models);

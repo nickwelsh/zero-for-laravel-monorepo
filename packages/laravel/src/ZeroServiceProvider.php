@@ -5,14 +5,19 @@ declare(strict_types=1);
 namespace ZeroForLaravel;
 
 use Closure;
+use Illuminate\Contracts\Http\Kernel;
 use Illuminate\Database\Events\MigrationsEnded;
 use Illuminate\Database\Migrations\Migrator;
 use Illuminate\Foundation\Application;
+use Illuminate\Routing\Events\RouteMatched;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\ServiceProvider;
+use Laravel\Ranger\RangerServiceProvider;
+use Laravel\Surveyor\SurveyorServiceProvider;
 use LogicException;
 use ReflectionMethod;
+use Typesense\Client;
 use ZeroForLaravel\Console\DevCommand;
 use ZeroForLaravel\Console\DoctorCommand;
 use ZeroForLaravel\Console\ExposureCommand;
@@ -30,8 +35,8 @@ final class ZeroServiceProvider extends ServiceProvider
 {
     public function register(): void
     {
-        $this->app->register(\Laravel\Surveyor\SurveyorServiceProvider::class);
-        $this->app->register(\Laravel\Ranger\RangerServiceProvider::class);
+        $this->app->register(SurveyorServiceProvider::class);
+        $this->app->register(RangerServiceProvider::class);
         $this->app->register(Permissions\PermissionServiceProvider::class);
         $this->app->singletonIf(Generation\SchemaDriver::class, Generation\ZodSchemaDriver::class);
         $this->mergeConfigFrom(__DIR__.'/../config/zero.php', 'zero');
@@ -54,8 +59,8 @@ final class ZeroServiceProvider extends ServiceProvider
 
             return $registry;
         });
-        if (class_exists(\Typesense\Client::class)) {
-            $this->app->singletonIf(\Typesense\Client::class, fn (): \Typesense\Client => new \Typesense\Client(config()->array('scout.typesense.client-settings')));
+        if (class_exists(Client::class)) {
+            $this->app->singletonIf(Client::class, fn (): Client => new Client(config()->array('scout.typesense.client-settings')));
         }
 
         $this->app->singleton(function (Application $app): ModelRegistry {
@@ -71,7 +76,7 @@ final class ZeroServiceProvider extends ServiceProvider
 
     public function boot(): void
     {
-        Event::listen(\Illuminate\Routing\Events\RouteMatched::class, static function (\Illuminate\Routing\Events\RouteMatched $event): void {
+        Event::listen(RouteMatched::class, static function (RouteMatched $event): void {
             if ($event->request->attributes->get('zero.controller.dispatch') === true) {
                 return;
             }
@@ -82,7 +87,7 @@ final class ZeroServiceProvider extends ServiceProvider
                 abort(405, 'Submit this action through its generated Zero mutation binding.');
             }
         });
-        $this->callAfterResolving(\Illuminate\Contracts\Http\Kernel::class, static function (\Illuminate\Foundation\Http\Kernel $kernel): void {
+        $this->callAfterResolving(Kernel::class, static function (\Illuminate\Foundation\Http\Kernel $kernel): void {
             // Capture original transport cookies before the web group decrypts them.
             $kernel->prependToMiddlewarePriority(AuthenticateZeroCache::class);
             $kernel->prependToMiddlewarePriority(Http\CaptureTransportCookies::class);

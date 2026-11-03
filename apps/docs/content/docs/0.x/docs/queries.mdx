@@ -1,6 +1,6 @@
 ---
 title: Controller queries
-description: Declare immutable native ZQL queries alongside ordinary Inertia props.
+description: Compose mutable Zero queries, scopes, includes, and parent filters alongside Inertia props.
 ---
 
 Add `ZeroForLaravel\Concerns\HasZeroQueries` to participating models. Declare
@@ -21,10 +21,12 @@ emits matching native TypeScript ZQL and authoritative PHP registrations. Input
 comes from the declared route/FormRequest contract. Laravel validates and
 authorizes each server invocation; the browser cannot supply an authoritative AST.
 
-Queries are immutable. The PHP construction surface includes `where`, expression
-callbacks, `whereExists`, `related`, `orderBy`, `limit`, `start`, and `one`.
-Expression callbacks support comparisons, conjunction, disjunction, negation,
-existence, and literal comparisons. Model visibility applies at every related scope.
+`zeroQuery()` returns a mutable `ZeroForLaravel\Query\ZeroQuery`, separate from
+Eloquent's query builder. Use `where`, predicate callbacks, `with`, `whereHas`,
+`orderBy`, `limit`, `start`, and `one`. Supported expression callbacks provide
+comparisons, conjunction, disjunction, negation, existence, and literal comparisons.
+Native `related` and correlated `EXISTS` are compilation details; the Laravel-facing
+API uses `with` and `whereHas`, with no `related()` compatibility alias.
 
 Use `infinite(size)` for an expanding live window and `paginate(size)` for cursor
 pages. These require deterministic ordering. Raw cursor values retain storage
@@ -43,6 +45,58 @@ Generation supports a checked PHP subset around query declarations. Unknown call
 unsupported control flow, or ambiguous output fail with source diagnostics. It
 does not run arbitrary controllers to guess what queries they might return.
 
+## Mutable query composition
+
+Builder calls mutate and return the same builder. Scope methods may return `void`
+or the same builder, so both statement-style scopes and fluent chains work. Use an
+explicit clone when creating independent branches:
+
+```php
+$base = Todo::zeroQuery()->where('list_id', $listId);
+$active = (clone $base)->where('completed', false);
+$completed = (clone $base)->completed();
+```
+
+`$active = $base` alone does not create a branch. Direct `Todo::completed()` and
+`Todo::zeroQuery()->completed()` invoke the same `#[ZeroScope]` method. Dynamic
+scope arguments are supported within the checked input/expression subset. The
+Eloquent-like higher-order form `Todo::completed()->orWhere->assignedTo($userId)`
+groups the next scope's conditions with OR. See [local scopes](./models.mdx#local-zero-scopes).
+
+Nested predicate callbacks and higher-order OR scopes contribute **conditions
+only**. A `withAttributes(...)` call inside one does not leak creation defaults
+onto the parent builder. Root/local scope defaults are different: see
+[creation precedence](./mutations.mdx#creation-defaults).
+
+## Includes and parent filters
+
+Use `with` to select related rows, and `whereHas` to keep only parents with a
+matching related row. They are different operations:
+
+```php
+use ZeroForLaravel\Query\ZeroQuery;
+
+$lists = TodoList::zeroQuery()
+    ->whereHas('todos', fn (ZeroQuery $todos) => $todos->completed())
+    ->with('todos', fn (ZeroQuery $todos) => $todos->completed()->orderBy('title', 'asc'));
+```
+
+This returns lists with at least one completed todo and includes their completed
+todos. `with` by itself would not filter out a list with an empty matching include.
+Relationship definitions come from supported Eloquent relationships between
+opted-in models, not a `relations(...)` metadata list.
+
+Each related query applies its model's global scopes independently. Parent scope
+removal does not remove child scopes; remove a child's scope explicitly inside
+its callback if trusted application logic requires it. Related builders do not
+contribute creation defaults to the parent. Eloquent relationship calls such as
+`$list->todos()` remain Eloquent and cannot invoke a Zero scope.
+
+The compiler checks relationship keys, target enrollment, and constraints. It
+does not auto-enroll target models, expose private correlation columns, or silently
+ignore unsupported relationship constraints. See [model relationships](./models.mdx#eloquent-relationships-zero-includes)
+and [membership-based visibility](./authorization.mdx#membership-based-todo-sharing).
+
 ## FormRequest inputs
 
 Use a FormRequest for editable filters. A finite rule becomes both a literal
@@ -59,9 +113,9 @@ public function rules(): array
 public function index(DashboardRequest $request): \Inertia\Response
 {
     $values = $request->validated();
-    $lists = TodoList::zeroQuery()->related('todos');
+    $lists = TodoList::zeroQuery()->with('todos');
     if (isset($values['status']) && $values['status'] !== 'all') {
-        $lists = TodoList::zeroQuery()->related('todos', fn ($todos) => $todos
+        $lists = TodoList::zeroQuery()->with('todos', fn ($todos) => $todos
             ->where('completed', $values['status'] === 'completed'));
     }
 
@@ -74,6 +128,9 @@ rules supply finite options. Chained enum restrictions and dynamic option lists
 are not inferred; use an explicit static list when needed. Options are values,
 not translated labels. Laravel remains authoritative for authorization, validation,
 and request preparation on each transform.
+
+This example filters the included todos, not which lists are returned. Add a
+matching `whereHas('todos', ...)` when the filter should also restrict the lists.
 
 The [React adapter](./react.mdx#editable-live-inputs) exposes `inputs.values`,
 `inputs.options`, `inputs.set`, and `inputs.reset`. Only FormRequest business

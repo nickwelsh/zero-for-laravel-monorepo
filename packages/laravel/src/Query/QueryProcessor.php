@@ -5,9 +5,11 @@ declare(strict_types=1);
 namespace ZeroForLaravel\Query;
 
 use Illuminate\Auth\Access\AuthorizationException;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Validation\ValidationException;
+use Symfony\Component\HttpKernel\Exception\HttpExceptionInterface;
+use ZeroForLaravel\ResolvedContext;
 use ZeroForLaravel\Support\Input;
-use ZeroForLaravel\ZeroContext;
 
 /**
  * @phpstan-type QueryResult array{id: string, name: string, ast?: array<string, mixed>, error?: 'parse'|'app', message?: string, details?: array{fields: array<array-key, mixed>}|array{status: int}}
@@ -21,7 +23,7 @@ final readonly class QueryProcessor
     /**
      * @return TransformFailed|QueryResponse
      */
-    public function process(mixed $body, ZeroContext $context): array
+    public function process(mixed $body, ResolvedContext $context): array
     {
         // Zero can revalidate every retained query in one batch, including
         // queries no longer displayed. AuthenticateZeroCache bounds the body
@@ -65,10 +67,10 @@ final readonly class QueryProcessor
                 $result['ast'] = $registered->invoke($request['args'][0], $context, $this->compiler);
             } catch (ValidationException $error) {
                 $result += ['error' => 'parse', 'message' => 'Invalid query arguments.', 'details' => ['fields' => $error->errors()]];
-            } catch (AuthorizationException|\Illuminate\Database\Eloquent\ModelNotFoundException|\Symfony\Component\HttpKernel\Exception\HttpExceptionInterface $error) {
+            } catch (AuthorizationException|ModelNotFoundException|HttpExceptionInterface $error) {
                 $status = match (true) {
                     $error instanceof AuthorizationException => $error->status() ?? config()->integer('permissions.denied_status'),
-                    $error instanceof \Illuminate\Database\Eloquent\ModelNotFoundException => 404,
+                    $error instanceof ModelNotFoundException => 404,
                     default => $error->getStatusCode(),
                 };
                 $result += ['error' => 'app', 'message' => $status === 404 ? 'Not found.' : 'This query is not authorized.', 'details' => ['status' => $status]];

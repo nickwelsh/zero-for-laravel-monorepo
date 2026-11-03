@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace ZeroForLaravel\Inertia;
 
+use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Support\ServiceProvider;
 use LogicException;
 use ZeroForLaravel\Query\RegisteredQueries;
@@ -19,7 +20,7 @@ final class ZeroInertiaServiceProvider extends ServiceProvider
         }
 
         $this->app->singleton(\Inertia\ResponseFactory::class, ResponseFactory::class);
-        $this->app->afterResolving(\Illuminate\Foundation\Http\FormRequest::class, function (\Illuminate\Foundation\Http\FormRequest $form): void {
+        $this->app->afterResolving(FormRequest::class, function (FormRequest $form): void {
             request()->attributes->set('zero.form.'.$form::class, $form);
         });
         $this->app->singleton(RegisteredQueries::class, fn (): RegisteredQueries => RegisteredQueries::load(config()->string('zero.controller_output')));

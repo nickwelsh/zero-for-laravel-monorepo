@@ -14,7 +14,7 @@ supported captured instance Gate can protect its bound resource and descendants.
 Related targets must be registered. Caller filters remain outside the admin OR.
 
 There is no `ZeroDefinition`, model `zero()` method, implicit visibility global scope,
-or PHP-only server-scope escape hatch. `zero.models` explicitly selects publication;
+or PHP-only server-scope escape hatch. `zero.models` or trait discovery selects publication;
 `zero.public_models` explicitly selects public reads. Database bindings live in
 `permissions.resources`; normal Laravel discovery resolves policies. Unsupported
 hooks, scopes or matchers fail instead of weakening a query. See
@@ -29,14 +29,27 @@ explicit Gates. Association IDs require their own checks.
 
 ## Checked query declarations
 
-Use immutable `Model::zeroQuery()` declarations in a final `Inertia::render()` prop
+Use mutable `Model::zeroQuery()` declarations in a final `Inertia::render()` prop
 array. Supported surrounding PHP includes typed route inputs, backed enums,
 validated FormRequest fields, local assignments, boolean branches, comparisons,
 and arrow callbacks. Unsupported guards and dependencies fail with source locations.
-Arbitrary controller effects are not replayed on query transforms.
+Arbitrary controller effects are not replayed on query transforms. Aliases share
+builder changes; clone a builder for independent branches. `with()`, `whereHas()`
+and `whereDoesntHave()` replace the old public `related()` API. Group callbacks
+receive a mutable `ZeroQuery`, not an expression builder.
+
+Local Zero scopes are nonpublic `#[ZeroScope]` methods accepting `ZeroQuery`.
+Global query construction uses `ZeroGlobalScope`, `#[ZeroScopedBy]`, or named
+`addZeroGlobalScope()` registrations. Removing a global removes its predicates
+and creation defaults. Global constraints remain outside caller OR groups.
+`withAttributes()` supplies creation defaults and, unless `asConditions: false`,
+query predicates. Explicit creation attributes override defaults; updates do not
+receive defaults. Defaults are not authorization. Application enum context fields
+resolve through `#[ResolvesContext]` methods; authenticated identity is independent
+of those values. Literal enum `->value` is not a context reference.
 
 The ZQL construction surface targets Zero 1.11.3: comparisons, membership, patterns,
-null tests, boolean expression groups, literal comparisons, correlated existence,
+null tests, grouped query predicates, correlated existence,
 relationship refinement, ordering, raw cursors, limits, and singular results.
 Existence supports `flip` and `scalar`; native scalar hints require unique-key
 constraints. Sort direction may be literal or an asc/desc backed enum.

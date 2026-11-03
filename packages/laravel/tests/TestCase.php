@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace ZeroForLaravel\Tests;
 
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
 use Orchestra\Testbench\TestCase as Orchestra;
@@ -21,8 +22,8 @@ abstract class TestCase extends Orchestra
     }
 
     /**
-     * @param  list<class-string<\Illuminate\Database\Eloquent\Model>>  $classes
-     * @return list<class-string<\Illuminate\Database\Eloquent\Model>>
+     * @param  list<class-string<Model>>  $classes
+     * @return list<class-string<Model>>
      */
     public function models(array $classes = []): array
     {
@@ -67,6 +68,8 @@ abstract class TestCase extends Orchestra
 
     protected function defineEnvironment($app): void
     {
+        $app['config']->set('zero.context', Fixtures\ZeroContext::class);
+        $app['config']->set('zero.context_resolver', Fixtures\ContextResolver::class);
         $app['config']->set('database.default', 'testing');
         $app['config']->set('database.connections.testing', [
             'driver' => 'sqlite', 'database' => ':memory:', 'prefix' => '',

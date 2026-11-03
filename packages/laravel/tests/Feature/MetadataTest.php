@@ -6,26 +6,26 @@ namespace ZeroForLaravel\Tests\Feature;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
 use LogicException;
 use ZeroForLaravel\Attributes\ZeroExclude;
-use ZeroForLaravel\ContextField;
+use ZeroForLaravel\Context\ContextReference;
 use ZeroForLaravel\Metadata\ModelRegistry;
 use ZeroForLaravel\Mutation\Mutation;
-use ZeroForLaravel\Query\Query;
+use ZeroForLaravel\Query\ZeroQuery;
+use ZeroForLaravel\ResolvedContext;
 use ZeroForLaravel\Tests\Fixtures\Comment;
 use ZeroForLaravel\Tests\Fixtures\Tag;
 use ZeroForLaravel\Tests\Fixtures\Task;
 use ZeroForLaravel\Tests\Fixtures\TaskList;
 use ZeroForLaravel\Tests\OwnerTestCase as TestCase;
-use ZeroForLaravel\ZeroContext;
 
 uses(TestCase::class);
 
 beforeEach(function (): void {
-    config(['zero.public_models' => [Calendar::class, WrongKeyTask::class, ExcludedTask::class, InvalidRelationTask::class, HiddenRelationTask::class, CastTask::class],
-        'zero.mutation_context.'.CastTask::class => ['user_id' => ContextField::UserId]]);
+    config(['zero.public_models' => [Calendar::class, WrongKeyTask::class, ExcludedTask::class, InvalidRelationTask::class, HiddenRelationTask::class, CastTask::class]]);
 });
 
 class ExternalTask extends Model
@@ -44,14 +44,14 @@ class ExternalTask extends Model
 }
 
 test('external publication and mutation metadata need no model definition and relationships are collected on demand', function (): void {
-    config(['zero.public_models' => [ExternalTask::class], 'zero.mutation_context' => [ExternalTask::class => ['user_id' => ContextField::UserId]]]);
+    config(['zero.public_models' => [ExternalTask::class]]);
     $registry = new ModelRegistry([ExternalTask::class]);
     $task = $registry->get('ExternalTask');
-    expect($task->serverFill)->toBe(['user_id' => 'user_id']);
-    expect($task->writable)->toBe(['title']);
+    expect((new ZeroQuery($task, $registry))->pendingAttributes())->toBe([]);
+    expect($task->writable)->toBe(['user_id', 'title']);
     expect($task->relations)->toBe([]);
-    expect(fn (): Query => (new Query($task, $registry))->related('delete'))->toThrow(LogicException::class, 'relationship');
-    expect(fn (): Query => (new Query($task, $registry))->related('parent'))->toThrow(LogicException::class, 'Unknown Zero model');
+    expect(fn (): ZeroQuery => (new ZeroQuery($task, $registry))->with('delete'))->toThrow(LogicException::class, 'relationship');
+    expect(fn (): ZeroQuery => (new ZeroQuery($task, $registry))->with('parent'))->toThrow(LogicException::class, 'Unknown Zero model');
     expect($task->columns)->not->toHaveKey('secret');
 });
 
@@ -79,8 +79,10 @@ test('resolves one column plan and separate public mutation inputs', function ()
     $this->assertTrue($task->columns['completed_at']['date']);
     $this->assertSame('boolean', $task->columns['done']['type']);
     $this->assertSame(false, $task->columns['done']['default']);
-    $this->assertSame(['list_id', 'title', 'done', 'completed_at'], $task->writable);
-    $this->assertSame(['user_id' => 'user_id'], $task->serverFill);
+    $this->assertSame(['user_id', 'list_id', 'title', 'done', 'completed_at'], $task->writable);
+    $defaults = (new ZeroQuery($task, $registry))->pendingAttributes();
+    $this->assertInstanceOf(ContextReference::class, $defaults['user_id']);
+    $this->assertSame('user_id', $defaults['user_id']->field);
     $this->assertSame([], $task->relations);
     $relation = $registry->relation($task, 'list');
     $this->assertSame('TaskList', $relation['model']);
@@ -144,6 +146,49 @@ class InvalidRelationTask extends Task
     }
 }
 
+class InvalidDefinitionTask extends Model
+{
+    protected $table = 'tasks';
+
+    public static function zero(): string
+    {
+        return 'invalid';
+    }
+}
+
+test('legacy model definitions are rejected regardless of return type', function (): void {
+    config(['zero.public_models' => [InvalidDefinitionTask::class]]);
+    new ModelRegistry([InvalidDefinitionTask::class]);
+})->throws(LogicException::class, 'legacy zero()/ZeroDefinition is unsupported');
+
+class ParentDependentTask extends Task
+{
+    /** @return HasMany<Comment, $this> */
+    public function comments(): HasMany
+    {
+        return $this->hasMany(Comment::class, 'task_id')->where('user_id', $this->user_id);
+    }
+}
+
+class ParentAccessorTask extends Task
+{
+    /** @return HasMany<Comment, $this> */
+    public function comments(): HasMany
+    {
+        return $this->hasMany(Comment::class, 'task_id')->where('user_id', $this->getAttribute('user_id'));
+    }
+}
+
+test('collected relationships reject parent values instead of freezing a blank instance', function (): void {
+    config(['zero.public_models' => [ParentDependentTask::class, ParentAccessorTask::class]]);
+    foreach ([ParentDependentTask::class, ParentAccessorTask::class] as $class) {
+        $registry = new ModelRegistry([$class, Comment::class]);
+        $parent = $registry->get(class_basename($class));
+        expect(fn (): array => $registry->relation($parent, 'comments'))
+            ->toThrow(LogicException::class, 'nonportable parent-instance relationship logic');
+    }
+});
+
 test('relationships are validated lazily and require a typed public Eloquent method', function (): void {
     $registry = new ModelRegistry([InvalidRelationTask::class]);
     expect($registry->get('InvalidRelationTask')->relations)->toBe([]);
@@ -158,7 +203,7 @@ enum CastStatus: string
 
 class CastTask extends Task
 {
-    protected $fillable = ['title', 'options', 'status', 'completed_at', 'scheduled_at'];
+    protected $fillable = ['user_id', 'title', 'options', 'status', 'completed_at', 'scheduled_at'];
 
     /** @return array<string, string> */
     protected function casts(): array
@@ -182,8 +227,8 @@ test('exports native cast metadata including implicit timestamps and backed enum
     expect($model->columns['done']['cast'] ?? null)->toBe('boolean');
     expect($model->columns['scheduled_at']['dateFormat'] ?? null)->toBe('Y-m-d H:i:s');
 
-    $query = new Query($model, new ModelRegistry([CastTask::class]));
-    expect(data_get($query->where('scheduled_at', '2026-10-30T20:31:45+02:00')->ast(), 'where.right.value'))->toBe('2026-10-30 18:31:45');
+    $query = new ZeroQuery($model, new ModelRegistry([CastTask::class]));
+    expect(data_get($query->withoutGlobalScopes()->where('scheduled_at', '2026-10-30T20:31:45+02:00')->ast(), 'where.right.value'))->toBe('2026-10-30 18:31:45');
 });
 
 test('controller mutation primitives preserve JSON enum date casts and patch semantics through Eloquent', function (): void {
@@ -194,7 +239,7 @@ test('controller mutation primitives preserve JSON enum date casts and patch sem
     });
     $registry = new ModelRegistry([CastTask::class]);
     $id = '019a0000-0000-7000-8000-000000000001';
-    $mutation = new Mutation($registry, ['timestamp' => 1700000000123, 'ids' => ['key:cast' => $id]], new ZeroContext(['user_id' => 'alice']));
+    $mutation = new Mutation($registry, ['timestamp' => 1700000000123, 'ids' => ['key:cast' => $id]], new ResolvedContext(['user_id' => 'alice'], 'alice'));
     $registry->connection()->transaction(function () use ($mutation, $id): void {
         $task = $mutation->create(CastTask::class, [
             'title' => 'Casts', 'options' => ['theme' => 'dark'], 'status' => 'published',

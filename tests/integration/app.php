@@ -10,9 +10,25 @@ use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Auth\User;
 use Illuminate\Foundation\Bootstrap\LoadConfiguration;
 use Illuminate\Http\Request;
+use Illuminate\Routing\Middleware\SubstituteBindings;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Gate;
-use ZeroForLaravel\Tests\Fixtures\{Task, TaskList, Tag, Comment};
+use Illuminate\Support\Facades\Route;
+use Inertia\Inertia;
+use Inertia\Response;
+use Symfony\Component\Console\Output\ConsoleOutput;
+use ZeroForLaravel\Attributes\ZeroMutation;
+use ZeroForLaravel\Generation\Mutations\ControllerMutationCompiler;
+use ZeroForLaravel\Permissions\Casbin;
+use ZeroForLaravel\Tests\Fixtures\Comment;
+use ZeroForLaravel\Tests\Fixtures\ContextResolver;
+use ZeroForLaravel\Tests\Fixtures\ControllerMutationRequest;
+use ZeroForLaravel\Tests\Fixtures\OwnerPermissions;
+use ZeroForLaravel\Tests\Fixtures\QueryController;
+use ZeroForLaravel\Tests\Fixtures\Tag;
+use ZeroForLaravel\Tests\Fixtures\Task;
+use ZeroForLaravel\Tests\Fixtures\TaskList;
+use ZeroForLaravel\Tests\Fixtures\ZeroContext;
 use ZeroForLaravel\ZeroServiceProvider;
 
 class FixtureIdentity
@@ -24,18 +40,21 @@ class FixtureIdentity
         $user = (new User)->setKeyType('string')->forceFill(['id' => $identity]);
         auth()->setUser($user);
         $request->setUserResolver(fn () => $user);
-        if ($request->is('callbacks/zero/query') && str_contains($request->getContent(), '"desc"')) { usleep(1200000); }
+        if ($request->is('callbacks/zero/query') && str_contains($request->getContent(), '"desc"')) {
+            usleep(1200000);
+        }
+
         return $next($request);
     }
 }
 
 class FixtureReads
 {
-    public function index(Request $request): \Inertia\Response
+    public function index(Request $request): Response
     {
-        return \Inertia\Inertia::render('fixture/related', [
+        return Inertia::render('fixture/related', [
             'tasks' => Task::zeroQuery()->visibleTo($request->user())
-                ->related('tags', fn ($tags) => $tags->visibleTo($request->user())),
+                ->with('tags', fn ($tags) => $tags->visibleTo($request->user())),
         ]);
     }
 }
@@ -43,15 +62,16 @@ class FixtureReads
 class FixtureMutations
 {
     /** @return array{id: string} */
-    #[\ZeroForLaravel\Attributes\ZeroMutation]
-    public function store(\ZeroForLaravel\Tests\Fixtures\ControllerMutationRequest $request): array
+    #[ZeroMutation]
+    public function store(ControllerMutationRequest $request): array
     {
         $task = Task::create($request->validated());
+
         return ['id' => $task->id];
     }
 
-    #[\ZeroForLaravel\Attributes\ZeroMutation]
-    public function update(\ZeroForLaravel\Tests\Fixtures\ControllerMutationRequest $request, Task $task): void
+    #[ZeroMutation]
+    public function update(ControllerMutationRequest $request, Task $task): void
     {
         Gate::authorize('update', $task);
         $task->update($request->validated());
@@ -59,7 +79,9 @@ class FixtureMutations
 }
 
 $root = getenv('ZERO_INTEGRATION_ROOT');
-if (! is_string($root) || ! is_dir($root) || ! str_starts_with(basename($root), 'zero-live-')) { throw new RuntimeException('Missing isolated fixture root.'); }
+if (! is_string($root) || ! is_dir($root) || ! str_starts_with(basename($root), 'zero-live-')) {
+    throw new RuntimeException('Missing isolated fixture root.');
+}
 $app = Application::configure(basePath: $root)->withProviders([ZeroServiceProvider::class])->withExceptions()->create();
 $app->afterBootstrapping(LoadConfiguration::class, function ($app) use ($root) {
     $app['config']->set([
@@ -73,6 +95,8 @@ $app->afterBootstrapping(LoadConfiguration::class, function ($app) use ($root) {
             'charset' => 'utf8', 'prefix' => '', 'search_path' => 'public', 'sslmode' => 'prefer',
         ],
         'zero.models' => [Task::class, TaskList::class, Tag::class, Comment::class],
+        'zero.context' => ZeroContext::class,
+        'zero.context_resolver' => ContextResolver::class,
         'zero.middleware' => [FixtureIdentity::class], 'zero.api_key' => getenv('ZERO_API_KEY'),
         'zero.app_id' => getenv('ZERO_APP_ID'), 'zero.upstream_schema' => getenv('ZERO_APP_ID').'_0',
         'zero.publication' => getenv('ZERO_APP_PUBLICATIONS'), 'zero.output' => $root.'/generated.ts',
@@ -81,31 +105,40 @@ $app->afterBootstrapping(LoadConfiguration::class, function ($app) use ($root) {
     ]);
 });
 ini_set('error_log', $root.'/php.log');
-$kernel = $app->make(PHP_SAPI === 'cli' ? \Illuminate\Contracts\Console\Kernel::class : Kernel::class);
+$kernel = $app->make(PHP_SAPI === 'cli' ? Illuminate\Contracts\Console\Kernel::class : Kernel::class);
 $kernel->bootstrap();
-\ZeroForLaravel\Tests\Fixtures\OwnerPermissions::configure();
-\Illuminate\Support\Facades\Route::post('/fixture/tasks', [FixtureMutations::class, 'store'])->middleware(FixtureIdentity::class);
-\Illuminate\Support\Facades\Route::put('/fixture/tasks/{task}', [FixtureMutations::class, 'update'])->middleware([FixtureIdentity::class, \Illuminate\Routing\Middleware\SubstituteBindings::class]);
-\Illuminate\Support\Facades\Route::get('/fixture/tasks/sorted/{direction}', [\ZeroForLaravel\Tests\Fixtures\QueryController::class, 'sorted'])->middleware([FixtureIdentity::class, \Illuminate\Routing\Middleware\SubstituteBindings::class]);
-\Illuminate\Support\Facades\Route::get('/fixture/tasks/{task}', [\ZeroForLaravel\Tests\Fixtures\QueryController::class, 'show'])->middleware([FixtureIdentity::class, \Illuminate\Routing\Middleware\SubstituteBindings::class]);
-\Illuminate\Support\Facades\Route::get('/fixture/related', [FixtureReads::class, 'index'])->middleware(FixtureIdentity::class);
+OwnerPermissions::configure();
+Route::post('/fixture/tasks', [FixtureMutations::class, 'store'])->middleware(FixtureIdentity::class);
+Route::put('/fixture/tasks/{task}', [FixtureMutations::class, 'update'])->middleware([FixtureIdentity::class, SubstituteBindings::class]);
+Route::get('/fixture/tasks/sorted/{direction}', [QueryController::class, 'sorted'])->middleware([FixtureIdentity::class, SubstituteBindings::class]);
+Route::get('/fixture/tasks/{task}', [QueryController::class, 'show'])->middleware([FixtureIdentity::class, SubstituteBindings::class]);
+Route::get('/fixture/related', [FixtureReads::class, 'index'])->middleware(FixtureIdentity::class);
 foreach (['create', 'update', 'delete', 'restore', 'forceDelete'] as $ability) {
     Gate::define($ability, fn ($user, $model) => $ability === 'create' || ($model->user_id === $user->getAuthIdentifier() && $model->title !== 'Locked'));
 }
 if (PHP_SAPI === 'cli') {
     if (in_array($argv[1] ?? null, ['revoke', 'restore'], true)) {
-        $permissions = \ZeroForLaravel\Permissions\Casbin::model('owner');
+        $permissions = Casbin::model('owner');
         $fields = ['owner:alice', 'tasks', 'view', 'owner', 'allow'];
-        if ($argv[1] === 'revoke') { $permissions->removePolicy(...$fields); }
-        else { $permissions->addPolicy(...$fields); }
+        if ($argv[1] === 'revoke') {
+            $permissions->removePolicy(...$fields);
+        } else {
+            $permissions->addPolicy(...$fields);
+        }
         exit(0);
     }
-    if (($argv[1] ?? null) === 'reset') { exit(Artisan::call('zero:reset', [($argv[2] ?? null) === 'force' ? '--force' : '--dry-run' => true], new \Symfony\Component\Console\Output\ConsoleOutput)); }
-    if (($argv[1] ?? null) === 'dev') { exit(Artisan::call('zero:dev', [], new \Symfony\Component\Console\Output\ConsoleOutput)); }
-    if (Artisan::call('migrate', ['--path' => __DIR__.'/migrations', '--realpath' => true, '--force' => true]) !== 0 || Artisan::call('zero:generate') !== 0 || Artisan::call('zero:generate', ['--check' => true]) !== 0) { throw new RuntimeException('Fixture setup failed.'); }
+    if (($argv[1] ?? null) === 'reset') {
+        exit(Artisan::call('zero:reset', [($argv[2] ?? null) === 'force' ? '--force' : '--dry-run' => true], new ConsoleOutput));
+    }
+    if (($argv[1] ?? null) === 'dev') {
+        exit(Artisan::call('zero:dev', [], new ConsoleOutput));
+    }
+    if (Artisan::call('migrate', ['--path' => __DIR__.'/migrations', '--realpath' => true, '--force' => true]) !== 0 || Artisan::call('zero:generate') !== 0 || Artisan::call('zero:generate', ['--check' => true]) !== 0) {
+        throw new RuntimeException('Fixture setup failed.');
+    }
     $contracts = [];
     foreach (['store', 'update'] as $method) {
-        $program = app(\ZeroForLaravel\Generation\Mutations\ControllerMutationCompiler::class)->compile(FixtureMutations::class, $method);
+        $program = app(ControllerMutationCompiler::class)->compile(FixtureMutations::class, $method);
         $contracts[$program->name()] = $program->contract();
     }
     file_put_contents($root.'/controller-contracts.json', json_encode($contracts, JSON_THROW_ON_ERROR));
@@ -117,7 +150,7 @@ $response = $kernel->handle($request);
 // must recover its data; retries must not execute the action a second time.
 if ($request->is('callbacks/zero/mutate') && str_contains($request->getContent(), 'Recovered result') && $response->isSuccessful() && ! is_file($root.'/lost-response.json')) {
     file_put_contents($root.'/lost-response.json', $response->getContent());
-    $response = new \Symfony\Component\HttpFoundation\Response('Simulated lost response', 503);
+    $response = new Symfony\Component\HttpFoundation\Response('Simulated lost response', 503);
 }
 $response->send();
 $kernel->terminate($request, $response);

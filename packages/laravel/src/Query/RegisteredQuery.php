@@ -6,22 +6,29 @@ namespace ZeroForLaravel\Query;
 
 use Closure;
 use Illuminate\Auth\Access\AuthorizationException;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Route;
 use Illuminate\Support\Facades\Gate;
 use LogicException;
+use PhpParser\ParserFactory;
+use ZeroForLaravel\Context\ContextDefinition;
+use ZeroForLaravel\Generation\ControllerQueryCompiler;
+use ZeroForLaravel\Generation\Mutations\ValueContract;
 use ZeroForLaravel\Http\ControllerRouteDispatcher;
+use ZeroForLaravel\Metadata\ModelRegistry;
+use ZeroForLaravel\Permissions\Binding;
+use ZeroForLaravel\ResolvedContext;
 use ZeroForLaravel\Support\Input;
-use ZeroForLaravel\ZeroContext;
 
 /** An application-generated registration, never supplied by the browser. */
 final readonly class RegisteredQuery
 {
     /**
      * @param  array<string, string>  $parameters
-     * @param  Closure(array<string, mixed>): Query  $factory
-     * @param  array<string,\ZeroForLaravel\Generation\Mutations\ValueContract>  $inputContracts
-     * @param  list<array{parameter: string, class: class-string<\Illuminate\Database\Eloquent\Model>, ability: string, fingerprint: string}>  $guards
+     * @param  Closure(array<string, mixed>): ZeroQuery  $factory
+     * @param  array<string,ValueContract>  $inputContracts
+     * @param  list<array{parameter: string, class: class-string<Model>, ability: string, fingerprint: string}>  $guards
      */
     public function __construct(
         public string $action,
@@ -41,7 +48,7 @@ final readonly class RegisteredQuery
         }
 
         [$class, $method] = explode('@', $this->action, 2);
-        $compiler = new \ZeroForLaravel\Generation\ControllerQueryCompiler((new \PhpParser\ParserFactory)->createForHostVersion(), resolve(\ZeroForLaravel\Metadata\ModelRegistry::class));
+        $compiler = new ControllerQueryCompiler((new ParserFactory)->createForHostVersion(), resolve(ModelRegistry::class));
         foreach ($compiler->compile($class, $method) as $query) {
             if ($query->prop === $this->prop && $query->name() === $this->contract) {
                 return;
@@ -52,12 +59,12 @@ final readonly class RegisteredQuery
     }
 
     /** @return array<string, mixed> */
-    public function compile(mixed $arguments, ZeroContext $context, QueryCompiler $compiler): array
+    public function compile(mixed $arguments, ResolvedContext $context, QueryCompiler $compiler): array
     {
         return $compiler->compileDeclaration($this->declaration($arguments), $context);
     }
 
-    public function declaration(mixed $arguments): Query
+    public function declaration(mixed $arguments): ZeroQuery
     {
         $args = Input::object($arguments, 'args');
         $window = $args['__window'] ?? null;
@@ -94,7 +101,7 @@ final readonly class RegisteredQuery
     }
 
     /** @return array<string, mixed> */
-    public function invoke(mixed $arguments, ZeroContext $identity, QueryCompiler $compiler): array
+    public function invoke(mixed $arguments, ResolvedContext $identity, QueryCompiler $compiler): array
     {
         $wire = Input::object($arguments, 'args');
         $args = $wire;
@@ -127,13 +134,8 @@ final readonly class RegisteredQuery
                 }
             }
 
-            $resolver = resolve(config()->string('zero.context_resolver'));
-            if (! is_callable($resolver)) {
-                throw new LogicException('Zero context resolver must be callable.');
-            }
-
-            $context = $resolver($request);
-            if (! $context instanceof ZeroContext || $context->userId() !== $identity->userId()) {
+            $context = ContextDefinition::configured()->resolve($request);
+            if ($context->userId() !== $identity->userId()) {
                 throw new AuthorizationException('Controller identity differs from the authenticated Zero identity.');
             }
 
@@ -141,12 +143,12 @@ final readonly class RegisteredQuery
             $guards = [];
             foreach ($this->guards as $guard) {
                 $resource = $route->parameter($guard['parameter']);
-                if (! $resource instanceof \Illuminate\Database\Eloquent\Model || ! $resource instanceof $guard['class']) {
+                if (! $resource instanceof Model || ! $resource instanceof $guard['class']) {
                     throw new LogicException('Captured Gate resource differs from the bound route model.');
                 }
 
                 Gate::forUser($request->user())->authorize($guard['ability'], $resource);
-                $guards[] = ['class' => $guard['class'], 'id' => \ZeroForLaravel\Permissions\Binding::id($resource->getKey()), 'ability' => $guard['ability']];
+                $guards[] = ['class' => $guard['class'], 'id' => Binding::id($resource->getKey()), 'ability' => $guard['ability']];
             }
 
             return $compiler->compileDeclaration($this->declaration($wire), $context, $guards, serving: true);

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace ZeroForLaravel\Permissions;
 
+use Illuminate\Database\Eloquent\Model;
 use ZeroForLaravel\Metadata\ModelMetadata;
 use ZeroForLaravel\Query\Condition;
 use ZeroForLaravel\Query\ExpressionBuilder;
@@ -13,7 +14,7 @@ final class ZeroVisibility
 {
     private int $alias = 0;
 
-    /** @param list<array{class: class-string<\Illuminate\Database\Eloquent\Model>, id: string, ability: string}> $guards */
+    /** @param list<array{class: class-string<Model>, id: string, ability: string}> $guards */
     public function condition(ModelMetadata $model, string $subjectId, string $ability = 'view', array $guards = []): Condition
     {
         $plan = (new PolicyCompiler)->compile($model->class, $ability);

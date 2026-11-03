@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace ZeroForLaravel\Generation\Mutations;
 
 use LogicException;
+use ZeroForLaravel\Context\ContextDefinition;
 use ZeroForLaravel\Generation\RequestContract;
 
 /** Infer only proven shapes. Unknown output never becomes an `any` schema. */
@@ -115,6 +116,12 @@ final class MutationContracts
             return new ValueContract(match (true) {
                 $node->value('value') === null => 'null', is_string($node->value('value')) => 'string', is_bool($node->value('value')) => 'bool', is_int($node->value('value')) => 'int', is_float($node->value('value')) => 'number', default => throw new LogicException('Unknown result literal.'),
             });
+        }
+
+        if ($op === 'context') {
+            $contract = ContextDefinition::configured()->fields[$node->string('field')];
+
+            return new ValueContract($contract['type'] === 'float' ? 'number' : $contract['type'], nullable: $contract['nullable']);
         }
 
         if ($op === 'validated') {

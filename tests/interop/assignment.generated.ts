@@ -2,6 +2,8 @@
 import {table, string, number, boolean, json, relationships, createSchema} from '@rocicorp/zero';
 import type {ContractMap, ModelRow} from '@nickwelsh/zero-for-laravel';
 
+export type Context = {readonly "user_id": string | null;};
+export const contextContract = {"user_id":{"type":"string","nullable":true}} as const;
 const table0 = table("comments").columns({
   "id": string(),
   "task_id": string(),
@@ -78,15 +80,20 @@ export const definitions = {
                 "default": null
             }
         },
-        "serverFill": {},
         "writable": [],
+        "scopeFingerprint": "35786c7117b4e38d0f169239752ce71158266ae2f6e4aa230fbbb87bd699c0e3",
+        "creationDefaults": {
+            "op": "merge",
+            "values": []
+        },
         "idGenerator": null,
         "timestamps": {
             "created": null,
             "updated": null,
             "deleted": null
         },
-        "relations": {}
+        "relations": {},
+        "relationConstraints": {}
     },
     "MutationPreference": {
         "name": "MutationPreference",
@@ -151,20 +158,25 @@ export const definitions = {
                 "default": null
             }
         },
-        "serverFill": {},
         "writable": [
             "recipient",
             "issue",
             "subscribed",
             "note"
         ],
+        "scopeFingerprint": "35786c7117b4e38d0f169239752ce71158266ae2f6e4aa230fbbb87bd699c0e3",
+        "creationDefaults": {
+            "op": "merge",
+            "values": []
+        },
         "idGenerator": "uuid",
         "timestamps": {
             "created": "created_at",
             "updated": "updated_at",
             "deleted": null
         },
-        "relations": {}
+        "relations": {},
+        "relationConstraints": {}
     },
     "Tag": {
         "name": "Tag",
@@ -196,15 +208,20 @@ export const definitions = {
                 "default": null
             }
         },
-        "serverFill": {},
         "writable": [],
+        "scopeFingerprint": "35786c7117b4e38d0f169239752ce71158266ae2f6e4aa230fbbb87bd699c0e3",
+        "creationDefaults": {
+            "op": "merge",
+            "values": []
+        },
         "idGenerator": null,
         "timestamps": {
             "created": null,
             "updated": null,
             "deleted": null
         },
-        "relations": {}
+        "relations": {},
+        "relationConstraints": {}
     },
     "Task": {
         "name": "Task",
@@ -285,22 +302,48 @@ export const definitions = {
                 "default": null
             }
         },
-        "serverFill": {
-            "user_id": "user_id"
-        },
         "writable": [
+            "user_id",
             "list_id",
             "title",
             "done",
             "completed_at"
         ],
+        "scopeFingerprint": "fae932e1cd8b0385d7e7593e3e09afcba51d8494c277942e13f57de06da3d7fb",
+        "creationDefaults": {
+            "op": "merge",
+            "values": [
+                {
+                    "op": "merge",
+                    "values": [
+                        {
+                            "op": "object",
+                            "items": [
+                                {
+                                    "key": "user_id",
+                                    "value": {
+                                        "op": "context",
+                                        "field": "user_id"
+                                    }
+                                }
+                            ]
+                        }
+                    ]
+                },
+                {
+                    "op": "merge",
+                    "values": []
+                }
+            ]
+        },
         "idGenerator": "uuid",
         "timestamps": {
             "created": "created_at",
             "updated": "updated_at",
             "deleted": "deleted_at"
         },
-        "relations": {}
+        "relations": {},
+        "relationConstraints": {}
     },
     "TaskList": {
         "name": "TaskList",
@@ -332,15 +375,20 @@ export const definitions = {
                 "default": null
             }
         },
-        "serverFill": {},
         "writable": [],
+        "scopeFingerprint": "35786c7117b4e38d0f169239752ce71158266ae2f6e4aa230fbbb87bd699c0e3",
+        "creationDefaults": {
+            "op": "merge",
+            "values": []
+        },
         "idGenerator": null,
         "timestamps": {
             "created": null,
             "updated": null,
             "deleted": null
         },
-        "relations": {}
+        "relations": {},
+        "relationConstraints": {}
     }
 } as const satisfies ContractMap;
 export type CommentRow = ModelRow<typeof definitions, "Comment">;
@@ -352,10 +400,10 @@ export type TaskListRow = ModelRow<typeof definitions, "TaskList">;
 // Generated controller mutations; deploy with the matching PHP manifest.
 /* oxlint-disable unicorn/no-thenable -- Operation trees use a JSON then branch, never a callable then. */
 import type {Schema} from '@rocicorp/zero';
-import {createControllerMutations, type ModelContract} from '@nickwelsh/zero-for-laravel';
+import {createControllerMutations, type ClientContext, type ModelContract} from '@nickwelsh/zero-for-laravel';
 import {z} from 'zod';
 export const controllerMutationContracts = {
-    "m_0746de967f38eacca7e011445dcadae0": {
+    "m_1906095314bb6cf4d17686ed181c270a": {
         "action": "ZeroForLaravel\\Tests\\Fixtures\\PreferenceMutationController@assign",
         "optimism": "generated",
         "conceal": false,
@@ -876,7 +924,7 @@ export const controllerMutationContracts = {
             "key:subscribe": "uuid",
             "key:unsubscribe": "uuid"
         },
-        "version": "0746de967f38eacca7e011445dcadae0452905b3da410a11711b77e9761a7803",
+        "version": "1906095314bb6cf4d17686ed181c270a2e8da2043364c5c430c3cc3d675bde7f",
         "returnType": "array"
     }
 } as const;
@@ -887,12 +935,12 @@ export const inputSchema0 = z.strictObject({"list_id": z.string().nullable().opt
 export const serverResultSchema0 = z.strictObject({"id": z.string()});
 export const clientResultSchema0 = z.union([z.strictObject({"id": z.string()}), z.undefined()]);
 const codec0 = {input: inputSchema0, encode: (input: Input0) => ({...(input["list_id"] === undefined ? {} : {"list_id": (input["list_id"] === null ? null : input["list_id"])})}), serverResult: serverResultSchema0, clientResult: clientResultSchema0};
-export function createControllerMutationBindings<S extends Schema>(schema: S, models: Readonly<Record<string, ModelContract>>) {
+export function createControllerMutationBindings<S extends Schema, C extends ClientContext = ClientContext>(schema: S, models: Readonly<Record<string, ModelContract>>) {
   const codecs = {
-    "m_0746de967f38eacca7e011445dcadae0": {...codec0},
+    "m_1906095314bb6cf4d17686ed181c270a": {...codec0},
   };
-  const runtime = createControllerMutations(schema, models, controllerMutationContracts, codecs);
+  const runtime = createControllerMutations<S, C>(schema, models, controllerMutationContracts, codecs);
   return {...runtime, actions: {
-    "ZeroForLaravel\\Tests\\Fixtures\\PreferenceMutationController@assign": runtime.bind("m_0746de967f38eacca7e011445dcadae0", codecs["m_0746de967f38eacca7e011445dcadae0"]),
+    "ZeroForLaravel\\Tests\\Fixtures\\PreferenceMutationController@assign": runtime.bind("m_1906095314bb6cf4d17686ed181c270a", codecs["m_1906095314bb6cf4d17686ed181c270a"]),
   }};
 }

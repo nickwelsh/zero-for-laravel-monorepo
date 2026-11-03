@@ -30,7 +30,7 @@ public function index(\Illuminate\Http\Request $request): \Inertia\Response
         'tasks' => Task::zeroQuery()
             ->visibleTo($request->user())
             ->where('done', false)
-            ->related('list', fn ($list) => $list->visibleTo($request->user()))
+            ->with('list', fn ($list) => $list->visibleTo($request->user()))
             ->orderBy('created_at', 'desc')
             ->infinite(25),
     ]);
@@ -38,8 +38,9 @@ public function index(\Illuminate\Http\Request $request): \Inertia\Response
 ```
 
 Use `ZeroForLaravel\Concerns\HasZeroQueries` on participating Eloquent models.
-`zeroQuery()` returns an immutable declaration, not an Eloquent query or HTTP row
-snapshot. The compiler discovers registered controllers through Ranger, analyzes
+`zeroQuery()` returns a mutable declaration, not an Eloquent query or HTTP row
+snapshot. Aliases share changes; clone a builder for an independent branch.
+The compiler discovers registered controllers through Ranger, analyzes
 FormRequest contracts through Surveyor, and emits coordinated PHP/native ZQL.
 Generation never executes an HTTP controller to sample its result.
 
@@ -79,10 +80,13 @@ The portable compiler supports ACL, global/domain RBAC and a typed ABAC subset;
 unsupported policies fail explicitly. A supported policy `before()` admin override
 stays live without bypassing caller filters. There is no auth-dependent global scope.
 
-Explicitly list participating models in `zero.models`. Every protected root,
+List participating models in `zero.models`, or use trait-based discovery. Every protected root,
 related selection and existence path needs `visibleTo()` or a supported captured
-instance Gate. `zero.public_models` opts into intentionally public reads. Trusted
-creation fills belong in `zero.mutation_context`; search uses its own registration.
+instance Gate. `zero.public_models` opts into intentionally public reads. Creation
+defaults use `withAttributes()` and typed application context; explicit creation
+attributes override defaults. Defaults are not write authorization or update stamps.
+Use checked `#[ZeroScope]` methods for local Zero scopes and `ZeroGlobalScope` for
+reusable query constraints. Search uses `zeroSearch()` or explicit registration.
 Write authorization stays in FormRequests, middleware and controller Gates.
 
 Captured show Gates also create actor-owned access watches: confirmed access loss
@@ -141,6 +145,11 @@ idempotent worker; an after-commit callback alone is not durable delivery.
 
 ```sh
 php artisan vendor:publish --tag=zero-config
+php artisan vendor:publish --tag=permissions-config
+php artisan vendor:publish --tag=permissions-migrations
+php artisan migrate
+# Configure bindings and managed grants, then install private authority projections.
+php artisan permissions:rebuild
 php artisan zero:generate --react
 php artisan zero:sync-publication --dry-run
 php artisan zero:sync-publication

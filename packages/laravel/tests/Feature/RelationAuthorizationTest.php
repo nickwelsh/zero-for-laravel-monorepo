@@ -7,10 +7,10 @@ namespace ZeroForLaravel\Tests\Feature;
 use Illuminate\Foundation\Auth\User;
 use LogicException;
 use ZeroForLaravel\Metadata\ModelRegistry;
-use ZeroForLaravel\Query\Query;
 use ZeroForLaravel\Query\QueryCompiler;
+use ZeroForLaravel\Query\ZeroQuery;
+use ZeroForLaravel\ResolvedContext;
 use ZeroForLaravel\Tests\OwnerTestCase as TestCase;
-use ZeroForLaravel\ZeroContext;
 
 uses(TestCase::class);
 
@@ -18,17 +18,17 @@ test('related private rows require their own explicit visibility declaration', f
     /** @var TestCase $this */
     $registry = new ModelRegistry($this->models());
     $alice = (new User)->setKeyType('string')->forceFill(['id' => 'alice']);
-    $query = (new Query($registry->get('Task'), $registry))->visibleTo($alice)->related('list');
-    (new QueryCompiler($registry))->compileDeclaration($query, new ZeroContext(['user_id' => 'alice']));
+    $query = (new ZeroQuery($registry->get('Task'), $registry))->visibleTo($alice)->with('list');
+    (new QueryCompiler($registry))->compileDeclaration($query, new ResolvedContext(['user_id' => 'alice'], 'alice'));
 })->throws(LogicException::class, 'visibleTo');
 
 test('junction predicates enforce private target visibility without introducing result bounds', function (): void {
     /** @var TestCase $this */
     $registry = new ModelRegistry($this->models());
     $alice = (new User)->setKeyType('string')->forceFill(['id' => 'alice']);
-    $query = (new Query($registry->get('Task'), $registry))->visibleTo($alice)
-        ->whereExists('tags', fn (Query $tags): Query => $tags->visibleTo($alice)->where('name', 'Reading'));
-    $ast = (new QueryCompiler($registry))->compileDeclaration($query, new ZeroContext(['user_id' => 'alice']));
+    $query = (new ZeroQuery($registry->get('Task'), $registry))->visibleTo($alice)
+        ->whereExists('tags', fn (ZeroQuery $tags): ZeroQuery => $tags->visibleTo($alice)->where('name', 'Reading'));
+    $ast = (new QueryCompiler($registry))->compileDeclaration($query, new ResolvedContext(['user_id' => 'alice'], 'alice'));
     $encoded = json_encode($ast, JSON_THROW_ON_ERROR);
     expect($encoded)->toContain('task_tag', 'tags', 'permission_index', 'Reading', 'user:alice');
     expect($encoded)->not->toContain('"limit"', '"orderBy"', '__visibility');
@@ -39,11 +39,11 @@ test('nested negative exists retains visibility on every private target', functi
     /** @var TestCase $this */
     $registry = new ModelRegistry($this->models());
     $alice = (new User)->setKeyType('string')->forceFill(['id' => 'alice']);
-    $query = (new Query($registry->get('Task'), $registry))->visibleTo($alice)
-        ->where(fn ($op) => $op->not($op->exists('list', fn (Query $list): Query => $list->visibleTo($alice)
-            ->whereExists('tasks', fn (Query $tasks): Query => $tasks->visibleTo($alice)
-                ->whereExists('comments', fn (Query $comments): Query => $comments->visibleTo($alice)->where('body', 'hidden'))))));
-    $ast = (new QueryCompiler($registry))->compileDeclaration($query, new ZeroContext(['user_id' => 'alice']));
+    $query = (new ZeroQuery($registry->get('Task'), $registry))->visibleTo($alice)
+        ->whereDoesntHave('list', fn (ZeroQuery $list): ZeroQuery => $list->visibleTo($alice)
+            ->whereExists('tasks', fn (ZeroQuery $tasks): ZeroQuery => $tasks->visibleTo($alice)
+                ->whereExists('comments', fn (ZeroQuery $comments): ZeroQuery => $comments->visibleTo($alice)->where('body', 'hidden'))));
+    $ast = (new QueryCompiler($registry))->compileDeclaration($query, new ResolvedContext(['user_id' => 'alice'], 'alice'));
     $encoded = json_encode($ast, JSON_THROW_ON_ERROR);
     expect($encoded)->toContain('NOT EXISTS', 'hidden');
     // Root task, list, nested task and comment each receive their own resource projection.

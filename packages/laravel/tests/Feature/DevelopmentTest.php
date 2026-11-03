@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace ZeroForLaravel\Tests\Feature;
 
+use Illuminate\Process\PendingProcess;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\File;
@@ -103,7 +104,7 @@ test('startup encodes PostgreSQL credentials, respects callback prefixes and for
     expect(Artisan::call('zero:dev'))->toBe(7);
     expect(is_file($this->fixture.'/generated.ts'))->toBeTrue();
     expect(is_file($this->fixture.'/replica.db.owner.json'))->toBeTrue();
-    Process::assertRan(fn (\Illuminate\Process\PendingProcess $process): bool => $process->environment['ZERO_QUERY_URL'] === $env['ZERO_QUERY_URL'] && $process->environment['ZERO_MUTATE_API_KEY'] === 'private-fixture-key');
+    Process::assertRan(fn (PendingProcess $process): bool => $process->environment['ZERO_QUERY_URL'] === $env['ZERO_QUERY_URL'] && $process->environment['ZERO_MUTATE_API_KEY'] === 'private-fixture-key');
 });
 
 test('occupied ports fail without starting or killing a process', function (): void {

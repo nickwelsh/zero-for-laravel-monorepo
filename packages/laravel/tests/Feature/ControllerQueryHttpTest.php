@@ -11,9 +11,13 @@ use Illuminate\Routing\Middleware\SubstituteBindings;
 use Illuminate\Support\Facades\Route;
 use LogicException;
 use Symfony\Component\HttpFoundation\Response;
+use ZeroForLaravel\Generation\ControllerQueryCompiler;
+use ZeroForLaravel\Generation\RequestContract;
 use ZeroForLaravel\Http\ControllerRouteDispatcher;
 use ZeroForLaravel\Query\RegisteredQueries;
 use ZeroForLaravel\Query\RegisteredQuery;
+use ZeroForLaravel\Query\ZeroQuery;
+use ZeroForLaravel\Tests\Fixtures\DateQueryRequest;
 use ZeroForLaravel\Tests\Fixtures\QueryController;
 use ZeroForLaravel\Tests\Fixtures\Task;
 use ZeroForLaravel\Tests\ProtectedHttpTestCase as HttpTestCase;
@@ -40,7 +44,7 @@ test('controller transforms replay bindings and middleware and cannot substitute
     Route::bind('title', fn (string $value): string => $value === 'alias' ? 'allowed' : $value);
     app()->instance(RegisteredQueries::class, new RegisteredQueries([
         'q_test' => new RegisteredQuery(QueryController::class.'@index', 'tasks/index', 'tasks', ['title' => 'string'],
-            static fn (array $args): \ZeroForLaravel\Query\Query => Task::zeroQuery()->visibleTo(request()->user())->where('title', $args['title'])),
+            static fn (array $args): ZeroQuery => Task::zeroQuery()->visibleTo(request()->user())->where('title', $args['title'])),
     ]));
     $alice = (new User)->setKeyType('string')->forceFill(['id' => 'alice']);
     $this->actingAs($alice)->withHeader('X-Api-Key', 'private-test-secret');
@@ -63,7 +67,7 @@ test('controller transforms replay bindings and middleware and cannot substitute
 test('FormRequest queries preserve missing null and zero filters and reauthorize every transform', function (): void {
     /** @var HttpTestCase $this */
     Route::get('/search', [QueryController::class, 'search']);
-    $definition = resolve(\ZeroForLaravel\Generation\ControllerQueryCompiler::class)->compile(QueryController::class, 'search')[0];
+    $definition = resolve(ControllerQueryCompiler::class)->compile(QueryController::class, 'search')[0];
     $factory = eval('return '.$definition->php().';');
     if (! $factory instanceof Closure) {
         throw new LogicException('Expected generated query factory.');
@@ -89,7 +93,7 @@ test('FormRequest queries preserve missing null and zero filters and reauthorize
 
 test('date query arguments use canonical JSON dates and preserve comparison semantics on direct transforms', function (): void {
     Route::get('/dated', [QueryController::class, 'dated']);
-    $definition = resolve(\ZeroForLaravel\Generation\ControllerQueryCompiler::class)->compile(QueryController::class, 'dated')[0];
+    $definition = resolve(ControllerQueryCompiler::class)->compile(QueryController::class, 'dated')[0];
     $factory = eval('return '.$definition->php().';');
     if (! $factory instanceof Closure) {
         throw new LogicException('Expected generated date query factory.');
@@ -97,7 +101,7 @@ test('date query arguments use canonical JSON dates and preserve comparison sema
 
     app()->instance(RegisteredQueries::class, new RegisteredQueries([
         $definition->name() => new RegisteredQuery($definition->action, $definition->component, $definition->prop, $definition->parameters, $factory,
-            ['input' => \ZeroForLaravel\Generation\RequestContract::value(\ZeroForLaravel\Tests\Fixtures\DateQueryRequest::class)]),
+            ['input' => RequestContract::value(DateQueryRequest::class)]),
     ]));
     \Pest\Laravel\actingAs((new User)->setKeyType('string')->forceFill(['id' => 'alice']))->withHeader('X-Api-Key', 'private-test-secret');
     $batch = [];
@@ -113,7 +117,7 @@ test('date query arguments use canonical JSON dates and preserve comparison sema
 test('cursor pages preserve raw ordering values and reject incomplete or foreign cursors', function (): void {
     /** @var HttpTestCase $this */
     Route::get('/pages', [QueryController::class, 'pages']);
-    $definition = resolve(\ZeroForLaravel\Generation\ControllerQueryCompiler::class)->compile(QueryController::class, 'pages')[0];
+    $definition = resolve(ControllerQueryCompiler::class)->compile(QueryController::class, 'pages')[0];
     $factory = eval('return '.$definition->php().';');
     if (! $factory instanceof Closure) {
         throw new LogicException('Expected generated query factory.');
@@ -142,7 +146,7 @@ function registerHttpQuery(): void
     Route::get('/http-query', [QueryController::class, 'window']);
     app()->instance(RegisteredQueries::class, new RegisteredQueries([
         'q_http' => new RegisteredQuery(QueryController::class.'@window', 'tasks/window', 'tasks', [],
-            static fn (): \ZeroForLaravel\Query\Query => Task::zeroQuery()->visibleTo(request()->user())),
+            static fn (): ZeroQuery => Task::zeroQuery()->visibleTo(request()->user())),
     ]));
 }
 

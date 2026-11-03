@@ -4,21 +4,34 @@ declare(strict_types=1);
 
 namespace ZeroForLaravel\Tests\Feature;
 
+use Illuminate\Auth\Access\AuthorizationException;
+use Illuminate\Database\QueryException;
 use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Routing\Middleware\SubstituteBindings;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Sleep;
 use LogicException;
+use PhpParser\ParserFactory;
 use RuntimeException;
 use stdClass;
 use Symfony\Component\Process\Process;
+use ZeroForLaravel\Generation\ControllerQueryCompiler;
+use ZeroForLaravel\Generation\ControllerQueryGenerator;
 use ZeroForLaravel\Generation\TypeScriptGenerator;
+use ZeroForLaravel\Generation\ZodSchemaDriver;
 use ZeroForLaravel\Metadata\ModelRegistry;
 use ZeroForLaravel\Permissions\Casbin;
 use ZeroForLaravel\Permissions\PermissionSchema;
 use ZeroForLaravel\Permissions\PermissionServiceProvider;
 use ZeroForLaravel\Permissions\ProjectionManager;
 use ZeroForLaravel\Publication\PublicationManager;
+use ZeroForLaravel\Query\QueryCompiler;
+use ZeroForLaravel\Query\RegisteredQuery;
+use ZeroForLaravel\ResolvedContext;
+use ZeroForLaravel\Tests\Fixtures\ContextResolver;
 use ZeroForLaravel\Tests\Fixtures\PermissionAdminPolicy;
 use ZeroForLaravel\Tests\Fixtures\PermissionList;
 use ZeroForLaravel\Tests\Fixtures\PermissionQueryController;
@@ -59,6 +72,10 @@ beforeEach(function (): void {
 });
 
 afterEach(function (): void {
+    if (! getenv('ZERO_TEST_PG_DATABASE')) {
+        return;
+    }
+
     foreach (DB::select("SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND tablename LIKE 'permission_%'") as $row) {
         if ($row instanceof stdClass && is_string($row->tablename)) {
             Schema::dropIfExists($row->tablename);
@@ -87,39 +104,39 @@ test('portable Zero queries use trusted actors and captured Gates replay without
     Casbin::addGroupingPolicy('user:42', 'role:reader', 'list:7');
     $registry = new ModelRegistry([PermissionList::class]);
     app()->instance(ModelRegistry::class, $registry);
-    config(['zero.context_resolver' => \ZeroForLaravel\Http\ContextResolver::class]);
+    config(['zero.context_resolver' => ContextResolver::class]);
     \Pest\Laravel\actingAs($alice);
     request()->setUserResolver(fn () => $alice);
-    $compiler = new \ZeroForLaravel\Generation\ControllerQueryCompiler((new \PhpParser\ParserFactory)->createForHostVersion(), $registry);
+    $compiler = new ControllerQueryCompiler((new ParserFactory)->createForHostVersion(), $registry);
     $index = $compiler->compile(PermissionQueryController::class, 'index')[0];
     expect($index->parameters)->toBe([]);
     expect($index->typescript())->not->toContain('visibleTo', 'actor', 'user', '42');
     expect(fn (): array => $compiler->compile(PermissionQueryController::class, 'unscoped'))->toThrow(LogicException::class, 'visibleTo');
     expect(fn (): array => $compiler->compile(PermissionQueryController::class, 'forged'))->toThrow(LogicException::class, 'Unrecognized query operation');
 
-    $native = new \ZeroForLaravel\Query\QueryCompiler($registry);
+    $native = new QueryCompiler($registry);
     $query = PermissionList::zeroQuery()->visibleTo($alice)->where('id', 7);
-    expect(fn (): array => $native->compileDeclaration($query, new \ZeroForLaravel\ZeroContext(['user_id' => '84'])))->toThrow(\Illuminate\Auth\Access\AuthorizationException::class);
-    expect(fn (): array => $native->compileDeclaration(PermissionList::zeroQuery(), new \ZeroForLaravel\ZeroContext(['user_id' => '42'])))->toThrow(LogicException::class, 'visibleTo');
+    expect(fn (): array => $native->compileDeclaration($query, new ResolvedContext(['user_id' => '84'], '84')))->toThrow(AuthorizationException::class);
+    expect(fn (): array => $native->compileDeclaration(PermissionList::zeroQuery(), new ResolvedContext(['user_id' => '42'], '42')))->toThrow(LogicException::class, 'visibleTo');
 
-    $ast = $native->compileDeclaration($query, new \ZeroForLaravel\ZeroContext(['user_id' => '42']));
+    $ast = $native->compileDeclaration($query, new ResolvedContext(['user_id' => '42'], '42'));
     expect(json_encode($ast))->toContain('permission_index');
     expect(json_encode($ast))->not->toContain('__visibility');
 
     $definition = $compiler->compile(PermissionQueryController::class, 'show')[0];
-    $source = (new \ZeroForLaravel\Generation\ControllerQueryGenerator(new \ZeroForLaravel\Generation\ZodSchemaDriver))->php([$definition]);
+    $source = (new ControllerQueryGenerator(new ZodSchemaDriver))->php([$definition]);
     $registrations = eval(substr($source, 5));
-    if (! is_array($registrations) || ! ($registrations[$definition->name()] ?? null) instanceof \ZeroForLaravel\Query\RegisteredQuery) {
+    if (! is_array($registrations) || ! ($registrations[$definition->name()] ?? null) instanceof RegisteredQuery) {
         throw new LogicException('Expected generated PHP query registration.');
     }
 
     $registered = $registrations[$definition->name()];
-    \Illuminate\Support\Facades\Route::get('/permission-lists/{list}', [PermissionQueryController::class, 'show'])->middleware(\Illuminate\Routing\Middleware\SubstituteBindings::class);
+    Route::get('/permission-lists/{list}', [PermissionQueryController::class, 'show'])->middleware(SubstituteBindings::class);
     $args = ['list' => 7];
-    $identity = new \ZeroForLaravel\ZeroContext(['user_id' => '42']);
+    $identity = new ResolvedContext(['user_id' => '42'], '42');
     expect($registered->invoke($args, $identity, $native)['table'])->toBe('permission_test_lists');
     Casbin::removeGroupingPolicy('user:42', 'role:reader', 'list:7');
-    expect(fn (): array => $registered->invoke($args, $identity, $native))->toThrow(\Illuminate\Auth\Access\AuthorizationException::class);
+    expect(fn (): array => $registered->invoke($args, $identity, $native))->toThrow(AuthorizationException::class);
     config(['permissions.denied_status' => 404]);
     expect(fn (): array => $registered->invoke($args, $identity, $native))->toThrow(LogicException::class, 'Stale Zero');
 });
@@ -258,13 +275,13 @@ test('all published portable profiles filter actual collections with the same Ga
 
 test('unknown conditions and raw rule writes cannot bypass managed consistency', function (): void {
     expect(fn () => Casbin::addPolicy('user:42', 'list:7', 'todo-list', 'view', 'typo', 'allow'))->toThrow(LogicException::class, 'Unknown portable');
-    expect(fn () => DB::table('permission_rules')->insert(['id' => 'forged', 'model' => 'default', 'ptype' => 'p']))->toThrow(\Illuminate\Database\QueryException::class, 'Use managed Casbin writes');
+    expect(fn () => DB::table('permission_rules')->insert(['id' => 'forged', 'model' => 'default', 'ptype' => 'p']))->toThrow(QueryException::class, 'Use managed Casbin writes');
     DB::transaction(function (): void {
         Casbin::addPolicy('user:42', 'list:7', 'todo-list', 'view', 'any', 'allow');
         try {
             DB::transaction(fn () => DB::table('permission_rules')->delete());
             throw new RuntimeException('Raw writes were accepted');
-        } catch (\Illuminate\Database\QueryException $queryException) {
+        } catch (QueryException $queryException) {
             expect($queryException->getMessage())->toContain('Use managed Casbin writes');
         }
     });
@@ -305,7 +322,7 @@ test('concurrent source writes cannot resurrect a revoked grant from an older sn
                 break;
             }
 
-            \Illuminate\Support\Sleep::usleep(10000);
+            Sleep::usleep(10000);
         }
 
         expect($blocked)->toBeTrue();

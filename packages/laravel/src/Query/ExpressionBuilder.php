@@ -4,10 +4,11 @@ declare(strict_types=1);
 
 namespace ZeroForLaravel\Query;
 
-use BackedEnum;
+use Carbon\CarbonImmutable;
 use Closure;
 use DateTimeInterface;
 use InvalidArgumentException;
+use ZeroForLaravel\Context\ContextReference;
 use ZeroForLaravel\Metadata\ModelMetadata;
 use ZeroForLaravel\Support\Input;
 
@@ -61,22 +62,29 @@ final readonly class ExpressionBuilder
         }
 
         $operator = $this->operator($operator);
-        $value = $value instanceof BackedEnum ? $value->value : $value;
+        $value = ContextReference::normalize($value);
+        if ($value === null && in_array($operator, ['=', '!='], true)) {
+            $operator = $operator === '=' ? 'IS' : 'IS NOT';
+        }
+
         if ($column['date'] && (is_string($value) || $value instanceof DateTimeInterface)) {
-            $date = \Carbon\CarbonImmutable::parse($value, 'UTC')->utc();
+            $date = CarbonImmutable::parse($value, 'UTC')->utc();
             $value = isset($column['dateFormat']) ? $date->format($column['dateFormat']) : $date->getTimestampMs();
         }
 
-        if (! $value instanceof Parameter && $value !== MissingValue::Missing) {
+        if (! $value instanceof Parameter && ! $value instanceof ContextReference && $value !== MissingValue::Missing) {
             if (in_array($operator, ['IN', 'NOT IN'], true)) {
                 if (! is_array($value) || ! array_is_list($value)) {
                     throw new InvalidArgumentException('Membership requires a scalar list.');
                 }
 
                 foreach ($value as &$item) {
-                    $item = $item instanceof BackedEnum ? $item->value : $item;
+                    if ($item instanceof ContextReference) {
+                        continue;
+                    }
+
                     if ($column['date'] && (is_string($item) || $item instanceof DateTimeInterface)) {
-                        $date = \Carbon\CarbonImmutable::parse($item, 'UTC')->utc();
+                        $date = CarbonImmutable::parse($item, 'UTC')->utc();
                         $item = isset($column['dateFormat']) ? $date->format($column['dateFormat']) : $date->getTimestampMs();
                     }
 
@@ -100,7 +108,7 @@ final readonly class ExpressionBuilder
     }
 
     /**
-     * @param  Closure(Query): Query|null  $refine
+     * @param  Closure(ZeroQuery): (ZeroQuery|void)|null  $refine
      * @param  array<string, bool>  $options
      */
     public function exists(string $relationship, ?Closure $refine = null, array $options = []): Condition
@@ -168,14 +176,18 @@ final readonly class ExpressionBuilder
             return $value->toArray();
         }
 
-        $value = $value instanceof BackedEnum ? $value->value : $value;
+        $value = ContextReference::normalize($value);
+        if ($value instanceof ContextReference) {
+            return ['type' => 'literal', 'value' => $value];
+        }
+
         if ($value === MissingValue::Missing) {
             $value = null;
         }
 
         $values = is_array($value) && array_is_list($value) ? $value : [$value];
         foreach ($values as $item) {
-            if ($item !== null && ! is_string($item) && ! is_bool($item) && ! is_int($item) && (! is_float($item) || ! is_finite($item))) {
+            if (! $item instanceof ContextReference && $item !== null && ! is_string($item) && ! is_bool($item) && ! is_int($item) && (! is_float($item) || ! is_finite($item))) {
                 throw new InvalidArgumentException('Native operands must be finite scalars or scalar lists.');
             }
         }

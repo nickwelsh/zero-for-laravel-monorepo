@@ -20,19 +20,24 @@ import { dated } from './controller-api/ZeroForLaravel/Tests/Fixtures/QueryContr
 it('executes both generated controller definitions with empty, zero-string, and ordinary inputs', () => {
     const zql = createBuilder(schema);
     const generated = JSON.parse(execFileSync('php', ['tests/interop/export.php', 'controller'], { encoding: 'utf8' }));
+    // Public construction carries ordinary scopes; permission predicates are
+    // installed privately by the server and checked in the authorized case.
+    const tasks = zql.tasks.where('deleted_at', 'IS', null);
     const sorted = runInNewContext(`(${generated.sorted.typescript})`, { zql }) as (input: {
         args: { direction: 'asc' | 'desc' };
+        ctx: { user_id: string };
     }) => typeof zql.tasks;
     const sortInput = runInNewContext(generated.sorted.schema, { z }) as z.ZodType;
     expect(sortInput.safeParse({ direction: 'random' }).success).toBe(false);
     for (const direction of ['asc', 'desc'] as const) {
         expect(sortInput.parse({ direction })).toEqual({ direction });
-        expect(asQueryInternals(sorted({ args: { direction } })).ast).toEqual(
-            asQueryInternals(zql.tasks.orderBy('title', direction)).ast,
+        expect(asQueryInternals(sorted({ args: { direction }, ctx: generated.context })).ast).toEqual(
+            asQueryInternals(tasks.orderBy('title', direction)).ast,
         );
     }
     const factory = runInNewContext(`(${generated.typescript})`, { zql }) as (input: {
         args: { title: string };
+        ctx: { user_id: string };
     }) => typeof zql.tasks;
     const validator = runInNewContext(generated.schema, { z }) as z.ZodType;
     for (const invalid of [{}, { title: null }, { title: false }, { title: '0', user_id: 'other' }]) {
@@ -40,35 +45,30 @@ it('executes both generated controller definitions with empty, zero-string, and 
     }
     for (const test of generated.cases) {
         expect(validator.parse(test.args)).toEqual(test.args);
-        const query = factory({ args: test.args });
+        const query = factory({ args: test.args, ctx: generated.context });
         const native = asQueryInternals(query);
         expect(native.ast).toEqual(normalizeAST(test.ast));
         expect(native.format).toEqual(test.format);
-        expect(native.ast.where !== undefined).toBe(test.args.title !== '');
+        expect(native.ast.where).toBeDefined();
     }
     const filtered = runInNewContext(`(${generated.filtered.typescript})`, { zql }) as (input: {
         args: { title: string; showDone: boolean; window: number };
+        ctx: { user_id: string };
     }) => typeof zql.tasks;
     for (const test of generated.filtered.cases) {
-        let expected = zql.tasks;
+        let expected = tasks;
         if (!test.args.showDone) expected = expected.where('done', false);
         if (test.args.title !== '') expected = expected.where('title', 'LIKE', `%${test.args.title}%`);
         expected = expected.orderBy('id', 'asc').limit(test.args.window);
-        const native = asQueryInternals(filtered({ args: test.args }));
+        const native = asQueryInternals(filtered({ args: test.args, ctx: generated.context }));
         expect(native.ast).toEqual(asQueryInternals(expected).ast);
         expect(normalizeAST(test.ast)).toEqual(native.ast);
     }
-    const expected = zql.tasks
-        .where((eb) =>
-            eb.not(
-                eb.or(
-                    eb.cmp('title', 'IN', ['0', 'hidden']),
-                    eb.exists('comments', (q) => q.where('body', 'secret'), { flip: true }),
-                ),
-            ),
-        )
+    const expected = tasks
+        .where('title', 'NOT IN', ['0', 'hidden'])
+        .where((eb) => eb.not(eb.exists('comments', (q) => q.where('body', 'secret'))))
         .whereExists('list', (q) => q.where('id', 'list-a'), { scalar: true })
-        .whereExists('comments', { flip: false })
+        .whereExists('comments', (q) => q, { flip: false })
         .related('comments', (q) => q.where('body', '!=', '0').orderBy('id', 'desc').limit(2))
         .related('list')
         .orderBy('title', 'desc')
@@ -76,17 +76,21 @@ it('executes both generated controller definitions with empty, zero-string, and 
         .start({ title: '0', id: 'task-a' }, { inclusive: false });
     const related = runInNewContext(`(${generated.relationships.typescript})`, { zql }) as (input: {
         args: { title: string };
+        ctx: { user_id: string };
     }) => typeof expected;
-    const native = asQueryInternals(related({ args: { title: '0' } }));
+    const native = asQueryInternals(related({ args: { title: '0' }, ctx: generated.context }));
     expect(native.ast).toEqual(asQueryInternals(expected).ast);
     expect(native.ast).toEqual(normalizeAST(generated.relationships.ast));
     expect(native.format).toEqual(generated.relationships.format);
     const window = runInNewContext(`(${generated.window.typescript})`, { zql }) as (input: {
         args: { __window?: number };
+        ctx: { user_id: string };
     }) => typeof zql.tasks;
-    expect(asQueryInternals(window({ args: {} })).ast).toEqual(normalizeAST(generated.window.ast));
-    expect(asQueryInternals(window({ args: { __window: 5 } })).ast).toEqual(
-        asQueryInternals(zql.tasks.orderBy('title', 'desc').orderBy('id', 'asc').limit(5)).ast,
+    expect(asQueryInternals(window({ args: {}, ctx: generated.context })).ast).toEqual(
+        normalizeAST(generated.window.ast),
+    );
+    expect(asQueryInternals(window({ args: { __window: 5 }, ctx: generated.context })).ast).toEqual(
+        asQueryInternals(tasks.orderBy('title', 'desc').orderBy('id', 'asc').limit(5)).ast,
     );
     const source = execFileSync('php', ['tests/interop/export.php', 'controller-module'], { encoding: 'utf8' });
     const compiled = transformSync(source, { loader: 'ts', format: 'cjs', target: 'es2022' });
@@ -178,7 +182,7 @@ it('applies authoritative visibility to controller roots, nested results, juncti
     }
 });
 
-it('matches immutable PHP declarations to the pinned native construction surface', () => {
+it('matches independently cloned PHP declarations to the pinned native construction surface', () => {
     const q = createBuilder(schema).tasks;
     const native = {
         unbounded: q,
@@ -199,14 +203,11 @@ it('matches immutable PHP declarations to the pinned native construction surface
         exists: q.whereExists('comments', (child) => child.where('body', 'NOT LIKE', 'secret%'), { flip: false }),
         scalar: q.whereExists('list', (child) => child.where('id', 'list-a'), { scalar: true }),
         junctionExists: q.whereExists('tags', (child) => child.where('name', 'work'), { flip: true }),
-        negation: q.where((eb) =>
-            eb.not(
-                eb.or(
-                    eb.cmp('done', false),
-                    eb.exists('comments', (child) => child.where('body', 'hidden')),
-                ),
-            ),
-        ),
+        negation: q
+            .where('done', '!=', false)
+            .where((eb) => eb.not(eb.exists('comments', (child) => child.where('body', 'hidden')))),
+        nullEquality: q.where('list_id', 'IS', null),
+        nullInequality: q.where('list_id', 'IS NOT', null),
         literals: q.where((eb) =>
             eb.or(eb.cmpLit('0', '=', '0'), eb.and(eb.cmpLit(0, '!=', 1), eb.cmp('list_id', 'IS', null))),
         ),

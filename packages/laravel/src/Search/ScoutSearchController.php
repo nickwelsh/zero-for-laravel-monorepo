@@ -6,25 +6,27 @@ namespace ZeroForLaravel\Search;
 
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use ZeroForLaravel\Http\ContextResolver;
+use Typesense\Client;
+use ZeroForLaravel\Context\ContextDefinition;
 use ZeroForLaravel\Metadata\ModelRegistry;
+use ZeroForLaravel\Support\Input;
 
 /** Register behind the application's session authentication middleware. */
 final class ScoutSearchController
 {
-    public function __invoke(Request $request, ModelRegistry $registry, ContextResolver $resolver): JsonResponse
+    public function __invoke(Request $request, ModelRegistry $registry): JsonResponse
     {
         abort_unless($request->user() !== null, 401);
         $input = $request->validate(['searches' => ['required', 'array', 'min:1', 'max:10'], 'searches.*' => ['required', 'array']]);
-        $context = $resolver($request);
+        $context = ContextDefinition::configured()->resolve($request);
         $searches = [];
-        $body = \ZeroForLaravel\Support\Input::object($input, 'search');
+        $body = Input::object($input, 'search');
         if (! is_array($body['searches'])) {
             abort(422);
         }
 
         foreach ($body['searches'] as $parameters) {
-            $parameters = \ZeroForLaravel\Support\Input::object($parameters, 'search');
+            $parameters = Input::object($parameters, 'search');
             abort_if(array_diff(array_keys($parameters), ['collection', 'q', 'page', 'per_page', 'query_by', 'filter_by', 'facet_by', 'max_facet_values', 'sort_by', 'include_fields', 'highlight_fields', 'highlight_full_fields', 'highlight_affix_num_tokens', 'highlight_start_tag', 'highlight_end_tag', 'snippet_threshold', 'drop_tokens_threshold', 'num_typos', 'typo_tokens_threshold']) !== [], 422, 'Unsupported search parameter.');
             $index = $parameters['collection'] ?? null;
             $search = null;
@@ -69,23 +71,23 @@ final class ScoutSearchController
                 'include_fields' => implode(',', array_unique(['id', $meta['key']])), 'highlight_fields' => 'none', 'highlight_full_fields' => '', 'enable_highlight_v1' => false];
         }
 
-        $client = resolve(\Typesense\Client::class);
-        $response = \ZeroForLaravel\Support\Input::object($client->multiSearch->perform(['searches' => $searches]), 'response');
+        $client = resolve(Client::class);
+        $response = Input::object($client->multiSearch->perform(['searches' => $searches]), 'response');
         if (! is_array($response['results'] ?? null)) {
             abort(502, 'Invalid search response.');
         }
 
         foreach ($response['results'] ?? [] as $index => $result) {
-            $result = \ZeroForLaravel\Support\Input::object($result, 'result');
+            $result = Input::object($result, 'result');
             if (! is_array($result['hits'] ?? [])) {
                 abort(502, 'Invalid search hits.');
             }
 
             $hits = $result['hits'] ?? [];
             foreach ($hits as $position => $hit) {
-                $hit = \ZeroForLaravel\Support\Input::object($hit, 'hit');
+                $hit = Input::object($hit, 'hit');
                 $keys = array_fill_keys(explode(',', $searches[$index]['include_fields']), true);
-                $hits[$position] = ['document' => array_intersect_key(\ZeroForLaravel\Support\Input::object($hit['document'] ?? [], 'document'), $keys), 'highlights' => []];
+                $hits[$position] = ['document' => array_intersect_key(Input::object($hit['document'] ?? [], 'document'), $keys), 'highlights' => []];
             }
 
             $result['hits'] = $hits;

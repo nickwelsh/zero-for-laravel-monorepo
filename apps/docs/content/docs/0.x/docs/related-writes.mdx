@@ -22,6 +22,13 @@ allocates stable creation-site identities, so the child uses the same parent ID
 locally and authoritatively. A rejected child write rolls back the parent too.
 The caller does not submit a table-write graph or choose arbitrary model methods.
 
+Each Zero create receives its own model's global creation defaults; a child does
+not inherit its parent's query defaults. Explicit association data still takes
+precedence and must be authorized by policies, Gates, or FormRequest association
+checks. Defaults do not authorize `person_id` or other foreign keys. Ordinary
+Eloquent relationship builders remain Eloquent and cannot invoke `#[ZeroScope]`
+methods. See [creation defaults](./mutations.mdx#creation-defaults).
+
 Explicit operations use `Mutation::create(Model::class, data: ..., key: ...)`.
 Supported bounded list loops require unique stable item keys; preparation derives
 UUID identities by item key rather than traversal position. Ambiguous identity

@@ -95,14 +95,12 @@ final class QueryController
         return Inertia::render('tasks/relationships', [
             'tasks' => Task::zeroQuery()
                 ->visibleTo($request->user())
-                ->where(fn ($args) => $args->not($args->or(
-                    $args->cmp('title', 'IN', [$title, 'hidden']),
-                    $args->exists('comments', fn ($query) => $query->visibleTo($request->user())->where('body', 'secret'), ['flip' => true]),
-                )))
+                ->where('title', 'NOT IN', [$title, 'hidden'])
+                ->whereDoesntHave('comments', fn ($query) => $query->visibleTo($request->user())->where('body', 'secret'))
                 ->whereExists('list', fn ($query) => $query->visibleTo($request->user())->where('id', 'list-a'), ['scalar' => true])
                 ->whereExists('comments', fn ($query) => $query->visibleTo($request->user()), ['flip' => false])
-                ->related('comments', fn ($query) => $query->visibleTo($request->user())->where('body', '!=', $title)->orderBy('id', 'desc')->limit(2))
-                ->related('list', fn ($query) => $query->visibleTo($request->user()))
+                ->with('comments', fn ($query) => $query->visibleTo($request->user())->where('body', '!=', $title)->orderBy('id', 'desc')->limit(2))
+                ->with('list', fn ($query) => $query->visibleTo($request->user()))
                 ->orderBy('title', 'desc')->orderBy('id', 'asc')
                 ->start(['title' => $title, 'id' => 'task-a'], ['inclusive' => false]),
         ]);
