@@ -73,7 +73,7 @@ final class ProjectionManager
             $this->table('permission_index', ['id' => 'text PRIMARY KEY', 'model' => 'text NOT NULL', 'rule_id' => 'text NOT NULL',
                 'subject_key' => 'text NOT NULL', 'effect' => 'text NOT NULL', 'global_key' => "text NOT NULL DEFAULT 'global'",
                 'v0' => 'text', 'v1' => 'text', 'v2' => 'text', 'v3' => 'text', 'v4' => 'text', 'v5' => 'text', ...$this->types($attributes, 's_')]);
-            $this->table('permission_installation', ['id' => 'boolean PRIMARY KEY DEFAULT true CHECK (id)', 'fingerprint' => 'text NOT NULL']);
+            $this->table('permission_installation', ['id' => 'boolean PRIMARY KEY DEFAULT true CHECK (id)', 'fingerprint' => 'text NOT NULL', 'global_key' => "text NOT NULL DEFAULT 'global'"]);
             PermissionSchema::createAccess($db);
             $db->statement('CREATE INDEX IF NOT EXISTS permission_lookup ON permission_index (subject_key, model, effect, v1, v2, v3)');
             $db->statement('CREATE INDEX IF NOT EXISTS permission_provenance ON permission_index (rule_id)');
@@ -115,7 +115,7 @@ final class ProjectionManager
                 $models[$binding->model] = $portable;
             }
 
-            $indexBody = 'DELETE FROM permission_index;';
+            $indexBody = '';
             foreach ($models as $name => $portable) {
                 $manager = resolve(PermissionManager::class)->model($name);
                 new RoleGraph($manager->rules());
@@ -127,6 +127,7 @@ final class ProjectionManager
                 $indexBody .= $this->indexSql($name, $portable, array_keys($subjectValues));
             }
 
+            $indexBody .= 'DELETE FROM permission_index'.($models === [] ? '' : ' WHERE model NOT IN ('.implode(', ', array_map($this->literal(...), array_keys($models))).')').';';
             $indexBody .= "IF (SELECT count(*) FROM permission_index) > 100000 THEN RAISE EXCEPTION 'Permission projection exceeds 100000 grants; reduce role fan-out'; END IF;";
             $this->function('zero_permissions_index', '', 'void', $indexBody);
             $this->function('zero_permissions_touch', '', 'void', 'WITH changed AS (UPDATE permission_models SET revision = revision + 1 RETURNING id, revision) INSERT INTO permission_events (model, revision) SELECT id, revision FROM changed;');
@@ -181,7 +182,7 @@ final class ProjectionManager
             }
         }
 
-        return hash('sha256', json_encode([config()->get('permissions.subject'), config()->get('permissions.resources'), $sources], JSON_THROW_ON_ERROR));
+        return hash('sha256', json_encode(['targeted-access-v1', config()->get('permissions.subject'), config()->get('permissions.resources'), $sources], JSON_THROW_ON_ERROR));
     }
 
     /** @param array<string, string> $columns */
@@ -302,6 +303,9 @@ final class ProjectionManager
         $roleDomain = $model->roleArity === 3 ? ' AND g.v2 = reach.domain_key' : '';
         $columns = $columns === '' ? '' : ', '.$columns;
         $select = $select === '' ? '' : ', '.$select;
+        $updates = implode(', ', array_map(fn (string $column): string => $this->quote($column).' = EXCLUDED.'.$this->quote($column), [
+            'model', 'rule_id', 'subject_key', 'effect', 'global_key', 'v0', 'v1', 'v2', 'v3', 'v4', 'v5', ...$attributes,
+        ]));
 
         return <<<SQL
             WITH RECURSIVE domains AS (
@@ -315,13 +319,20 @@ final class ProjectionManager
                 FROM reach JOIN permission_rules g
                     ON g.model = {$literal} AND g.ptype = 'g' AND g.v0 = reach.principal {$roleDomain}
                 WHERE reach.depth < 8
+            ), desired AS MATERIALIZED (
+                SELECT encode(sha256(convert_to(s.id || ':' || p.id, 'UTF8')), 'hex') AS id,
+                    {$literal} AS model, p.id AS rule_id, s.id AS subject_key, {$effect} AS effect,
+                    'global' AS global_key, p.v0, p.v1, p.v2, p.v3, p.v4, p.v5 {$select}
+                FROM permission_subjects s CROSS JOIN permission_rules p
+                WHERE p.model = {$literal} AND p.ptype = 'p' AND {$reachable}
+            ), removed AS (
+                DELETE FROM permission_index current WHERE current.model = {$literal}
+                    AND NOT EXISTS (SELECT 1 FROM desired WHERE desired.id = current.id)
             )
-            INSERT INTO permission_index
-                (id, model, rule_id, subject_key, effect, global_key, v0, v1, v2, v3, v4, v5 {$columns})
-            SELECT encode(sha256(convert_to(s.id || ':' || p.id, 'UTF8')), 'hex'),
-                {$literal}, p.id, s.id, {$effect}, 'global', p.v0, p.v1, p.v2, p.v3, p.v4, p.v5 {$select}
-            FROM permission_subjects s CROSS JOIN permission_rules p
-            WHERE p.model = {$literal} AND p.ptype = 'p' AND {$reachable};
+            INSERT INTO permission_index (id, model, rule_id, subject_key, effect, global_key, v0, v1, v2, v3, v4, v5 {$columns})
+                SELECT * FROM desired
+            ON CONFLICT (id) DO UPDATE SET {$updates}
+                WHERE ROW(permission_index.*) IS DISTINCT FROM ROW(EXCLUDED.*);
             SQL;
     }
 

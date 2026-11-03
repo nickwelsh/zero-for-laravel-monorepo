@@ -66,7 +66,9 @@ Captured instance guards are rechecked through reserved native Zero status queri
 denied states preserve the configured 403/404 and unmount the page before
 `onRevoked`. Disconnects are unknown, not revocation. Reconnects require fresh
 status and business-query generations. Checks renew after 15 seconds and expire
-after 20; permission revisions invalidate them immediately through replication.
+after 20. Live subject/resource/ability predicates invalidate only affected access
+results through replication; unrelated permission edits do not trigger a recheck
+or rotate a protected business query's generation.
 
 ## Inputs, casts, and results
 

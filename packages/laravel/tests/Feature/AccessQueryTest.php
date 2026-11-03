@@ -323,12 +323,10 @@ test('a concurrent source revocation cannot commit between the initial Gate and 
 
         expect($blocked)->toBeTrue();
     };
-    $before = DB::table('permission_access_revision')->value('revision');
     accessNativeQuery(accessNativeInput())->assertOk()->assertJsonMissingPath('queries.0.error');
     expect($writer->wait())->toBe(0)->and($writer->getOutput())->toContain('committed');
     expect(DB::table('permission_access_checks')->count())->toBe(1);
-    expect(DB::table('permission_access_checks')->value('revision'))->toBe($before);
-    expect(DB::table('permission_access_revision')->value('revision'))->not->toBe($before);
+    expect(DB::table('permission_access_results')->value('state'))->toBe('allowed');
 
     $next = accessNativeInput();
     accessNativeQuery($next)->assertOk()->assertJsonMissingPath('queries.0.error');
@@ -422,24 +420,49 @@ test('native access generations are idempotent scoped and never renew from backg
     expect(DB::table('permission_access_results')->where('generation', $input['generation'])->count())->toBe(2);
 });
 
-test('native access revision changes are transactional and checks do not invalidate themselves', function (): void {
-    $revision = DB::table('permission_access_revision')->value('revision');
-    accessNativeQuery(accessNativeInput())->assertOk();
-    expect(DB::table('permission_access_revision')->value('revision'))->toBe($revision);
+test('the targeted access migration upgrades already published legacy checks without dropping their publication', function (): void {
+    accessNativeQuery(accessNativeInput())->assertOk()->assertJsonMissingPath('queries.0.error');
+    Schema::table('permission_access_checks', fn (Blueprint $table) => $table->dropColumn(['global_key', 'dependencies']));
+    DB::statement("ALTER TABLE permission_access_checks ADD COLUMN revision varchar(36) NOT NULL DEFAULT 'legacy'");
+    $publication = 'access_upgrade_test';
+    try {
+        (new PublicationManager(resolve(ModelRegistry::class)))->sync($publication);
+        $migration = require __DIR__.'/../../database/migrations/2026_11_03_000003_targeted_access_checks.php';
+        if (! is_object($migration) || ! is_callable([$migration, 'up'])) {
+            throw new LogicException('Expected an executable access migration.');
+        }
+
+        $migration->up();
+        (new PublicationManager(resolve(ModelRegistry::class)))->sync($publication);
+        $input = accessNativeInput();
+        accessNativeQuery($input)->assertOk()->assertJsonMissingPath('queries.0.error');
+        expect(DB::table('permission_access_results')->where('generation', $input['generation'])->value('state'))->toBe('allowed');
+        expect(DB::table('pg_publication_tables')->where('pubname', $publication)->where('tablename', 'permission_access_checks')->count())->toBe(1);
+    } finally {
+        DB::statement('DROP PUBLICATION IF EXISTS access_upgrade_test');
+    }
+});
+
+test('native access checks preserve rolled back grants without a global broadcast table', function (): void {
+    $input = accessNativeInput();
+    $ast = accessNativeQuery($input)->assertOk()->json('queries.0.ast');
+    expect(Schema::hasTable('permission_access_revision'))->toBeFalse();
     try {
         DB::transaction(function (): void {
             Casbin::removePolicy('user:42', 'list:7', 'todo-list', 'view', 'department', 'allow');
             throw new RuntimeException('rollback');
         });
     } catch (RuntimeException) {
-        expect(DB::table('permission_access_revision')->value('revision'))->toBe($revision);
+        expect(accessNativeQuery($input)->assertOk()->json('queries.0.ast'))->toBe($ast);
     }
 
+    accessNativeQuery(accessNativeInput())->assertOk();
+    expect(DB::table('permission_access_results')->pluck('state')->all())->toBe(['allowed', 'allowed']);
     PermissionUser::whereKey(42)->update(['department_id' => 'support']);
-    expect(DB::table('permission_access_revision')->value('revision'))->not->toBe($revision);
-    $revision = DB::table('permission_access_revision')->value('revision');
     (new ProjectionManager)->rebuild();
-    expect(DB::table('permission_access_revision')->value('revision'))->not->toBe($revision);
+    $next = accessNativeInput();
+    accessNativeQuery($next)->assertOk();
+    expect(DB::table('permission_access_results')->where('generation', $next['generation'])->value('state'))->toBe('denied');
 });
 
 test('native access checks retain route middleware binding and fresh actor semantics', function (): void {
@@ -477,8 +500,11 @@ test('native access bounds generations batches and cleanup without publishing au
     $input['owner'] = 'foreign';
     accessNativeQuery($input)->assertOk()->assertJsonPath('queries.0.error', 'parse');
     $plan = implode("\n", (new PublicationManager(resolve(ModelRegistry::class)))->plan('access_native_publication'));
-    expect($plan)->toContain('permission_access_results', 'permission_access_revision', 'permission_access_checks');
+    expect($plan)->toContain('permission_access_results', 'permission_access_checks', 'permission_installation');
+    expect($plan)->not->toContain('permission_access_revision');
+
     $generated = (new \ZeroForLaravel\Generation\TypeScriptGenerator)->generate(resolve(ModelRegistry::class));
-    expect($generated)->toContain('permission_access_results', 'permission_access_revision');
+    expect($generated)->toContain('permission_access_results');
+    expect($generated)->not->toContain('permission_access_revision', 'dependencies');
     expect($generated)->not->toContain('permission_access_checks', 'fingerprint', 'expires_at');
 });

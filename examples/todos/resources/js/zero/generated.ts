@@ -11,18 +11,14 @@ const table0 = table("permission_access_results").columns({
   "state": string(),
   "status": number().optional(),
 } ).primaryKey("id");
-const table1 = table("permission_access_revision").columns({
-  "id": string(),
-  "revision": string(),
-} ).primaryKey("id");
-const table2 = table("todo_lists").columns({
+const table1 = table("todo_lists").columns({
   "id": string(),
   "user_id": number(),
   "name": string(),
   "created_at": number().optional(),
   "updated_at": number().optional(),
 } ).primaryKey("id");
-const table3 = table("todos").columns({
+const table2 = table("todos").columns({
   "id": string(),
   "list_id": string(),
   "title": string(),
@@ -30,10 +26,10 @@ const table3 = table("todos").columns({
   "created_at": number().optional(),
   "updated_at": number().optional(),
 } ).primaryKey("id");
-const table2Relations = relationships(table2, ({many}) => ({
-  "todos": many({sourceField: ["id"], destField: ["list_id"], destSchema: table3}),
+const table1Relations = relationships(table1, ({many}) => ({
+  "todos": many({sourceField: ["id"], destField: ["list_id"], destSchema: table2}),
 }));
-export const schema = createSchema({tables: [table0, table1, table2, table3], relationships: [table2Relations], enableLegacyQueries: false, enableLegacyMutators: false});
+export const schema = createSchema({tables: [table0, table1, table2], relationships: [table1Relations], enableLegacyQueries: false, enableLegacyMutators: false});
 export const definitions = {
     "Todo": {
         "name": "Todo",

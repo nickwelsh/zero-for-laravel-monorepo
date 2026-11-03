@@ -155,7 +155,7 @@ final class ModelRegistry
         foreach ($this->models as $model) {
             if ($model->policyVisibility) {
                 resolve(ProjectionManager::class)->assertReady();
-                $tables = array_unique([...$tables, 'permission_subjects', 'permission_index', 'permission_access_checks', Binding::resource($model->class)->projectionTable()]);
+                $tables = array_unique([...$tables, 'permission_subjects', 'permission_index', 'permission_installation', 'permission_access_checks', Binding::resource($model->class)->projectionTable()]);
             }
         }
 
@@ -177,9 +177,6 @@ final class ModelRegistry
         }
 
         return [
-            'permission_access_revision' => ['columns' => [
-                'id' => ['type' => 'string', 'nullable' => false], 'revision' => ['type' => 'string', 'nullable' => false],
-            ], 'key' => ['id']],
             'permission_access_results' => ['columns' => [
                 'id' => ['type' => 'string', 'nullable' => false], 'generation' => ['type' => 'string', 'nullable' => false],
                 'binding' => ['type' => 'string', 'nullable' => false], 'state' => ['type' => 'string', 'nullable' => false],

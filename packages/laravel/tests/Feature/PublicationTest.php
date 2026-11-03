@@ -66,7 +66,7 @@ test('publication matches the generated column plan and sync is idempotent', fun
         $manager->sync('laravel_zero_test_publication');
         $manager->sync('laravel_zero_test_publication');
         $tables = DB::select("SELECT tablename, attnames FROM pg_publication_tables WHERE pubname = 'laravel_zero_test_publication' ORDER BY tablename");
-        $expected = ['comments', 'lists', 'tags', 'task_tag', 'tasks', 'permission_access_results', 'permission_access_revision', ...array_keys($registry->privateTables())];
+        $expected = ['comments', 'lists', 'tags', 'task_tag', 'tasks', 'permission_access_results', ...array_keys($registry->privateTables())];
         sort($expected);
         $this->assertSame($expected, array_column($tables, 'tablename'));
         $columns = DB::scalar("SELECT attnames::text FROM pg_publication_tables WHERE pubname = 'laravel_zero_test_publication' AND tablename = 'tasks'");

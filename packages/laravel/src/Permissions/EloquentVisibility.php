@@ -39,38 +39,42 @@ final class EloquentVisibility
             throw new LogicException('Portable visibility does not support custom FROM expressions or aliases.');
         }
 
-        $predicates = PolicyPredicates::bind($plan, Binding::id($user->getAuthIdentifier()));
         $key = $query->getModel()->qualifyColumn($query->getModel()->getKeyName());
 
-        return $query->whereExists(function (Sql $resource) use ($plan, $predicates, $key): void {
-            $resource->selectRaw('1')->from($plan->binding->projectionTable(), 'permission_resource')
-                ->whereColumn('permission_resource.resource_id', $key)
-                ->where(function (Sql $decision) use ($plan, $predicates): void {
-                    if ($plan->adminAttribute !== null) {
-                        $decision->whereExists(function (Sql $subject) use ($plan, $predicates): void {
-                            $subject->selectRaw('1')->from('permission_subjects', 'permission_subject')
-                                ->whereColumn('permission_subject.global_key', 'permission_resource.global_key')
-                                ->where('permission_subject.id', $predicates->subjectKey)
-                                ->where('permission_subject.s_'.$plan->adminAttribute, true);
-                        });
+        return $query->whereExists($this->query($plan, Binding::id($user->getAuthIdentifier()))->whereColumn('permission_resource.resource_id', $key));
+    }
+
+    /** The same bound decision is used by visibility and native access dependency snapshots. */
+    public function query(PolicyPlan $plan, string $subjectId): Sql
+    {
+        $predicates = PolicyPredicates::bind($plan, $subjectId);
+
+        return (new ProjectionManager)->connection()->query()->selectRaw('1')->from($plan->binding->projectionTable(), 'permission_resource')
+            ->where(function (Sql $decision) use ($plan, $predicates): void {
+                if ($plan->adminAttribute !== null) {
+                    $decision->whereExists(function (Sql $subject) use ($plan, $predicates): void {
+                        $subject->selectRaw('1')->from('permission_subjects', 'permission_subject')
+                            ->whereColumn('permission_subject.global_key', 'permission_resource.global_key')
+                            ->where('permission_subject.id', $predicates->subjectKey)
+                            ->where('permission_subject.s_'.$plan->adminAttribute, true);
+                    });
+                }
+
+                $decision->orWhere(function (Sql $casbin) use ($plan, $predicates): void {
+                    if ($plan->constant !== null) {
+                        $casbin->whereRaw($plan->constant ? '1 = 1' : '1 = 0');
+
+                        return;
                     }
 
-                    $decision->orWhere(function (Sql $casbin) use ($plan, $predicates): void {
-                        if ($plan->constant !== null) {
-                            $casbin->whereRaw($plan->constant ? '1 = 1' : '1 = 0');
-
-                            return;
-                        }
-
-                        $this->matches($casbin, $predicates, 'allow');
-                        if ($plan->model->denyOverride) {
-                            $casbin->whereNot(function (Sql $denied) use ($predicates): void {
-                                $this->matches($denied, $predicates, 'deny');
-                            });
-                        }
-                    });
+                    $this->matches($casbin, $predicates, 'allow');
+                    if ($plan->model->denyOverride) {
+                        $casbin->whereNot(function (Sql $denied) use ($predicates): void {
+                            $this->matches($denied, $predicates, 'deny');
+                        });
+                    }
                 });
-        });
+            });
     }
 
     private function matches(Sql $query, PolicyPredicates $predicates, string $effect): void

@@ -57,7 +57,7 @@ final readonly class QueryProcessor
                     Input::fail('args', 'Expected one argument object.');
                 }
 
-                if (in_array($request['name'], [AccessQueries::REVISION, AccessQueries::STATUS], true)) {
+                if ($request['name'] === AccessQueries::STATUS) {
                     $result['ast'] = resolve(AccessQueries::class)->transform($request['name'], $request['args'][0], $context);
                     $queries[] = $result;
 

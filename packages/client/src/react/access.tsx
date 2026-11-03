@@ -70,24 +70,17 @@ function text(value: unknown): value is string {
     return typeof value === 'string' && value.length > 0 && value.length <= 256;
 }
 
-/** One revision subscription and coalesced batches per native instance AND actor context. */
+/** Coalesced checks per native instance AND actor context; no broadcast subscription. */
 function monitor(zero: NativeZero, context: string) {
     const entries = new Map<string, Entry>();
     let running = false;
     let epoch = zero.connection.state.current;
-    let revision: string | undefined;
-    let revisionStop: (() => void) | undefined;
     let connectionStop: (() => void) | undefined;
     let timer: ReturnType<typeof setTimeout> | undefined;
-    let revisionTimer: ReturnType<typeof setTimeout> | undefined;
-    let revisionFailures = 0;
     let queued = false;
     // These are genuine named native queries, sent over Zero's existing socket.
     const builder = createBuilder(zero.schema);
     const queries = defineQueries({
-        __zero_access_revision: defineQuery((_options: { args: { generation: string }; ctx: ClientContext }) =>
-            builder.permission_access_revision!.where('id', 'global'),
-        ),
         __zero_access_status: defineQuery(
             ({
                 args,
@@ -146,7 +139,7 @@ function monitor(zero: NativeZero, context: string) {
                 emit(entry, 'unknown');
             }
             if (entry.lease) next = Math.min(next, entry.lease);
-            if (revision !== undefined) next = Math.min(next, entry.due);
+            next = Math.min(next, entry.due);
         }
         if (Number.isFinite(next)) timer = setTimeout(flush, Math.max(0, next - now));
     }
@@ -208,12 +201,14 @@ function monitor(zero: NativeZero, context: string) {
                         );
                     } else {
                         // An incomplete renewal may keep an earlier unexpired lease.
-                        // Losing an already-confirmed row, however, invalidates immediately.
+                        // A live dependency removed only this binding's result.
+                        // Recheck it immediately without touching sibling approvals.
                         if (batch.answered.has(entry)) {
-                            entry.lease = 0;
-                            emit(entry, 'unknown');
+                            invalidate(entry);
+                            queue();
+                        } else if (type === 'error' || type === 'complete') {
+                            retry(entry);
                         }
-                        if (type === 'error' || type === 'complete') retry(entry);
                     }
                 }
                 schedule();
@@ -227,8 +222,7 @@ function monitor(zero: NativeZero, context: string) {
         clearTimeout(timer);
         timer = undefined;
         if (!connected()) return;
-        const due =
-            revision === undefined ? [] : [...entries.values()].filter((entry) => entry.due <= performance.now());
+        const due = [...entries.values()].filter((entry) => entry.due <= performance.now());
         for (let offset = 0; offset < due.length; offset += 32) check(due.slice(offset, offset + 32));
         schedule();
     }
@@ -239,69 +233,6 @@ function monitor(zero: NativeZero, context: string) {
             queued = false;
             if (running) flush();
         });
-    }
-    function retryRevision(delay?: number) {
-        if (!connected() || revisionTimer !== undefined) return;
-        revisionTimer = setTimeout(
-            () => {
-                revisionTimer = undefined;
-                watchRevision();
-            },
-            delay ?? Math.min(1000 * 2 ** Math.min(revisionFailures++, 4), renewalMS),
-        );
-    }
-    function watchRevision() {
-        revisionStop?.();
-        revisionStop = undefined;
-        revision = undefined;
-        invalidateAll();
-        clearTimeout(timer);
-        timer = undefined;
-        clearTimeout(revisionTimer);
-        revisionTimer = undefined;
-        if (!connected()) return;
-        const observedEpoch = epoch;
-        let active = true;
-        let attaching = true;
-        let view: TypedView<unknown> | undefined;
-        let unsubscribe: (() => void) | undefined;
-        revisionStop = () => {
-            active = false;
-            unsubscribe?.();
-            view?.destroy();
-        };
-        try {
-            // A new identity forces server confirmation even when the previous
-            // revision query is retained as complete on this connection.
-            view = zero.materialize(queries['__zero_access_revision']({ generation: crypto.randomUUID() }), { ttl: 0 });
-            unsubscribe = view.addListener((data, type) => {
-                if (!active || !connected() || epoch !== observedEpoch) return;
-                // addListener synchronously replays a retained snapshot. It cannot
-                // prove freshness for this connection epoch, even if 'complete'.
-                if (attaching) return;
-                const row = Array.isArray(data) && data.length === 1 ? record(data[0]) : undefined;
-                const next =
-                    type === 'complete' && row?.id === 'global' && text(row.revision) ? row.revision : undefined;
-                if (next === undefined) retryRevision();
-                else {
-                    clearTimeout(revisionTimer);
-                    revisionTimer = undefined;
-                    revisionFailures = 0;
-                }
-                if (next === revision) return;
-                revision = next;
-                invalidateAll();
-                queue();
-            });
-        } catch {
-            revisionStop();
-            retryRevision();
-        } finally {
-            attaching = false;
-            // No new completion is not evidence of freshness. Retry at a
-            // bounded rate rather than trusting a retained complete replay.
-            if (revision === undefined) retryRevision(renewalMS);
-        }
     }
     function visibility() {
         if (document.visibilityState !== 'visible') return;
@@ -315,22 +246,19 @@ function monitor(zero: NativeZero, context: string) {
             // Observe every synchronous Source epoch, including connected ->
             // disconnected -> connected in a single React batch.
             epoch = zero.connection.state.current;
-            watchRevision();
+            invalidateAll();
+            queue();
         });
         document.addEventListener('visibilitychange', visibility);
-        watchRevision();
+        queue();
     }
     function stop() {
         running = false;
-        revisionStop?.();
-        revisionStop = undefined;
         connectionStop?.();
         connectionStop = undefined;
         document.removeEventListener('visibilitychange', visibility);
         clearTimeout(timer);
         timer = undefined;
-        clearTimeout(revisionTimer);
-        revisionTimer = undefined;
         invalidateAll();
     }
     return {
@@ -380,8 +308,8 @@ function monitor(zero: NativeZero, context: string) {
                         entries.delete(key);
                         schedule();
                         // React replaces subscriptions within one commit when
-                        // editable args change. Keep the revision view through
-                        // that handoff, but never retain the old binding's lease.
+                        // editable args change. Keep the monitor through that
+                        // handoff, but never retain the old binding's lease.
                         if (!entries.size)
                             queueMicrotask(() => {
                                 if (!entries.size) stop();

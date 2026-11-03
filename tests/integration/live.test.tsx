@@ -220,8 +220,8 @@ it.skipIf(!enabled)(
                     `SELECT attnames::text FROM pg_publication_tables WHERE pubname='${publication}' AND tablename='tasks'`,
                 ),
             ).not.toContain('secret');
-            // Five business/pivot tables, six private permission projections,
-            // two safe access roots and one private access-check projection.
+            // Five business/pivot tables, seven private permission projections,
+            // one safe access root and one private access-check projection.
             expect(psql(`SELECT count(*) FROM pg_publication_tables WHERE pubname='${publication}'`)).toBe('14');
             php = spawn(
                 'php',
@@ -319,9 +319,6 @@ it.skipIf(!enabled)(
             const defineQueries = defineQueriesWithType<LiveSchema>();
             const defineQuery = defineQueryWithType<LiveSchema, Context>();
             const access = defineQueries({
-                __zero_access_revision: defineQuery((_options: { args: Record<string, never>; ctx: Context }) =>
-                    builder.permission_access_revision.where('id', 'global'),
-                ),
                 __zero_access_status: defineQuery(
                     ({
                         args,
@@ -384,16 +381,11 @@ it.skipIf(!enabled)(
             }
             try {
                 await until(() => complete && result.length === 2, 'Authorized query never completed');
-                const revisionView = zero.materialize(access['__zero_access_revision']({}), { ttl: 0 });
-                let revision: string | undefined;
-                const removeRevision = revisionView.addListener((rows, type) => {
-                    if (type === 'complete') revision = rows[0]?.revision;
-                });
-                watches.push(() => {
-                    removeRevision();
-                    revisionView.destroy();
-                });
-                await until(() => revision !== undefined, 'Reserved revision query did not replicate');
+                expect(
+                    psql(
+                        "SELECT count(*) FROM pg_tables WHERE schemaname='public' AND tablename='permission_access_revision'",
+                    ),
+                ).toBe('0');
                 const first = status([alice, bob, '019a0000-0000-7000-8000-000000000099'], generation);
                 await until(
                     () => first.complete && first.rows.length === 3,
@@ -416,35 +408,115 @@ it.skipIf(!enabled)(
                 const serverAST = JSON.stringify((await transform('__zero_access_status', first.args)).ast);
                 expect(serverAST).toContain('"system":"permissions"');
                 expect(serverAST).toContain('permission_access_checks');
-                expect(serverAST).toContain('permission_access_revision');
-                const originalRevision = revision;
+                expect(serverAST).not.toContain('permission_access_revision');
+                const initialStatus = [...first.rows];
                 execFileSync('php', ['tests/integration/app.php', 'revoke-rollback'], { env, stdio: 'pipe' });
-                expect(psql("SELECT revision FROM permission_access_revision WHERE id='global'")).toBe(
-                    originalRevision,
-                );
                 await sleep(300);
-                expect(revision).toBe(originalRevision);
-                expect(first.rows).toHaveLength(3);
+                expect(first.rows).toEqual(initialStatus);
                 expect(result).toHaveLength(2);
 
-                // Invalidation is an authority-epoch join, not business emptiness:
-                // an unrelated tag grant edit leaves these business rows present.
+                // A committed unrelated grant must produce no access row patch,
+                // Laravel check, or status change. A later business-row update is
+                // the WAL catch-up barrier; this is not a sleep-only assertion.
+                const unrelatedStart = frames.length;
+                const unrelatedCallbacks = readFileSync(join(root, 'query-callbacks.log'), 'utf8');
+                const unrelatedChecks = readFileSync(join(root, 'access-actors.log'), 'utf8');
                 execFileSync('php', ['tests/integration/app.php', 'revoke-related'], { env, stdio: 'pipe' });
+                psql(`UPDATE tasks SET title='Unrelated permission barrier' WHERE id='${alice}'`);
                 await until(
-                    () => revision !== originalRevision && first.rows.length === 0,
-                    'Old allowed/denied status survived a committed revision',
+                    () => result[0]?.title === 'Unrelated permission barrier',
+                    'Unrelated change did not reach WAL barrier',
                 );
+                expect(first.rows).toEqual(initialStatus);
                 expect(result).toHaveLength(2);
+                expect(readFileSync(join(root, 'query-callbacks.log'), 'utf8')).toBe(unrelatedCallbacks);
+                expect(readFileSync(join(root, 'access-actors.log'), 'utf8')).toBe(unrelatedChecks);
+                const unrelatedWire = Buffer.concat(frames.slice(unrelatedStart)).toString('utf8');
+                expect(unrelatedWire).toContain('Unrelated permission barrier');
+                expect(unrelatedWire).not.toContain('permission_access_results');
+                for (const row of initialStatus) expect(unrelatedWire).not.toContain(row.id);
                 expect(await transform('__zero_access_status', first.args)).toHaveProperty('ast');
-                await sleep(200);
-                expect(first.rows).toEqual([]); // Retransforming cannot renew an old generation.
                 execFileSync('php', ['tests/integration/app.php', 'restore-related'], { env, stdio: 'pipe' });
+                psql(`UPDATE tasks SET title='Initial' WHERE id='${alice}'`);
+                await until(() => result[0]?.title === 'Initial', 'Unrelated fixture did not restore');
+
+                // Two users observe the same changed resource alongside their
+                // own unaffected resources. Only the changed decision disappears,
+                // including Bob's denied decision becoming a grant.
+                const other = new Zero<typeof schema, undefined, Context>({
+                    schema,
+                    userID: 'bob',
+                    auth: 'bob',
+                    context: { user_id: 'bob' },
+                    cacheURL: `http://127.0.0.1:${zeroPort}`,
+                    kvStore: 'mem',
+                    logLevel: 'error',
+                });
+                const scopedStart = watches.length;
+                try {
+                    const aliceScoped = status([alice, third]);
+                    const bobScoped = status([alice, bob], randomUUID(), other);
+                    await until(
+                        () =>
+                            aliceScoped.complete &&
+                            aliceScoped.rows.length === 2 &&
+                            bobScoped.complete &&
+                            bobScoped.rows.length === 2,
+                        'Scoped access decisions did not synchronize',
+                    );
+                    const aliceChanged = aliceScoped.rows.find((row) => row.binding === binding)!;
+                    const bobChanged = bobScoped.rows.find((row) => row.binding === binding)!;
+                    const aliceUnchanged = aliceScoped.rows.filter((row) => row.id !== aliceChanged.id);
+                    const bobUnchanged = bobScoped.rows.filter((row) => row.id !== bobChanged.id);
+                    expect(aliceChanged.state).toBe('allowed');
+                    expect(bobChanged.state).toBe('denied');
+                    expect(aliceUnchanged[0]?.state).toBe('allowed');
+                    expect(bobUnchanged[0]?.state).toBe('allowed');
+                    const scopedWireStart = frames.length;
+                    const scopedCallbacks = readFileSync(join(root, 'query-callbacks.log'), 'utf8');
+                    const scopedChecks = readFileSync(join(root, 'access-actors.log'), 'utf8');
+                    psql(`UPDATE tasks SET user_id='bob' WHERE id='${alice}'`);
+                    await until(
+                        () => aliceScoped.rows.length === 1 && bobScoped.rows.length === 1 && result.length === 1,
+                        'Ownership transfer did not invalidate both affected decisions',
+                    );
+                    psql(`UPDATE tasks SET title='Scoped WAL barrier' WHERE id='${third}'`);
+                    await until(
+                        () => result[0]?.title === 'Scoped WAL barrier',
+                        'Scoped WAL barrier did not replicate',
+                    );
+                    expect(aliceScoped.rows).toEqual(aliceUnchanged);
+                    expect(bobScoped.rows).toEqual(bobUnchanged);
+                    expect(readFileSync(join(root, 'query-callbacks.log'), 'utf8')).toBe(scopedCallbacks);
+                    expect(readFileSync(join(root, 'access-actors.log'), 'utf8')).toBe(scopedChecks);
+                    const scopedWire = Buffer.concat(frames.slice(scopedWireStart)).toString('utf8');
+                    expect(scopedWire).toContain(aliceChanged.id);
+                    expect(scopedWire).toContain(bobChanged.id);
+                    for (const row of [...aliceUnchanged, ...bobUnchanged]) expect(scopedWire).not.toContain(row.id);
+                    const aliceRecheck = status();
+                    const bobRecheck = status([alice], randomUUID(), other);
+                    await until(
+                        () => aliceRecheck.rows[0]?.state === 'denied' && bobRecheck.rows[0]?.state === 'allowed',
+                        'Targeted rechecks did not reflect transferred ownership',
+                    );
+                    expect(aliceRecheck.rows[0]?.status).toBe(404);
+                } finally {
+                    watches.splice(scopedStart).forEach((destroy) => destroy());
+                    await other.close();
+                    psql(
+                        `UPDATE tasks SET user_id='alice' WHERE id='${alice}'; UPDATE tasks SET title='Zebra' WHERE id='${third}'`,
+                    );
+                    await until(
+                        () => result.length === 2 && result[1]?.title === 'Zebra',
+                        'Scoped fixtures did not restore',
+                    );
+                }
                 const overlap = status();
                 await until(
                     () => overlap.complete && overlap.rows[0]?.state === 'allowed',
                     'New overlapping generation did not authorize',
                 );
-                expect(first.rows).toEqual([]);
+                expect(first.rows).toEqual(initialStatus);
                 const forged = { ...overlap.args, owner: 'alice' };
                 expect(await transform('__zero_access_status', forged, 'bob')).toHaveProperty('error', 'parse');
                 const bobAST = JSON.stringify((await transform('__zero_access_status', overlap.args, 'bob')).ast);
@@ -559,7 +631,7 @@ it.skipIf(!enabled)(
                 expect(frames.length).toBeGreaterThan(0);
                 expect(frames.every((frame) => frame[0] === 0)).toBe(true);
                 expect(Buffer.concat(frames).toString('utf8')).toContain('permission_access_results');
-                expect(Buffer.concat(frames).toString('utf8')).toContain('permission_access_revision');
+                expect(Buffer.concat(frames).toString('utf8')).not.toContain('permission_access_revision');
                 expect(Buffer.concat(frames).toString('utf8')).toContain('Initial'); // positive control
                 expect(leaks(frames)).toEqual([]);
                 // Deliberately put a real private fingerprint in a PUBLIC title.
@@ -657,9 +729,18 @@ it.skipIf(!enabled)(
                     await sleep(300);
                     const uiCallbacks = readFileSync(join(root, 'query-callbacks.log'), 'utf8');
                     const uiChecks = readFileSync(join(root, 'access-actors.log'), 'utf8');
-                    await sleep(1200);
+                    execFileSync('php', ['tests/integration/app.php', 'revoke-related'], { env, stdio: 'pipe' });
+                    psql(`UPDATE tasks SET title='UI isolation barrier' WHERE id='${alice}'`);
+                    await waitFor(() => expect(protectedHost.container.textContent).toBe('UI isolation barrier'), {
+                        timeout: 10000,
+                    });
                     expect(readFileSync(join(root, 'query-callbacks.log'), 'utf8')).toBe(uiCallbacks);
                     expect(readFileSync(join(root, 'access-actors.log'), 'utf8')).toBe(uiChecks);
+                    expect(mounts).toBe(1);
+                    expect(unmounts).toBe(0);
+                    expect(generations().size).toBe(1);
+                    expect(losses).toEqual([]);
+                    execFileSync('php', ['tests/integration/app.php', 'restore-related'], { env, stdio: 'pipe' });
                     // Exercise the actual 15-second renewal on the socket, not
                     // just fake timers. Approval renewal must not remount private
                     // content or churn its business query generation.

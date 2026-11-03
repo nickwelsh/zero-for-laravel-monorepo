@@ -19,8 +19,13 @@ use Symfony\Component\HttpKernel\Exception\HttpExceptionInterface;
 use Throwable;
 use ZeroForLaravel\Context\ContextDefinition;
 use ZeroForLaravel\Permissions\Binding;
+use ZeroForLaravel\Permissions\EloquentVisibility;
+use ZeroForLaravel\Permissions\PolicyCompiler;
 use ZeroForLaravel\Permissions\ProjectionManager;
+use ZeroForLaravel\Permissions\VisibleToCurrentUser;
+use ZeroForLaravel\Permissions\ZeroVisibility;
 use ZeroForLaravel\Query\QueryCompiler;
+use ZeroForLaravel\Query\QueryInput;
 use ZeroForLaravel\Query\RegisteredQueries;
 use ZeroForLaravel\Query\RegisteredQuery;
 use ZeroForLaravel\ResolvedContext;
@@ -29,8 +34,6 @@ use ZeroForLaravel\Support\Input;
 /** Short authoritative checks; only physically safe result rows reach the browser. */
 final readonly class AccessQueries
 {
-    public const string REVISION = '__zero_access_revision';
-
     public const string STATUS = '__zero_access_status';
 
     public function __construct(private ProjectionManager $projections) {}
@@ -45,13 +48,8 @@ final readonly class AccessQueries
         }
 
         $owner = $this->owner($context);
-        if ($name === self::REVISION) {
-            Input::keys($input, ['generation'], 'access');
-            if (isset($input['generation']) && (! is_string($input['generation']) || ! Str::isUuid($input['generation']))) {
-                Input::fail('generation', 'A revision generation must be a UUID.');
-            }
-
-            return ['table' => 'permission_access_revision', 'where' => $this->equal('id', 'global')];
+        if ($name !== self::STATUS) {
+            Input::fail('name', 'Unknown access query. Reload the application.');
         }
 
         Input::keys($input, ['generation', 'bindings'], 'access');
@@ -88,7 +86,8 @@ final readonly class AccessQueries
                 'id' => hash('sha256', $owner."\0".$generation."\0".$key)];
         }
 
-        $this->projections->connection()->transaction(function () use ($checks, $owner, $generation, $identity, $limit): void {
+        $conditions = [];
+        $this->projections->connection()->transaction(function () use ($checks, $owner, $generation, $identity, $limit, &$conditions): void {
             $this->projections->lock();
             $db = $this->projections->connection();
             $expired = $db->table('permission_access_checks')->where('expires_at', '<=', now())->limit(128)->pluck('id')->all();
@@ -105,6 +104,10 @@ final readonly class AccessQueries
                     if ($row === null || $row->fingerprint !== $check['fingerprint']) {
                         Input::fail('generation', 'A check generation cannot be reused with different bindings.');
                     }
+
+                    $conditions[$check['id']] = is_string($row->dependencies)
+                        ? Input::object(json_decode($row->dependencies, true, flags: JSON_THROW_ON_ERROR), 'dependencies')
+                        : ['type' => 'or', 'conditions' => []];
                 }
 
                 // Background retransform must not renew an old decision or lease.
@@ -115,18 +118,15 @@ final readonly class AccessQueries
                 abort(429, 'Access check quota exceeded.');
             }
 
-            $revision = $db->table('permission_access_revision')->where('id', 'global')->value('revision');
-            if (! is_string($revision)) {
-                throw new LogicException('Access revision is missing. Run the permission migrations.');
-            }
-
             $metadata = [];
             $results = [];
             foreach ($checks as $key => $check) {
                 $state = 'allowed';
                 $status = null;
+                $conditions[$check['id']] = ['type' => 'or', 'conditions' => []];
                 try {
                     $this->projections->assertReady();
+                    $conditions[$check['id']] = $this->dependencies($check['query'], $check['args'], Binding::id($identity->userId()));
                     $this->invoke(resolve(Request::class), $check['query'], $check['args'], $identity);
                 } catch (AuthorizationException $error) {
                     $state = 'denied';
@@ -152,7 +152,7 @@ final readonly class AccessQueries
                 }
 
                 $metadata[] = ['id' => $check['id'], 'owner' => $owner, 'generation' => $generation,
-                    'fingerprint' => $check['fingerprint'], 'revision' => $revision, 'expires_at' => now()->addSeconds(20)];
+                    'fingerprint' => $check['fingerprint'], 'dependencies' => json_encode($conditions[$check['id']], JSON_THROW_ON_ERROR), 'expires_at' => now()->addSeconds(20)];
                 $results[] = ['id' => $check['id'], 'generation' => $generation, 'binding' => $key, 'state' => $state, 'status' => $status];
             }
 
@@ -160,14 +160,57 @@ final readonly class AccessQueries
             $db->table('permission_access_results')->insert($results);
         }, 3);
 
-        return ['table' => 'permission_access_results', 'where' => ['type' => 'and', 'conditions' => [
-            ['type' => 'simple', 'op' => 'IN', 'left' => ['type' => 'column', 'name' => 'id'],
-                'right' => ['type' => 'literal', 'value' => array_column($checks, 'id')]],
-            $this->exists('permission_access_checks', 'id', 'id', ['type' => 'and', 'conditions' => [
-                $this->equal('owner', $owner),
-                $this->exists('permission_access_revision', 'revision', 'revision', $this->equal('id', 'global')),
-            ]]),
-        ]]];
+        $branches = [];
+        foreach ($conditions as $id => $condition) {
+            $branches[] = ['type' => 'and', 'conditions' => [
+                $this->equal('id', $id),
+                $this->exists('permission_access_checks', 'id', 'id', ['type' => 'and', 'conditions' => [$this->equal('owner', $owner), $condition]]),
+            ]];
+        }
+
+        return ['table' => 'permission_access_results', 'where' => ['type' => 'or', 'conditions' => $branches]];
+    }
+
+    /** Snapshot actual portable decisions, not policy revisions or rule membership.
+     * @param  array<string, mixed>  $args
+     * @return array<string, mixed>
+     */
+    private function dependencies(RegisteredQuery $query, array $args, string $subjectId): array
+    {
+        $query->assertCurrent();
+        $db = $this->projections->connection();
+        $subject = config()->string('permissions.subject.prefix').$subjectId;
+        $conditions = [$this->exists('permission_subjects', 'global_key', 'global_key', $this->equal('id', $subject),
+            $db->table('permission_subjects')->where('id', $subject)->exists() ? 'EXISTS' : 'NOT EXISTS')];
+        $zero = new ZeroVisibility;
+        foreach ($query->guards as $guard) {
+            QueryInput::validate($query->parameters[$guard['parameter']], $args[$guard['parameter']] ?? null, $guard['parameter']);
+            $id = Binding::id($args[$guard['parameter']]);
+            $class = $guard['class'];
+            $resource = new $class;
+            $abilities = [$guard['ability']];
+            if ($resource->hasGlobalScope(VisibleToCurrentUser::class)) {
+                $abilities[] = 'view';
+            }
+
+            foreach (array_unique($abilities) as $ability) {
+                $plan = (new PolicyCompiler)->compile($guard['class'], $ability);
+                $conditions[] = $zero->guard($plan, $subjectId, $id,
+                    (new EloquentVisibility)->query($plan, $subjectId)->where('object_id', $id)->exists())->toArray();
+                $conditions[] = $this->exists($plan->binding->projectionTable(), 'global_key', 'global_key', $this->equal('object_id', $id),
+                    $db->table($plan->binding->projectionTable())->where('object_id', $id)->exists() ? 'EXISTS' : 'NOT EXISTS');
+            }
+        }
+
+        // Deployment/readiness changes fail closed; ordinary rule revisions do not.
+        $fingerprint = $db->table('permission_installation')->value('fingerprint');
+        if (! is_string($fingerprint)) {
+            throw new LogicException('Permission installation is missing.');
+        }
+
+        $conditions[] = $this->exists('permission_installation', 'global_key', 'global_key', $this->equal('fingerprint', $fingerprint));
+
+        return ['type' => 'and', 'conditions' => $conditions];
     }
 
     private function owner(ResolvedContext $identity): string
@@ -279,9 +322,9 @@ final readonly class AccessQueries
     /** @param array<string, mixed> $where
      * @return array<string, mixed>
      */
-    private function exists(string $table, string $parent, string $child, array $where): array
+    private function exists(string $table, string $parent, string $child, array $where, string $operator = 'EXISTS'): array
     {
-        return ['type' => 'correlatedSubquery', 'op' => 'EXISTS', 'related' => [
+        return ['type' => 'correlatedSubquery', 'op' => $operator, 'related' => [
             'system' => 'permissions', 'hidden' => true,
             'correlation' => ['parentField' => [$parent], 'childField' => [$child]],
             'subquery' => ['table' => $table, 'alias' => 'zsubq_'.$table, 'where' => $where],

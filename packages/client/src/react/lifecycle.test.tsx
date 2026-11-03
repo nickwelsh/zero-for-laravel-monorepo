@@ -23,7 +23,6 @@ const native = vi.hoisted(() => ({
     zero: undefined as unknown as ReturnType<typeof mockZero>,
     requests: [] as { args: Record<string, unknown> }[],
     views: [] as NativeView[],
-    retainedRevision: false,
     retry: vi.fn(),
 }));
 vi.mock('@rocicorp/zero/react', () => ({
@@ -50,7 +49,7 @@ class NativeView {
     ) {}
     addListener(listener: NonNullable<NativeView['listener']>) {
         this.listener = listener;
-        listener([{ id: 'global', revision: 'one' }], native.retainedRevision ? 'complete' : 'unknown');
+        listener([], 'unknown');
         return this.unsubscribe;
     }
     send(data: unknown, type: Parameters<NonNullable<NativeView['listener']>>[1] = 'complete') {
@@ -91,14 +90,9 @@ function mockZero(user = 'alice') {
         },
     };
 }
-const revisions = () => native.views.filter((view) => view.request.query.queryName === '__zero_access_revision');
 const checks = () => native.views.filter((view) => view.request.query.queryName === '__zero_access_status');
-async function revision(value = 'one') {
-    await act(async () =>
-        revisions()
-            .at(-1)!
-            .send([{ id: 'global', revision: value }]),
-    );
+async function ready() {
+    await act(async () => {});
 }
 async function answer(state = 'allowed', status?: number, view = checks().at(-1)!) {
     await act(async () => view.send(view.rows(state, status)));
@@ -113,7 +107,6 @@ beforeEach(() => {
     native.results.clear();
     native.views.length = 0;
     native.requests.length = 0;
-    native.retainedRevision = false;
     native.retry.mockReset();
 });
 const rows = [
@@ -185,7 +178,7 @@ it.each([403, 404] as const)(
         const view = render(<Wrapped {...page.props} />);
         try {
             expect(native.requests).toHaveLength(0);
-            await revision();
+            await ready();
             await answer('denied', status);
             expect(screen.getByRole('alert').getAttribute('data-zero-access')).toBe(String(status));
             expect(revoked).not.toHaveBeenCalled();
@@ -233,32 +226,14 @@ function BusinessIdentity() {
     return <p>Private {useContext(AccessGeneration)}</p>;
 }
 
-it('rejects retained revision completion, cached-only status, malformed/missing/duplicate rows and transport errors', async () => {
-    native.retainedRevision = true;
+it('rejects cached-only status, malformed/missing/duplicate rows and transport errors', async () => {
     const revoked = vi.fn();
     render(
         <AccessBoundary binding={protectedBinding} prop="tasks" options={{ onRevoked: revoked }}>
             <BusinessIdentity />
         </AccessBoundary>,
     );
-    await act(async () => {});
-    expect(checks()).toHaveLength(0);
-    await act(async () => revisions()[0]!.send([{ id: 'global', revision: 'one' }], 'cached'));
-    expect(checks()).toHaveLength(0);
-    for (const data of [
-        [],
-        [{ id: 'other', revision: 'one' }],
-        [{ id: 'global', revision: null }],
-        [{ id: 'global', revision: '' }],
-        [
-            { id: 'global', revision: 'one' },
-            { id: 'global', revision: 'two' },
-        ],
-    ]) {
-        act(() => revisions()[0]!.send(data));
-        expect(checks()).toHaveLength(0);
-    }
-    await revision();
+    await ready();
     const check = checks()[0]!;
     const row = check.rows()[0]!;
     for (const type of ['cached', 'unknown', 'error'] as const) {
@@ -296,7 +271,7 @@ it('renews with fresh UUIDs without changing business identity, and expires from
             <BusinessIdentity />
         </AccessBoundary>,
     );
-    await revision();
+    await ready();
     await act(() => vi.advanceTimersByTime(10_000));
     await answer();
     const identity = screen.getByText(/^Private/).textContent;
@@ -327,7 +302,7 @@ it('rejects an expired current-generation response even when renewal and expiry 
             <BusinessIdentity />
         </AccessBoundary>,
     );
-    await revision();
+    await ready();
     const clock = vi.spyOn(performance, 'now').mockReturnValue(20_001);
     try {
         // Simulate a suspended event loop delivering the network callback before
@@ -350,7 +325,7 @@ it('backs off empty checks and retains denied subscriptions for eventual regrant
             <BusinessIdentity />
         </AccessBoundary>,
     );
-    await revision();
+    await ready();
     act(() => checks()[0]!.send([]));
     await act(() => vi.advanceTimersByTime(999));
     expect(checks()).toHaveLength(1);
@@ -367,7 +342,7 @@ it('backs off empty checks and retains denied subscriptions for eventual regrant
     expect(screen.getByText(/^Private/)).toBeTruthy();
 });
 
-it('retries revision materialization failures at a bounded rate and cancels pending retry timers', async () => {
+it('retries status materialization failures at a bounded rate and cancels pending retry timers', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date', 'performance'] });
     const materialize = vi.spyOn(native.zero, 'materialize').mockImplementationOnce(() => {
         throw new Error('transport');
@@ -378,64 +353,59 @@ it('retries revision materialization failures at a bounded rate and cancels pend
         </AccessBoundary>,
     );
     expect(screen.queryByText(/^Private/)).toBeNull();
+    await ready();
     expect(materialize).toHaveBeenCalledOnce();
     await act(() => vi.advanceTimersByTime(999));
     expect(materialize).toHaveBeenCalledOnce();
     await act(() => vi.advanceTimersByTime(1));
-    expect(revisions()).toHaveLength(1);
-    act(() => revisions()[0]!.send([], 'error'));
+    expect(checks()).toHaveLength(1);
+    act(() => checks()[0]!.send([], 'error'));
     expect(screen.queryByRole('alert')).toBeNull();
     await act(async () => view.unmount());
     expect(vi.getTimerCount()).toBe(0);
     materialize.mockRestore();
 });
 
-it('observes synchronous disconnect/reconnect epochs and requires a fresh revision and status even when the revision is unchanged', async () => {
+it('observes synchronous disconnect/reconnect epochs and requires a fresh status generation', async () => {
     render(
         <AccessBoundary binding={protectedBinding} prop="tasks" options={{}}>
             <BusinessIdentity />
         </AccessBoundary>,
     );
-    await revision();
+    await ready();
     await answer();
     const identity = screen.getByText(/^Private/).textContent;
-    const oldRevision = revisions()[0]!;
     const oldCheck = checks()[0]!;
-    native.retainedRevision = true;
     act(() => {
         native.zero.connect('disconnected');
         native.zero.connect('connected');
     });
     expect(screen.queryByText(/^Private/)).toBeNull();
-    expect(revisions()).toHaveLength(2);
-    expect(revisions()[1]!.request.args.generation).toMatch(/^[a-f0-9-]{36}$/);
-    expect(revisions()[1]!.request.args.generation).not.toBe(oldRevision.request.args.generation);
-    expect(oldRevision.destroy).toHaveBeenCalledOnce();
     expect(oldCheck.destroy).toHaveBeenCalledOnce();
-    act(() => oldRevision.send([{ id: 'global', revision: 'one' }]));
     await answer('allowed', undefined, oldCheck);
-    expect(checks()).toHaveLength(1);
     expect(screen.queryByText(/^Private/)).toBeNull();
-    await revision();
+    await ready();
     expect(checks()).toHaveLength(2);
+    expect(checks()[1]!.request.args.generation).toMatch(/^[a-f0-9-]{36}$/);
+    expect(checks()[1]!.request.args.generation).not.toBe(oldCheck.request.args.generation);
     await answer();
     expect(screen.getByText(/^Private/).textContent).not.toBe(identity);
     expect(native.views.every((view) => view.options.ttl === 0)).toBe(true);
 });
 
-it('coalesces revisions, invalidates visibility restoration, and never shares approval across contexts or Zero instances', async () => {
+it('invalidates lost decisions and visibility restoration without sharing approval across contexts or Zero instances', async () => {
     const boundary = (
         <AccessBoundary binding={protectedBinding} prop="tasks" options={{}}>
             <BusinessIdentity />
         </AccessBoundary>
     );
     const view = render(boundary);
-    await revision();
+    await ready();
     await answer();
     const old = checks()[0]!;
     await act(async () => {
-        revisions()[0]!.send([{ id: 'global', revision: 'two' }]);
-        revisions()[0]!.send([{ id: 'global', revision: 'three' }]);
+        old.send([]);
+        old.send([]); // Repeated obsolete callbacks cannot queue duplicate checks.
     });
     expect(screen.queryByText(/^Private/)).toBeNull();
     expect(checks()).toHaveLength(2);
@@ -453,7 +423,7 @@ it('coalesces revisions, invalidates visibility restoration, and never shares ap
         </AccessBoundary>,
     );
     expect(screen.queryByText(/^Private/)).toBeNull();
-    await revision();
+    await ready();
     await answer();
     native.zero = mockZero('bob');
     view.rerender(
@@ -462,9 +432,41 @@ it('coalesces revisions, invalidates visibility restoration, and never shares ap
         </AccessBoundary>,
     );
     expect(screen.queryByText(/^Private/)).toBeNull();
-    await revision();
+    await ready();
     await answer();
     expect(screen.getByText(/^Private/)).toBeTruthy();
+});
+
+it('rechecks only a removed binding while its batched sibling keeps its approval and business identity', async () => {
+    render(
+        <>
+            <AccessBoundary binding={{ ...protectedBinding, args: { title: 'first' } }} prop="first" options={{}}>
+                <div data-testid="first">
+                    <BusinessIdentity />
+                </div>
+            </AccessBoundary>
+            <AccessBoundary binding={{ ...protectedBinding, args: { title: 'second' } }} prop="second" options={{}}>
+                <div data-testid="second">
+                    <BusinessIdentity />
+                </div>
+            </AccessBoundary>
+        </>,
+    );
+    await ready();
+    const initial = checks()[0]!;
+    expect(initial.request.args.bindings).toHaveLength(2);
+    await answer();
+    const unchanged = screen.getByTestId('second').textContent;
+    const remaining = initial.rows().filter((row) => row.binding === initial.request.args.bindings![1]!.binding);
+    await act(async () => initial.send(remaining));
+    expect(screen.queryByTestId('first')).toBeNull();
+    expect(screen.getByTestId('second').textContent).toBe(unchanged);
+    expect(checks()).toHaveLength(2);
+    expect(checks()[1]!.request.args.bindings?.map((binding) => binding.args)).toEqual([{ title: 'first' }]);
+    await answer('denied', 404);
+    expect(screen.getByRole('alert').textContent).toBe('Not found');
+    expect(screen.getByTestId('second').textContent).toBe(unchanged);
+    expect(native.views.every((view) => view.request.query.queryName === '__zero_access_status')).toBe(true);
 });
 
 it('shares identical bindings and splits native batches at 32 without invalidating sibling approvals', async () => {
@@ -486,15 +488,14 @@ it('shares identical bindings and splits native batches at 32 without invalidati
             </AccessBoundary>
         </>,
     );
-    await revision();
-    expect(revisions()).toHaveLength(1);
+    await ready();
     expect(checks().map((view) => view.request.args.bindings!.length)).toEqual([32, 32, 1]);
     for (const check of checks()) await answer('allowed', undefined, check);
     expect(screen.getAllByText(/^Private/)).toHaveLength(65);
     expect(screen.getByText('Duplicate')).toBeTruthy();
 });
 
-it('keeps one revision view through StrictMode subscription handoffs and cleans up all resources', async () => {
+it('coalesces StrictMode subscription handoffs and cleans up all resources', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date', 'performance'] });
     const view = render(
         <StrictMode>
@@ -503,9 +504,9 @@ it('keeps one revision view through StrictMode subscription handoffs and cleans 
             </AccessBoundary>
         </StrictMode>,
     );
-    expect(revisions()).toHaveLength(1);
     expect(screen.queryByText(/^Private/)).toBeNull();
-    await revision();
+    await ready();
+    expect(checks()).toHaveLength(1);
     await answer();
     expect(screen.getByText(/^Private/)).toBeTruthy();
     await act(async () => view.unmount());
@@ -532,7 +533,7 @@ it('authorizes nested Inertia bindings independently without unmount loops or re
     const Wrapped = adapter.wrap(() => <p>Nested private page</p>, page);
     const view = render(<Wrapped {...page.props} />);
     try {
-        await revision();
+        await ready();
         await answer();
         const first = native.requests.at(-1)!.args;
         put(first, []);
@@ -606,7 +607,7 @@ it('checks the actual edited Inertia inputs before mounting the corresponding bu
     const props = page.props as unknown as Parameters<typeof Page>[0];
     const view = render(<Wrapped {...props} />);
     try {
-        await revision();
+        await ready();
         await answer();
         put(native.requests.at(-1)!.args, [{ id: 'a', title: 'Seed' }]);
         view.rerender(<Wrapped {...props} />);

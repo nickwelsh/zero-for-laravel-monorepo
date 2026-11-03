@@ -29,6 +29,14 @@ final class ZeroVisibility
         return $this->exists($plan->binding->projectionTable(), [$model->key => 'resource_id'], ExpressionBuilder::simplify(new Condition('and', conditions: $conditions)));
     }
 
+    /** A captured guard depends only on this subject, resource and ability. */
+    public function guard(PolicyPlan $plan, string $subjectId, string $resourceId, bool $allowed): Condition
+    {
+        return $this->exists($plan->binding->projectionTable(), ['global_key' => 'global_key'], new Condition('and', conditions: [
+            $this->comparison('object_id', '=', $resourceId), $this->decision($plan, $subjectId),
+        ]), $allowed ? 'EXISTS' : 'NOT EXISTS');
+    }
+
     private function decision(PolicyPlan $plan, string $subjectId): Condition
     {
         $predicates = PolicyPredicates::bind($plan, $subjectId);

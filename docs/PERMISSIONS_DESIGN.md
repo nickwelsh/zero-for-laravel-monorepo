@@ -64,8 +64,10 @@ business rows, grants, projections and durable invalidations together.
 
 The initial projector recomputes effective grants on policy/role/subject changes,
 bounded at 100,000 effective grants. It does not expand global grants per resource.
-Resource projections upsert only changed facts and remove deleted keys. This favors
-simple transactional correctness over large-graph throughput; applications must
+Effective-grant and resource projections upsert only changed facts and remove
+obsolete keys; unchanged grants are not deleted and reinserted. Computing the
+effective-grant diff can still span the full graph. This favors simple
+transactional correctness over large-graph throughput; applications must
 measure their own write/fan-out costs. Role inheritance is acyclic and limited to
 eight edges. All authority tables and source models must use one connection and
 unprefixed public-schema tables. Each source table has one binding; custom table
@@ -130,9 +132,15 @@ and `ZERO_MUTATE_URL` to forward opaque credentials without a JWT verifier.
 Supported unconditional instance `Gate::authorize()` calls protect initial shows
 through normal Laravel exceptions. Generation captures the guard for server query
 transforms and native predicates without replaying controller side effects.
-Reserved native Zero queries carry revision invalidations and stored results of
-fresh Laravel middleware/binding/Gate checks. Safe results are physically separate
-from private ownership/check metadata and require the current permission revision.
+The reserved native Zero status query carries stored results of fresh Laravel
+middleware/binding/Gate checks. Safe results are physically separate from private
+ownership/check metadata. Each result requires live predicates matching the checked
+subject, guarded resource and abilities, including binding visibility and existence.
+These predicates snapshot decision outcomes, not global or per-user revisions.
+Changing one decision removes only that binding's result; its client immediately
+rechecks it. Unaffected bindings retain their approval and business-query identity,
+even when they share a batch with the affected binding. Denied decisions also have
+live predicates, so regrant triggers a fresh authoritative check.
 The browser blocks protected content until current status and business generations
 complete; confirmed loss unmounts it before `access.onRevoked`. Initial denial,
 transport failure, and empty collections are not revocation events. Default denial
@@ -142,9 +150,12 @@ There is no SSE connection, browser authorization fetch or PHP polling loop. Zer
 still invokes Laravel internally and each check writes safe result/private metadata
 rows. Batched checks renew after 15 seconds and approvals expire 20 seconds from
 monotonic request start, covering non-projected middleware dependencies. Reconnect
-never trusts an old allow snapshot. The opaque global revision retains unrelated
-change timing and fan-out; it does not claim per-user timing isolation. Live means
-after commit and replication delivery, not zero latency. Model/schema changes need
+never trusts an old allow snapshot. There is no global revision subscription:
+unrelated permission changes send no access-result patch or extra Laravel recheck.
+Private dependency tables stay inside permission subqueries and are not streamed
+to clients. A permission deployment/readiness fingerprint change intentionally
+invalidates affected installations; it is not an ordinary permission edit. Live
+means after commit and replication delivery, not zero latency. Model/schema changes need
 rebuild, regeneration, publication sync and draining incompatible clients.
 
 The optional `/zero/permissions` endpoint is registered only when prediction
