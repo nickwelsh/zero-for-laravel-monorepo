@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace ZeroForLaravel\Tests\Feature;
 
 use Illuminate\Auth\Access\AuthorizationException;
+use Illuminate\Foundation\Auth\User;
 use Illuminate\Validation\ValidationException;
 use InvalidArgumentException;
 use LogicException;
@@ -14,7 +15,7 @@ use ZeroForLaravel\Query\QueryCompiler;
 use ZeroForLaravel\Query\QueryProcessor;
 use ZeroForLaravel\Query\RegisteredQueries;
 use ZeroForLaravel\Tests\Fixtures\Task;
-use ZeroForLaravel\Tests\TestCase;
+use ZeroForLaravel\Tests\OwnerTestCase as TestCase;
 use ZeroForLaravel\ZeroContext;
 
 uses(TestCase::class);
@@ -48,16 +49,17 @@ test('declaration compilation enforces visibility on results and negative existe
     /** @var TestCase $this */
     $registry = new ModelRegistry($this->models());
     app()->instance(ModelRegistry::class, $registry);
-    $query = Task::zeroQuery()->related('comments')
-        ->where(fn ($expression) => $expression->not($expression->exists('tags')));
+    $alice = (new User)->setKeyType('string')->forceFill(['id' => 'alice']);
+    $query = Task::zeroQuery()->visibleTo($alice)->related('comments', fn (Query $comments): Query => $comments->visibleTo($alice))
+        ->where(fn ($expression) => $expression->not($expression->exists('tags', fn (Query $tags): Query => $tags->visibleTo($alice))));
     $ast = (new QueryCompiler($registry))->compileDeclaration($query, new ZeroContext(['user_id' => 'alice']));
     expect($ast)->not->toHaveKey('limit');
     expect($ast)->not->toHaveKey('orderBy');
-    expect(data_get($ast, 'where.conditions.0.right.value'))->toBe('alice');
+    expect(json_encode(data_get($ast, 'where.conditions.0'), JSON_THROW_ON_ERROR))->toContain('permission_index', 'user:alice');
     expect(data_get($ast, 'where.conditions.1.op'))->toBe('IS');
-    expect(data_get($ast, 'related.0.subquery.where.right.value'))->toBe('alice');
+    expect(json_encode(data_get($ast, 'related.0.subquery.where'), JSON_THROW_ON_ERROR))->toContain('permission_index', 'user:alice');
     expect(data_get($ast, 'where.conditions.2.op'))->toBe('NOT EXISTS');
-    expect(data_get($ast, 'where.conditions.2.related.subquery.where.related.subquery.where.right.value'))->toBe('alice');
+    expect(json_encode(data_get($ast, 'where.conditions.2.related.subquery.where.related.subquery.where'), JSON_THROW_ON_ERROR))->toContain('permission_index', 'user:alice');
     expect(fn (): array => (new QueryCompiler($registry))->compileDeclaration($query, new ZeroContext([])))
         ->toThrow(AuthorizationException::class);
 });

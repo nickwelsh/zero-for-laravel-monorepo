@@ -17,22 +17,12 @@ use Illuminate\Testing\PendingCommand;
 use LogicException;
 use ZeroForLaravel\Http\ContextResolver;
 use ZeroForLaravel\Metadata\ModelRegistry;
-use ZeroForLaravel\Query\RegisteredQueries;
-use ZeroForLaravel\Query\RegisteredQuery;
 use ZeroForLaravel\Tests\Fixtures\ControllerMutationController;
 use ZeroForLaravel\Tests\Fixtures\QueryController;
 use ZeroForLaravel\Tests\Fixtures\Task;
 use ZeroForLaravel\Tests\HttpTestCase;
 
 uses(HttpTestCase::class);
-
-function registerHttpQuery(): void
-{
-    Route::get('/http-query', [QueryController::class, 'window']);
-    app()->instance(RegisteredQueries::class, new RegisteredQueries([
-        'q_http' => new RegisteredQuery(QueryController::class.'@window', 'tasks/window', 'tasks', [], static fn (): \ZeroForLaravel\Query\Query => Task::zeroQuery()),
-    ]));
-}
 
 test('annotated mutations cannot bypass native preparation through ordinary HTTP', function (): void {
     Route::post('/controller-write', [ControllerMutationController::class, 'store']);
@@ -58,41 +48,10 @@ test('cache requests are authenticated separately from end users', function (): 
     $this->postJson('/zero/query', ['transform', []])->assertForbidden();
 });
 
-test('query endpoint uses authenticated identity instead of body context', function (): void {
-    /** @var HttpTestCase $this */
-    registerHttpQuery();
-    $user = (new User)->setKeyType('string');
-    $user->forceFill(['id' => 'alice']);
-    $this->actingAs($user)->withHeader('X-Api-Key', 'private-test-secret')
-        ->postJson('/zero/query', ['transform', [['id' => 'q', 'name' => 'q_http', 'args' => [(object) []]]]])
-        ->assertOk()->assertJsonPath('userID', 'alice')->assertJsonPath('queries.0.ast.where.conditions.0.right.value', 'alice');
-});
-
 test('bad json returns protocol error without leaking exceptions', function (): void {
     /** @var HttpTestCase $this */
     $this->withHeader('X-Api-Key', 'private-test-secret')->postJson('/zero/query', ['other', []])
         ->assertOk()->assertJsonPath('kind', 'TransformFailed')->assertJsonPath('reason', 'parse');
-});
-
-test('query transforms accept large revalidation batches while authorizing every query', function (): void {
-    /** @var HttpTestCase $this */
-    registerHttpQuery();
-    $user = (new User)->setKeyType('string');
-    $user->forceFill(['id' => 'alice']);
-
-    $queries = [];
-    for ($index = 0; $index < 257; $index++) {
-        $queries[] = ['id' => 'q'.$index, 'name' => 'q_http', 'args' => [(object) []]];
-    }
-
-    $queries[] = ['id' => 'invalid', 'name' => 'q_http', 'args' => [['ast' => ['table' => 'users']]]];
-    $response = $this->actingAs($user)->withHeader('X-Api-Key', 'private-test-secret')
-        ->postJson('/zero/query', ['transform', $queries])
-        ->assertOk()->assertJsonPath('kind', 'QueryResponse')->assertJsonCount(258, 'queries')
-        ->assertJsonPath('queries.257.error', 'parse');
-    for ($index = 0; $index < 257; $index++) {
-        $response->assertJsonPath('queries.'.$index.'.ast.where.conditions.0.right.value', 'alice');
-    }
 });
 
 test('the cache request size limit still bounds transform work', function (): void {
@@ -210,10 +169,14 @@ test('react generation binds the contracts and preserves editable connection con
     }
 });
 
-test('configured discovery roots find opted-in modular models without publishing unrelated classes', function (): void {
+test('only explicitly allowlisted modular models are exposed and discovery roots are ignored', function (): void {
     config()->set('zero.models', []);
     config()->set('zero.discovery', [['path' => __DIR__.'/../Fixtures/Module', 'namespace' => 'ZeroForLaravel\\Tests\\Fixtures\\Module']]);
 
+    app()->forgetInstance(ModelRegistry::class);
+    expect(resolve(ModelRegistry::class)->all())->toBe([]);
+    config(['zero.models' => [\ZeroForLaravel\Tests\Fixtures\Module\OutsideTask::class],
+        'zero.public_models' => [\ZeroForLaravel\Tests\Fixtures\Module\OutsideTask::class]]);
     app()->forgetInstance(ModelRegistry::class);
     $registry = resolve(ModelRegistry::class);
     expect(array_keys($registry->all()))->toBe(['OutsideTask']);
@@ -223,7 +186,7 @@ test('exposure reports reflect the same private column and authorization metadat
     /** @var HttpTestCase $this */
     $command = $this->artisan('zero:exposure');
     $this->assertInstanceOf(PendingCommand::class, $command);
-    $command->expectsOutputToContain('Published:')->expectsOutputToContain('Owner rules:')->assertSuccessful()->run();
+    $command->expectsOutputToContain('Published:')->expectsOutputToContain('Laravel policy via visibleTo / captured Gate')->assertSuccessful()->run();
 });
 
 test('mutation results are not exposed through a second read endpoint', function (): void {

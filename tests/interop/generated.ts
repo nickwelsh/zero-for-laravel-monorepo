@@ -81,15 +81,6 @@ export const definitions = {
                 "default": null
             }
         },
-        "authorization": [
-            {
-                "field": "user_id",
-                "op": "=",
-                "value": {
-                    "context": "user_id"
-                }
-            }
-        ],
         "serverFill": {},
         "writable": [],
         "idGenerator": null,
@@ -130,15 +121,6 @@ export const definitions = {
                 "default": null
             }
         },
-        "authorization": [
-            {
-                "field": "user_id",
-                "op": "=",
-                "value": {
-                    "context": "user_id"
-                }
-            }
-        ],
         "serverFill": {},
         "writable": [],
         "idGenerator": null,
@@ -228,15 +210,6 @@ export const definitions = {
                 "default": null
             }
         },
-        "authorization": [
-            {
-                "field": "user_id",
-                "op": "=",
-                "value": {
-                    "context": "user_id"
-                }
-            }
-        ],
         "serverFill": {
             "user_id": "user_id"
         },
@@ -339,15 +312,6 @@ export const definitions = {
                 "default": null
             }
         },
-        "authorization": [
-            {
-                "field": "user_id",
-                "op": "=",
-                "value": {
-                    "context": "user_id"
-                }
-            }
-        ],
         "serverFill": {},
         "writable": [],
         "idGenerator": null,

@@ -4,7 +4,7 @@ import type {Schema} from '@rocicorp/zero';
 import {createControllerMutations, type ModelContract, type ControllerMutationOptions} from '@nickwelsh/zero-for-laravel';
 import {z} from 'zod';
 export const controllerMutationContracts = {
-    "m_0c942016ea357836f0eb3a49d41a6eac": {
+    "m_4609bf773a9787758b478d876f4e0610": {
         "action": "ZeroForLaravel\\Tests\\Fixtures\\ControllerMutationController@store",
         "optimism": "generated",
         "conceal": false,
@@ -199,10 +199,10 @@ export const controllerMutationContracts = {
             "s0": "uuid",
             "s1": "uuid"
         },
-        "version": "0c942016ea357836f0eb3a49d41a6eacedae581734a024f2d1196c2765914357",
+        "version": "4609bf773a9787758b478d876f4e06108bd03540f4fe321389dd9f6cb3a96a63",
         "returnType": "array"
     },
-    "m_8e58a825ae917736fa896672ef132517": {
+    "m_3f7a28999a592cbb73acfe152c28e526": {
         "action": "ZeroForLaravel\\Tests\\Fixtures\\ControllerMutationController@complete",
         "optimism": "generated",
         "conceal": false,
@@ -374,10 +374,10 @@ export const controllerMutationContracts = {
             }
         ],
         "sites": {},
-        "version": "8e58a825ae917736fa896672ef1325170ea9c08bda7692b0a116de3f64332ea7",
+        "version": "3f7a28999a592cbb73acfe152c28e52620ef077ebee8551d322d658b860c9607",
         "returnType": "array"
     },
-    "m_8096540cc159184f02146c3356051d8d": {
+    "m_507f542a46cc639cde69c7dd4c767ccd": {
         "action": "ZeroForLaravel\\Tests\\Fixtures\\ControllerMutationController@authoritative",
         "optimism": "disabled",
         "conceal": false,
@@ -390,10 +390,10 @@ export const controllerMutationContracts = {
         },
         "operations": [],
         "sites": {},
-        "version": "8096540cc159184f02146c3356051d8d7f02e08e280e559a6d09a4f7b735fbd5",
+        "version": "507f542a46cc639cde69c7dd4c767ccd2253c0c6ebc60c5be370b03ece5e9d79",
         "returnType": "null"
     },
-    "m_b3521c165bbbedc5cd962fb38dc88f6c": {
+    "m_e354098a49ae8fadb1917be171b39f62": {
         "action": "ZeroForLaravel\\Tests\\Fixtures\\ControllerMutationController@noResult",
         "optimism": "generated",
         "conceal": false,
@@ -406,10 +406,10 @@ export const controllerMutationContracts = {
         },
         "operations": [],
         "sites": {},
-        "version": "b3521c165bbbedc5cd962fb38dc88f6cf20e662b7e34769ce1f3434e6e4518ab",
+        "version": "e354098a49ae8fadb1917be171b39f62d121c5f65f8efae65e2a260d863dba10",
         "returnType": "void"
     },
-    "m_6d3e17a49c33e8663677ec1aa22a4601": {
+    "m_0f9207f56ec34d53bb86b174e4856281": {
         "action": "ZeroForLaravel\\Tests\\Fixtures\\ControllerMutationController@explicit",
         "optimism": "generated",
         "conceal": false,
@@ -490,10 +490,10 @@ export const controllerMutationContracts = {
         "sites": {
             "key:task": "uuid"
         },
-        "version": "6d3e17a49c33e8663677ec1aa22a4601eff60f97a04be28ca6d4ef24feabe791",
+        "version": "0f9207f56ec34d53bb86b174e485628109e9d2768eac012a1d13b6d981d928bf",
         "returnType": "array"
     },
-    "m_1797e16d1f66f0039b4a5698b4b8f871": {
+    "m_6ebbf4a7c4477a13fdac4759b85db034": {
         "action": "ZeroForLaravel\\Tests\\Fixtures\\ControllerMutationController@structured",
         "optimism": "disabled",
         "conceal": false,
@@ -506,10 +506,10 @@ export const controllerMutationContracts = {
         },
         "operations": [],
         "sites": {},
-        "version": "1797e16d1f66f0039b4a5698b4b8f871619ba3b7bd847ce53c4c99ad70162854",
+        "version": "6ebbf4a7c4477a13fdac4759b85db0346ffe0292c1c67315fb5b4e50d8716355",
         "returnType": "array"
     },
-    "m_cecc396233526ec1385d343b6c5bd25f": {
+    "m_a8fa0497166297e599a1410608191ae5": {
         "action": "ZeroForLaravel\\Tests\\Fixtures\\ControllerMutationController@projected",
         "optimism": "custom",
         "conceal": false,
@@ -522,10 +522,10 @@ export const controllerMutationContracts = {
         },
         "operations": [],
         "sites": {},
-        "version": "cecc396233526ec1385d343b6c5bd25f585fcf2cbb13c55304a6de654a8ac28e",
+        "version": "a8fa0497166297e599a1410608191ae51a9cac13f3996914ce6c1e2f35aecdce",
         "returnType": "array"
     },
-    "m_48ab1c04a0bb23993fea8fc62db44389": {
+    "m_448eec000d59dfd83159ed0bf0a8b154": {
         "action": "ZeroForLaravel\\Tests\\Fixtures\\ControllerMutationController@bulk",
         "optimism": "generated",
         "conceal": false,
@@ -655,7 +655,7 @@ export const controllerMutationContracts = {
         "sites": {
             "s0": "uuid"
         },
-        "version": "48ab1c04a0bb23993fea8fc62db4438955528db9661124e84e244b0f6282f74b",
+        "version": "448eec000d59dfd83159ed0bf0a8b154ccc64ebd597190cdb00a062d3101213b",
         "returnType": "void"
     }
 } as const;
@@ -717,24 +717,24 @@ export const clientResultSchema7 = z.undefined();
 const codec7 = {input: inputSchema7, encode: (input: Input7) => ({"items": input["items"].map(item => ({"key": item["key"], "title": item["title"], "at": (item["at"] === null ? null : item["at"].toISOString())}))}), serverResult: serverResultSchema7, clientResult: clientResultSchema7};
 export function createControllerMutationBindings<S extends Schema>(schema: S, models: Readonly<Record<string, ModelContract>>, projections: {"ZeroForLaravel\\Tests\\Fixtures\\ControllerMutationController@projected": NonNullable<ControllerMutationOptions<Input6, ServerResult6, ClientResult6>["optimistic"]>}) {
   const codecs = {
-    "m_0c942016ea357836f0eb3a49d41a6eac": {...codec0},
-    "m_8e58a825ae917736fa896672ef132517": {...codec1},
-    "m_8096540cc159184f02146c3356051d8d": {...codec2},
-    "m_b3521c165bbbedc5cd962fb38dc88f6c": {...codec3},
-    "m_6d3e17a49c33e8663677ec1aa22a4601": {...codec4},
-    "m_1797e16d1f66f0039b4a5698b4b8f871": {...codec5},
-    "m_cecc396233526ec1385d343b6c5bd25f": {...codec6, optimistic: projections["ZeroForLaravel\\Tests\\Fixtures\\ControllerMutationController@projected"]},
-    "m_48ab1c04a0bb23993fea8fc62db44389": {...codec7},
+    "m_4609bf773a9787758b478d876f4e0610": {...codec0},
+    "m_3f7a28999a592cbb73acfe152c28e526": {...codec1},
+    "m_507f542a46cc639cde69c7dd4c767ccd": {...codec2},
+    "m_e354098a49ae8fadb1917be171b39f62": {...codec3},
+    "m_0f9207f56ec34d53bb86b174e4856281": {...codec4},
+    "m_6ebbf4a7c4477a13fdac4759b85db034": {...codec5},
+    "m_a8fa0497166297e599a1410608191ae5": {...codec6, optimistic: projections["ZeroForLaravel\\Tests\\Fixtures\\ControllerMutationController@projected"]},
+    "m_448eec000d59dfd83159ed0bf0a8b154": {...codec7},
   };
   const runtime = createControllerMutations(schema, models, controllerMutationContracts, codecs);
   return {...runtime, actions: {
-    "ZeroForLaravel\\Tests\\Fixtures\\ControllerMutationController@store": runtime.bind("m_0c942016ea357836f0eb3a49d41a6eac", codecs["m_0c942016ea357836f0eb3a49d41a6eac"]),
-    "ZeroForLaravel\\Tests\\Fixtures\\ControllerMutationController@complete": runtime.bind("m_8e58a825ae917736fa896672ef132517", codecs["m_8e58a825ae917736fa896672ef132517"]),
-    "ZeroForLaravel\\Tests\\Fixtures\\ControllerMutationController@authoritative": runtime.bind("m_8096540cc159184f02146c3356051d8d", codecs["m_8096540cc159184f02146c3356051d8d"]),
-    "ZeroForLaravel\\Tests\\Fixtures\\ControllerMutationController@noResult": runtime.bind("m_b3521c165bbbedc5cd962fb38dc88f6c", codecs["m_b3521c165bbbedc5cd962fb38dc88f6c"]),
-    "ZeroForLaravel\\Tests\\Fixtures\\ControllerMutationController@explicit": runtime.bind("m_6d3e17a49c33e8663677ec1aa22a4601", codecs["m_6d3e17a49c33e8663677ec1aa22a4601"]),
-    "ZeroForLaravel\\Tests\\Fixtures\\ControllerMutationController@structured": runtime.bind("m_1797e16d1f66f0039b4a5698b4b8f871", codecs["m_1797e16d1f66f0039b4a5698b4b8f871"]),
-    "ZeroForLaravel\\Tests\\Fixtures\\ControllerMutationController@projected": runtime.bind("m_cecc396233526ec1385d343b6c5bd25f", codecs["m_cecc396233526ec1385d343b6c5bd25f"]),
-    "ZeroForLaravel\\Tests\\Fixtures\\ControllerMutationController@bulk": runtime.bind("m_48ab1c04a0bb23993fea8fc62db44389", codecs["m_48ab1c04a0bb23993fea8fc62db44389"]),
+    "ZeroForLaravel\\Tests\\Fixtures\\ControllerMutationController@store": runtime.bind("m_4609bf773a9787758b478d876f4e0610", codecs["m_4609bf773a9787758b478d876f4e0610"]),
+    "ZeroForLaravel\\Tests\\Fixtures\\ControllerMutationController@complete": runtime.bind("m_3f7a28999a592cbb73acfe152c28e526", codecs["m_3f7a28999a592cbb73acfe152c28e526"]),
+    "ZeroForLaravel\\Tests\\Fixtures\\ControllerMutationController@authoritative": runtime.bind("m_507f542a46cc639cde69c7dd4c767ccd", codecs["m_507f542a46cc639cde69c7dd4c767ccd"]),
+    "ZeroForLaravel\\Tests\\Fixtures\\ControllerMutationController@noResult": runtime.bind("m_e354098a49ae8fadb1917be171b39f62", codecs["m_e354098a49ae8fadb1917be171b39f62"]),
+    "ZeroForLaravel\\Tests\\Fixtures\\ControllerMutationController@explicit": runtime.bind("m_0f9207f56ec34d53bb86b174e4856281", codecs["m_0f9207f56ec34d53bb86b174e4856281"]),
+    "ZeroForLaravel\\Tests\\Fixtures\\ControllerMutationController@structured": runtime.bind("m_6ebbf4a7c4477a13fdac4759b85db034", codecs["m_6ebbf4a7c4477a13fdac4759b85db034"]),
+    "ZeroForLaravel\\Tests\\Fixtures\\ControllerMutationController@projected": runtime.bind("m_a8fa0497166297e599a1410608191ae5", codecs["m_a8fa0497166297e599a1410608191ae5"]),
+    "ZeroForLaravel\\Tests\\Fixtures\\ControllerMutationController@bulk": runtime.bind("m_448eec000d59dfd83159ed0bf0a8b154", codecs["m_448eec000d59dfd83159ed0bf0a8b154"]),
   }};
 }

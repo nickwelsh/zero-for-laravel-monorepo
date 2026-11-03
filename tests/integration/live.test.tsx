@@ -177,7 +177,8 @@ it.skipIf(!enabled)(
                     `SELECT attnames::text FROM pg_publication_tables WHERE pubname='${publication}' AND tablename='tasks'`,
                 ),
             ).not.toContain('secret');
-            expect(psql(`SELECT count(*) FROM pg_publication_tables WHERE pubname='${publication}'`)).toBe('5');
+            // Five business/pivot tables plus subject/grant facts and four private resource projections.
+            expect(psql(`SELECT count(*) FROM pg_publication_tables WHERE pubname='${publication}'`)).toBe('11');
             php = spawn(
                 'php',
                 [
@@ -340,6 +341,18 @@ it.skipIf(!enabled)(
                     JSON.parse(readFileSync(join(root, 'lost-response.json'), 'utf8')).mutations[0].result.data,
                 ).toEqual({ id: request.args.prepared.ids.s0 });
                 expect(psql("SELECT count(*) FROM tasks WHERE title='Recovered result' AND user_id='alice'")).toBe('1');
+                // Exercise the real managed Casbin writer, PostgreSQL projector,
+                // generated PHP compiler and unchanged native subscription together.
+                execFileSync('php', ['tests/integration/app.php', 'revoke'], { env, stdio: 'pipe' });
+                await until(() => result.length === 0, 'Managed permission revocation did not remove live rows');
+                psql(`UPDATE tasks SET title='Written after grant revocation' WHERE id='${alice}'`);
+                await sleep(300);
+                expect(result).toEqual([]);
+                execFileSync('php', ['tests/integration/app.php', 'restore'], { env, stdio: 'pipe' });
+                await until(
+                    () => result.some((row) => row.title === 'Written after grant revocation'),
+                    'Restored managed grant did not restore the unchanged subscription',
+                );
             } finally {
                 unsubscribe();
                 view.destroy();

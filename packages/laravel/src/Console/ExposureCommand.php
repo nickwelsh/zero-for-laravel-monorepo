@@ -17,7 +17,7 @@ final class ExposureCommand extends Command
     {
         $report = [];
         foreach ($registry->all() as $model) {
-            $report[$model->name] = $model->toArray() + ['class' => $model->class, 'serverScopes' => count($model->serverScopes)];
+            $report[$model->name] = $model->toArray() + ['class' => $model->class, 'policyVisibility' => $model->policyVisibility];
         }
 
         if ($this->option('json')) {
@@ -26,10 +26,7 @@ final class ExposureCommand extends Command
             foreach ($registry->all() as $model) {
                 $this->info($model->name.' → '.$model->table);
                 $this->line('  Published: '.implode(', ', array_keys($model->columns)));
-                $this->line('  Owner rules: '.json_encode($model->authorization, JSON_THROW_ON_ERROR));
-                $this->line('  Owner relationships: '.implode(', ', $model->authorizationRelations));
-                $this->line('  Server visibility scopes: '.count($model->serverScopes));
-                $this->line('  Visibility: '.($model->authorization === [] && $model->authorizationRelations === [] && $model->serverScopes === [] && ! $model->policyVisibility ? 'explicitly public' : 'constrained'));
+                $this->line('  Visibility: '.($model->policyVisibility ? 'Laravel policy via visibleTo / captured Gate' : 'explicitly public'));
                 $this->line('  Server fills: '.json_encode($model->serverFill, JSON_THROW_ON_ERROR));
                 $this->line('  Relationships: '.implode(', ', array_keys($model->relations)));
             }

@@ -7,8 +7,8 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use ZeroForLaravel\Concerns\HasPolicyVisibility;
 use ZeroForLaravel\Concerns\HasZeroQueries;
-use ZeroForLaravel\Definition\ZeroDefinition;
 
 /**
  * @property string $id
@@ -19,16 +19,11 @@ use ZeroForLaravel\Definition\ZeroDefinition;
  */
 class Todo extends Model
 {
+    use HasPolicyVisibility;
     use HasUuids;
     use HasZeroQueries;
 
     protected $fillable = ['list_id', 'title', 'completed'];
-
-    public static function zero(): ZeroDefinition
-    {
-        return ZeroDefinition::make()->authorizeRelation('list')
-            ->relations('list');
-    }
 
     /** @return BelongsTo<TodoList, $this> */
     public function list(): BelongsTo

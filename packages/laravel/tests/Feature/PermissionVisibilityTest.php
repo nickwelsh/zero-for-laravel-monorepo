@@ -21,6 +21,7 @@ use ZeroForLaravel\Permissions\ProjectionManager;
 use ZeroForLaravel\Publication\PublicationManager;
 use ZeroForLaravel\Tests\Fixtures\PermissionAdminPolicy;
 use ZeroForLaravel\Tests\Fixtures\PermissionList;
+use ZeroForLaravel\Tests\Fixtures\PermissionQueryController;
 use ZeroForLaravel\Tests\Fixtures\PermissionSoftDeletedList;
 use ZeroForLaravel\Tests\Fixtures\PermissionUser;
 use ZeroForLaravel\Tests\PostgresTestCase;
@@ -77,6 +78,50 @@ test('private permission projections replicate without entering the browser sche
     expect($sql)->toContain('permission_subjects', 'permission_index');
     $browser = (new TypeScriptGenerator)->generate($registry);
     expect($browser)->not->toContain('permission_subjects', 'permission_index', 's_is_admin', 'a_owner_id');
+});
+
+test('portable Zero queries use trusted actors and captured Gates replay without executing the controller', function (): void {
+    $alice = PermissionUser::create(['id' => 42, 'department_id' => 'engineering']);
+    PermissionList::create(['id' => 7, 'owner_id' => '42', 'department_id' => 'engineering', 'name' => 'Owner']);
+    Casbin::addPolicy('role:reader', 'list:7', 'todo-list', 'view', 'owner', 'allow');
+    Casbin::addGroupingPolicy('user:42', 'role:reader', 'list:7');
+    $registry = new ModelRegistry([PermissionList::class]);
+    app()->instance(ModelRegistry::class, $registry);
+    config(['zero.context_resolver' => \ZeroForLaravel\Http\ContextResolver::class]);
+    \Pest\Laravel\actingAs($alice);
+    request()->setUserResolver(fn () => $alice);
+    $compiler = new \ZeroForLaravel\Generation\ControllerQueryCompiler((new \PhpParser\ParserFactory)->createForHostVersion(), $registry);
+    $index = $compiler->compile(PermissionQueryController::class, 'index')[0];
+    expect($index->parameters)->toBe([]);
+    expect($index->typescript())->not->toContain('visibleTo', 'actor', 'user', '42');
+    expect(fn (): array => $compiler->compile(PermissionQueryController::class, 'unscoped'))->toThrow(LogicException::class, 'visibleTo');
+    expect(fn (): array => $compiler->compile(PermissionQueryController::class, 'forged'))->toThrow(LogicException::class, 'Unrecognized query operation');
+
+    $native = new \ZeroForLaravel\Query\QueryCompiler($registry);
+    $query = PermissionList::zeroQuery()->visibleTo($alice)->where('id', 7);
+    expect(fn (): array => $native->compileDeclaration($query, new \ZeroForLaravel\ZeroContext(['user_id' => '84'])))->toThrow(\Illuminate\Auth\Access\AuthorizationException::class);
+    expect(fn (): array => $native->compileDeclaration(PermissionList::zeroQuery(), new \ZeroForLaravel\ZeroContext(['user_id' => '42'])))->toThrow(LogicException::class, 'visibleTo');
+
+    $ast = $native->compileDeclaration($query, new \ZeroForLaravel\ZeroContext(['user_id' => '42']));
+    expect(json_encode($ast))->toContain('permission_index');
+    expect(json_encode($ast))->not->toContain('__visibility');
+
+    $definition = $compiler->compile(PermissionQueryController::class, 'show')[0];
+    $source = (new \ZeroForLaravel\Generation\ControllerQueryGenerator(new \ZeroForLaravel\Generation\ZodSchemaDriver))->php([$definition]);
+    $registrations = eval(substr($source, 5));
+    if (! is_array($registrations) || ! ($registrations[$definition->name()] ?? null) instanceof \ZeroForLaravel\Query\RegisteredQuery) {
+        throw new LogicException('Expected generated PHP query registration.');
+    }
+
+    $registered = $registrations[$definition->name()];
+    \Illuminate\Support\Facades\Route::get('/permission-lists/{list}', [PermissionQueryController::class, 'show'])->middleware(\Illuminate\Routing\Middleware\SubstituteBindings::class);
+    $args = ['list' => 7];
+    $identity = new \ZeroForLaravel\ZeroContext(['user_id' => '42']);
+    expect($registered->invoke($args, $identity, $native)['table'])->toBe('permission_test_lists');
+    Casbin::removeGroupingPolicy('user:42', 'role:reader', 'list:7');
+    expect(fn (): array => $registered->invoke($args, $identity, $native))->toThrow(\Illuminate\Auth\Access\AuthorizationException::class);
+    config(['permissions.denied_status' => 404]);
+    expect(fn (): array => $registered->invoke($args, $identity, $native))->toThrow(LogicException::class, 'Stale Zero');
 });
 
 test('visible collections agree with Gates before counts and windows and preserve caller filters for admins', function (): void {

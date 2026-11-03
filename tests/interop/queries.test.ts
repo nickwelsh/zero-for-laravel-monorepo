@@ -7,7 +7,12 @@ import { z } from 'zod';
 import { transformSync } from 'esbuild';
 // Version-pinned compatibility oracle: 1.11 canonicalizes condition/relationship
 // order before returning an AST. PHP emits the equivalent unnormalized wire AST.
-import { normalizeAST } from '../../node_modules/@rocicorp/zero/out/zero-protocol/src/ast.js';
+import {
+    normalizeAST,
+    astSchema,
+    type AST,
+    type Condition,
+} from '../../node_modules/@rocicorp/zero/out/zero-protocol/src/ast.js';
 import { schema, definitions } from './generated';
 import { liveQuery, withQueryInputs } from '../../packages/client/src/live-query';
 import { dated } from './controller-api/ZeroForLaravel/Tests/Fixtures/QueryController';
@@ -115,17 +120,53 @@ it('encodes public Date arguments before constructing native named query request
 });
 
 it('applies authoritative visibility to controller roots, nested results, junctions, and boolean scopes', () => {
-    const q = createBuilder(schema).tasks.where('user_id', 'alice').where('deleted_at', 'IS', null);
+    // Permission predicates are private server ASTs, not public schema relationships.
+    // Check those at every protected path, then compare the unchanged business
+    // query against the native builder. Real subscriptions cover their decisions.
+    function business(ast: AST): AST {
+        function condition(value: Condition): Condition | undefined {
+            if (value.type === 'correlatedSubquery') {
+                if (value.related.system === 'permissions') {
+                    const serialized = JSON.stringify(value);
+                    expect(value.op).toBe('EXISTS');
+                    expect(value.related.hidden).toBe(true);
+                    expect(serialized).toContain('user:alice');
+                    expect(serialized).toContain('"allow"');
+                    expect(serialized).toContain('"deny"');
+                    return undefined;
+                }
+                return { ...value, related: { ...value.related, subquery: business(value.related.subquery) } };
+            }
+            if (value.type === 'and' || value.type === 'or') {
+                const conditions = value.conditions.map(condition).filter((item) => item !== undefined);
+                return conditions.length === 1
+                    ? conditions[0]
+                    : conditions.length
+                      ? { ...value, conditions }
+                      : undefined;
+            }
+            return value;
+        }
+        if (['tasks', 'lists', 'tags', 'comments'].includes(ast.table)) {
+            expect(JSON.stringify(ast.where), ast.table).toContain('"system":"permissions"');
+        }
+        const { where, related, ...rest } = ast;
+        const filtered = where && condition(where);
+        return {
+            ...rest,
+            ...(filtered ? { where: filtered } : {}),
+            ...(related ? { related: related.map((child) => ({ ...child, subquery: business(child.subquery) })) } : {}),
+        };
+    }
+    const q = createBuilder(schema).tasks.where('deleted_at', 'IS', null);
     const native = {
         root: q,
-        related: q
-            .related('list', (child) => child.where('user_id', 'alice'))
-            .related('comments', (child) => child.where('user_id', 'alice').limit(3)),
-        junction: q.whereExists('tags', (child) => child.where('user_id', 'alice').where('id', 'owned')),
+        related: q.related('list').related('comments', (child) => child.limit(3)),
+        junction: q.whereExists('tags', (child) => child.where('id', 'owned')),
         groups: q.where((eb) =>
             eb.or(
-                eb.exists('tags', (child) => child.where('user_id', 'alice').where('name', 'Reading')),
-                eb.exists('tags', (child) => child.where('user_id', 'alice').where('name', 'Other')),
+                eb.exists('tags', (child) => child.where('name', 'Reading')),
+                eb.exists('tags', (child) => child.where('name', 'Other')),
             ),
         ),
         scope: q.where((eb) => eb.or(eb.cmp('done', true), eb.cmp('title', 'shared'))),
@@ -133,7 +174,7 @@ it('applies authoritative visibility to controller roots, nested results, juncti
     const php = JSON.parse(execFileSync('php', ['tests/interop/export.php', 'authorized'], { encoding: 'utf8' }));
     expect(Object.keys(php)).toEqual(Object.keys(native));
     for (const [name, query] of Object.entries(native)) {
-        expect(normalizeAST(php[name]), name).toEqual(asQueryInternals(query).ast);
+        expect(normalizeAST(business(astSchema.parse(php[name]))), name).toEqual(asQueryInternals(query).ast);
     }
 });
 

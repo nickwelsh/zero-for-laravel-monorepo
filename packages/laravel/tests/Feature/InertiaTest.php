@@ -18,9 +18,14 @@ use ZeroForLaravel\Metadata\ModelRegistry;
 use ZeroForLaravel\Query\RegisteredQueries;
 use ZeroForLaravel\Tests\Fixtures\QueryController;
 use ZeroForLaravel\Tests\Fixtures\Task;
-use ZeroForLaravel\Tests\TestCase;
+use ZeroForLaravel\Tests\OwnerTestCase as TestCase;
 
 uses(TestCase::class);
+
+beforeEach(function (): void {
+    \ZeroForLaravel\Tests\Fixtures\OwnerPermissions::install();
+    \Pest\Laravel\actingAs(\ZeroForLaravel\Tests\Fixtures\OwnerUser::findOrFail('alice'));
+});
 
 test('Inertia omits live result props in HTML, visits, and partial responses', function (): void {
     /** @var TestCase $this */

@@ -27,6 +27,8 @@ final readonly class QueryExpression
 
         return match ($this->kind) {
             'literal' => $literal,
+            'actor' => $typescript ? 'undefined' : 'request()->user()',
+            'guarded' => $typescript ? $child(0) : $child(0).'->guardedBy(request()->user(), '.$literal.')',
             'argument', 'enum', 'validated' => $typescript ? 'args['.$literal.']' : '$args['.$literal.']',
             'field' => $child(0).'['.$literal.']',
             'dateOperand' => $typescript
@@ -43,7 +45,7 @@ final readonly class QueryExpression
             'bound' => ($typescript ? 'zql['.json_encode($this->model?->table, JSON_THROW_ON_ERROR).'].where(' : '\\'.$this->model?->class.'::zeroQuery()->where(').json_encode($this->model?->key, JSON_THROW_ON_ERROR).', '.($typescript ? 'args[' : '$args[').$literal.']'.($typescript ? ').one()' : ')->one()'),
             'infinite' => $typescript ? $child(0).'.limit(args.__window ?? '.((int) $this->value + 1).')' : $child(0).'->infinite('.$literal.')',
             'paginate' => $typescript ? '(args.__cursor === undefined ? '.$child(0).'.limit('.((int) $this->value + 1).') : '.$child(0).'.limit('.((int) $this->value + 1).').start(args.__cursor))' : $child(0).'->paginate('.$literal.')',
-            'method' => $this->value === 'all' && $typescript ? $child(0) : $child(0).($typescript ? '.' : '->').$this->value.'('.implode(', ', array_map(fn (self $arg): string => $arg->emit($typescript), array_slice($this->children, 1))).')',
+            'method' => in_array($this->value, ['all', 'visibleTo'], true) && $typescript ? $child(0) : $child(0).($typescript ? '.' : '->').$this->value.'('.implode(', ', array_map(fn (self $arg): string => $arg->emit($typescript), array_slice($this->children, 1))).')',
             'conditional' => '('.$child(0).' ? '.$child(1).' : '.$child(2).')',
             'binary' => '('.$child(0).' '.($typescript && $this->value === '.' ? '+' : $this->value).' '.$child(1).')',
             'not' => '(!'.$child(0).')',

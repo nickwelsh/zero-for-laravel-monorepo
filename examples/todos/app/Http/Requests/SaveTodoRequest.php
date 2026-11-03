@@ -17,7 +17,9 @@ class SaveTodoRequest extends FormRequest
         $id = $this->input('list_id');
         $user = $this->user();
 
-        return is_string($id) && $user instanceof User && TodoList::find($id)?->accessibleBy($user) === true;
+        $list = is_string($id) ? TodoList::find($id) : null;
+
+        return $user instanceof User && $list instanceof TodoList && $user->can('createTodo', $list);
     }
 
     /** @return array<string, list<string>> */

@@ -28,11 +28,12 @@ use ZeroForLaravel\Mutation\Mutation;
 use ZeroForLaravel\Tests\Fixtures\MutationPreference;
 use ZeroForLaravel\Tests\Fixtures\PreferenceMutationController;
 use ZeroForLaravel\Tests\Fixtures\Task;
-use ZeroForLaravel\Tests\PostgresTestCase;
+use ZeroForLaravel\Tests\OwnerPostgresTestCase as PostgresTestCase;
+use ZeroForLaravel\Tests\OwnerTestCase;
 use ZeroForLaravel\Tests\TestCase;
 use ZeroForLaravel\ZeroContext;
 
-uses(getenv('ZERO_TEST_PG_DATABASE') ? PostgresTestCase::class : TestCase::class);
+uses(getenv('ZERO_TEST_PG_DATABASE') ? PostgresTestCase::class : OwnerTestCase::class);
 
 beforeEach(function (): void {
     Schema::create('mutation_preferences', function (Blueprint $table): void {

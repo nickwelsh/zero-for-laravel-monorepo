@@ -16,7 +16,7 @@ use ZeroForLaravel\Query\RegisteredQueries;
 use ZeroForLaravel\Query\RegisteredQuery;
 use ZeroForLaravel\Tests\Fixtures\QueryController;
 use ZeroForLaravel\Tests\Fixtures\Task;
-use ZeroForLaravel\Tests\HttpTestCase;
+use ZeroForLaravel\Tests\ProtectedHttpTestCase as HttpTestCase;
 
 uses(HttpTestCase::class);
 
@@ -40,7 +40,7 @@ test('controller transforms replay bindings and middleware and cannot substitute
     Route::bind('title', fn (string $value): string => $value === 'alias' ? 'allowed' : $value);
     app()->instance(RegisteredQueries::class, new RegisteredQueries([
         'q_test' => new RegisteredQuery(QueryController::class.'@index', 'tasks/index', 'tasks', ['title' => 'string'],
-            static fn (array $args): \ZeroForLaravel\Query\Query => Task::zeroQuery()->where('title', $args['title'])),
+            static fn (array $args): \ZeroForLaravel\Query\Query => Task::zeroQuery()->visibleTo(request()->user())->where('title', $args['title'])),
     ]));
     $alice = (new User)->setKeyType('string')->forceFill(['id' => 'alice']);
     $this->actingAs($alice)->withHeader('X-Api-Key', 'private-test-secret');
@@ -135,4 +135,43 @@ test('cursor pages preserve raw ordering values and reject incomplete or foreign
         ->assertJsonPath('queries.1.ast.start.exclusive', true)
         ->assertJsonPath('queries.2.error', 'parse')->assertJsonPath('queries.3.error', 'parse')
         ->assertJsonPath('queries.4.error', 'parse');
+});
+
+function registerHttpQuery(): void
+{
+    Route::get('/http-query', [QueryController::class, 'window']);
+    app()->instance(RegisteredQueries::class, new RegisteredQueries([
+        'q_http' => new RegisteredQuery(QueryController::class.'@window', 'tasks/window', 'tasks', [],
+            static fn (): \ZeroForLaravel\Query\Query => Task::zeroQuery()->visibleTo(request()->user())),
+    ]));
+}
+
+test('query endpoint uses authenticated identity instead of body context', function (): void {
+    /** @var HttpTestCase $this */
+    registerHttpQuery();
+    $user = (new User)->setKeyType('string')->forceFill(['id' => 'alice']);
+    $response = $this->actingAs($user)->withHeader('X-Api-Key', 'private-test-secret')
+        ->postJson('/zero/query', ['transform', [['id' => 'q', 'name' => 'q_http', 'args' => [(object) []]]]])
+        ->assertOk()->assertJsonPath('userID', 'alice')->assertJsonMissingPath('queries.0.error');
+    expect(json_encode($response->json('queries.0.ast'), JSON_THROW_ON_ERROR))->toContain('user:alice', 'permission_index');
+});
+
+test('query transforms accept large revalidation batches while authorizing every query', function (): void {
+    /** @var HttpTestCase $this */
+    registerHttpQuery();
+    $user = (new User)->setKeyType('string')->forceFill(['id' => 'alice']);
+    $queries = [];
+    for ($index = 0; $index < 257; $index++) {
+        $queries[] = ['id' => 'q'.$index, 'name' => 'q_http', 'args' => [(object) []]];
+    }
+
+    $queries[] = ['id' => 'invalid', 'name' => 'q_http', 'args' => [['ast' => ['table' => 'users']]]];
+    $response = $this->actingAs($user)->withHeader('X-Api-Key', 'private-test-secret')
+        ->postJson('/zero/query', ['transform', $queries])
+        ->assertOk()->assertJsonPath('kind', 'QueryResponse')->assertJsonCount(258, 'queries')
+        ->assertJsonPath('queries.257.error', 'parse');
+    for ($index = 0; $index < 257; $index++) {
+        $response->assertJsonMissingPath('queries.'.$index.'.error');
+        expect(json_encode($response->json('queries.'.$index.'.ast'), JSON_THROW_ON_ERROR))->toContain('user:alice', 'permission_index');
+    }
 });

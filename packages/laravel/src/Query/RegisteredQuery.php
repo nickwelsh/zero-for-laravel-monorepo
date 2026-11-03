@@ -8,6 +8,7 @@ use Closure;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Route;
+use Illuminate\Support\Facades\Gate;
 use LogicException;
 use ZeroForLaravel\Http\ControllerRouteDispatcher;
 use ZeroForLaravel\Support\Input;
@@ -20,6 +21,7 @@ final readonly class RegisteredQuery
      * @param  array<string, string>  $parameters
      * @param  Closure(array<string, mixed>): Query  $factory
      * @param  array<string,\ZeroForLaravel\Generation\Mutations\ValueContract>  $inputContracts
+     * @param  list<array{parameter: string, class: class-string<\Illuminate\Database\Eloquent\Model>, ability: string, fingerprint: string}>  $guards
      */
     public function __construct(
         public string $action,
@@ -28,7 +30,26 @@ final readonly class RegisteredQuery
         public array $parameters,
         private Closure $factory,
         public array $inputContracts = [],
+        public array $guards = [],
+        public ?string $contract = null,
     ) {}
+
+    public function assertCurrent(): void
+    {
+        if ($this->contract === null) {
+            return;
+        }
+
+        [$class, $method] = explode('@', $this->action, 2);
+        $compiler = new \ZeroForLaravel\Generation\ControllerQueryCompiler((new \PhpParser\ParserFactory)->createForHostVersion(), resolve(\ZeroForLaravel\Metadata\ModelRegistry::class));
+        foreach ($compiler->compile($class, $method) as $query) {
+            if ($query->prop === $this->prop && $query->name() === $this->contract) {
+                return;
+            }
+        }
+
+        throw new LogicException('Stale Zero policy/schema registration. Regenerate and deploy paired contracts.');
+    }
 
     /** @return array<string, mixed> */
     public function compile(mixed $arguments, ZeroContext $context, QueryCompiler $compiler): array
@@ -116,7 +137,19 @@ final readonly class RegisteredQuery
                 throw new AuthorizationException('Controller identity differs from the authenticated Zero identity.');
             }
 
-            return $compiler->compileDeclaration($this->declaration($wire), $context);
+            $this->assertCurrent();
+            $guards = [];
+            foreach ($this->guards as $guard) {
+                $resource = $route->parameter($guard['parameter']);
+                if (! $resource instanceof \Illuminate\Database\Eloquent\Model || ! $resource instanceof $guard['class']) {
+                    throw new LogicException('Captured Gate resource differs from the bound route model.');
+                }
+
+                Gate::forUser($request->user())->authorize($guard['ability'], $resource);
+                $guards[] = ['class' => $guard['class'], 'id' => \ZeroForLaravel\Permissions\Binding::id($resource->getKey()), 'ability' => $guard['ability']];
+            }
+
+            return $compiler->compileDeclaration($this->declaration($wire), $context, $guards, serving: true);
         });
     }
 }

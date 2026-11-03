@@ -26,7 +26,7 @@ use ZeroForLaravel\Mutation\ControllerMutationRegistry;
 use ZeroForLaravel\Mutation\OperationException;
 use ZeroForLaravel\Tests\Fixtures\ControllerMutationController;
 use ZeroForLaravel\Tests\Fixtures\Task;
-use ZeroForLaravel\Tests\TestCase;
+use ZeroForLaravel\Tests\OwnerTestCase as TestCase;
 use ZeroForLaravel\ZeroContext;
 
 uses(TestCase::class);

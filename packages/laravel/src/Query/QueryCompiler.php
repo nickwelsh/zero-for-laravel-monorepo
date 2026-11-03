@@ -4,10 +4,11 @@ declare(strict_types=1);
 
 namespace ZeroForLaravel\Query;
 
-use Closure;
+use Illuminate\Auth\Access\AuthorizationException;
 use LogicException;
 use ZeroForLaravel\Metadata\ModelMetadata;
 use ZeroForLaravel\Metadata\ModelRegistry;
+use ZeroForLaravel\Permissions\ZeroVisibility;
 use ZeroForLaravel\Support\Input;
 use ZeroForLaravel\ZeroContext;
 
@@ -19,14 +20,16 @@ use ZeroForLaravel\ZeroContext;
  */
 final readonly class QueryCompiler
 {
-    public function __construct(private ModelRegistry $registry) {}
+    /** @param list<array{class: class-string<\Illuminate\Database\Eloquent\Model>, id: string, ability: string}> $guards */
+    public function __construct(private ModelRegistry $registry, private array $guards = [], private bool $serving = false) {}
 
     /** Compile an application-owned declaration, never an AST supplied over HTTP.
+     * @param  list<array{class: class-string<\Illuminate\Database\Eloquent\Model>, id: string, ability: string}>  $guards
      * @return array<string, mixed>
      */
-    public function compileDeclaration(Query $query, ZeroContext $context): array
+    public function compileDeclaration(Query $query, ZeroContext $context, array $guards = [], bool $serving = false): array
     {
-        return $this->authorizeDeclaration($query->ast(), $context, 0);
+        return (new self($this->registry, $guards, $serving))->authorizeDeclaration($query->ast(), $context, 0);
     }
 
     /** @param array<string, mixed> $ast
@@ -55,7 +58,13 @@ final readonly class QueryCompiler
                 continue;
             }
 
-            $conditions = $this->visibility($model, $context, $depth);
+            $ability = $ast['__ability'] ?? 'view';
+            if (! is_string($ability)) {
+                throw new LogicException('Invalid captured policy ability.');
+            }
+
+            $conditions = $this->visibility($model, $context, $ast['__visibility'] ?? null, $ability);
+            unset($ast['__visibility'], $ast['__ability']);
             if (isset($ast['where'])) {
                 $conditions[] = Input::object($ast['where'], 'condition');
             }
@@ -92,54 +101,30 @@ final readonly class QueryCompiler
         return $condition;
     }
 
-    /** @return Related */
-    private function related(ModelMetadata $model, string $name, ZeroContext $context, int $depth, ?Closure $refine = null): array
-    {
-        $relation = $model->relations[$name];
-        $target = $this->registry->get($relation['model']);
-        $path = $relation['path'];
-        if ($depth > 8) {
-            Input::fail('query', 'Query relationships exceed the maximum depth.');
-        }
-
-        $conditions = $this->visibility($target, $context, $depth);
-        if ($refine instanceof Closure) {
-            $query = $this->scopeBuilder($target, $context, $depth);
-            $refine($query);
-            $conditions[] = $query->condition();
-        }
-
-        $ast = ['table' => $target->table];
-        if ($conditions !== []) {
-            $ast['where'] = $this->conjunction($conditions);
-        }
-
-        $ast['alias'] = 'zsubq_'.$name;
-        if (count($path) > 1) {
-            $ast['alias'] = 'zsubq_zhidden_'.$name;
-            $inner = ['correlation' => ['parentField' => $path[1]['source'], 'childField' => $path[1]['dest']], 'subquery' => $ast, 'system' => 'client'];
-            $ast = ['table' => $path[0]['table'], 'alias' => 'zsubq_'.$name, 'where' => ['type' => 'correlatedSubquery', 'related' => $inner, 'op' => 'EXISTS']];
-        }
-
-        return ['correlation' => ['parentField' => $path[0]['source'], 'childField' => $path[0]['dest']], 'subquery' => $ast, 'system' => 'client'];
-    }
-
     /** @return list<WireCondition> */
-    private function visibility(ModelMetadata $model, ZeroContext $context, int $depth): array
+    private function visibility(ModelMetadata $model, ZeroContext $context, mixed $subjectId = null, string $ability = 'view'): array
     {
+        $conditions = [];
+        if ($this->guards !== [] && ! $model->policyVisibility) {
+            throw new LogicException('Captured guards on public query paths cannot be maintained live. Bind a portable permission resource.');
+        }
+
         if ($model->policyVisibility) {
-            throw new LogicException('Portable Zero policy visibility must be compiled before this query can run.');
-        }
+            if ($this->serving) {
+                $projector = new \ZeroForLaravel\Permissions\ProjectionManager;
+                $projector->assertConnection(new $model->class);
+                $projector->assertReady();
+            }
 
-        $conditions = array_map(fn (array $rule): array => $this->comparison($rule['field'], $rule['op'], array_key_exists('context', $rule['value']) ? $context->get($rule['value']['context']) : $rule['value']['literal']), $model->authorization);
-        foreach ($model->authorizationRelations as $relation) {
-            $conditions[] = ['type' => 'correlatedSubquery', 'related' => $this->related($model, $relation, $context, $depth + 1), 'op' => 'EXISTS'];
-        }
+            if ($subjectId === null) {
+                throw new LogicException("{$model->name}: protected query paths require visibleTo or a captured instance Gate.");
+            }
 
-        foreach ($model->serverScopes as $scope) {
-            $query = $this->scopeBuilder($model, $context, $depth);
-            $scope($query, $context);
-            $conditions[] = $query->condition();
+            if (! is_string($subjectId) || $context->userId() === null || $subjectId !== $context->userId()) {
+                throw new AuthorizationException('Visibility actor differs from the authenticated Zero identity.');
+            }
+
+            $conditions[] = (new ZeroVisibility)->condition($model, $subjectId, $ability, $this->guards)->toArray();
         }
 
         if ($model->deletedAt !== null) {
@@ -147,17 +132,6 @@ final readonly class QueryCompiler
         }
 
         return $conditions;
-    }
-
-    private function scopeBuilder(ModelMetadata $model, ZeroContext $context, int $depth): ZQLBuilder
-    {
-        return new ZQLBuilder(new ZeroOperator($model, function (string $name, ?Closure $refine) use ($model, $context, $depth): array {
-            if (! isset($model->relations[$name])) {
-                throw new LogicException("Register scope relation {$model->name}.{$name} using enforceServerScope relations.");
-            }
-
-            return $this->related($model, $name, $context, $depth + 1, $refine);
-        }));
     }
 
     /** @return Simple */

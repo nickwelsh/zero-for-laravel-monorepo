@@ -13,7 +13,6 @@ use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Schema;
 use RuntimeException;
-use ZeroForLaravel\Definition\ZeroDefinition;
 use ZeroForLaravel\Metadata\ModelRegistry;
 use ZeroForLaravel\Publication\PublicationManager;
 use ZeroForLaravel\Tests\PostgresTestCase;
@@ -26,11 +25,6 @@ class MigrationRecord extends Model
     protected $connection = 'testing';
 
     protected $hidden = ['secret'];
-
-    public static function zero(): ZeroDefinition
-    {
-        return ZeroDefinition::make()->publicReads();
-    }
 }
 
 abstract class MigrationPublicationTestCase extends PostgresTestCase
@@ -62,6 +56,7 @@ abstract class MigrationPublicationTestCase extends PostgresTestCase
     {
         parent::defineEnvironment($app);
         $app['config']->set('zero.models', [MigrationRecord::class]);
+        $app['config']->set('zero.public_models', [MigrationRecord::class]);
         $app['config']->set('zero.publication', 'laravel_zero_test_publication');
         $app['config']->set('zero.sync_publication_on_migrate', true);
     }

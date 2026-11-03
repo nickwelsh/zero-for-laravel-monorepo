@@ -29,6 +29,17 @@ class FixtureIdentity
     }
 }
 
+class FixtureReads
+{
+    public function index(Request $request): \Inertia\Response
+    {
+        return \Inertia\Inertia::render('fixture/related', [
+            'tasks' => Task::zeroQuery()->visibleTo($request->user())
+                ->related('tags', fn ($tags) => $tags->visibleTo($request->user())),
+        ]);
+    }
+}
+
 class FixtureMutations
 {
     /** @return array{id: string} */
@@ -72,13 +83,23 @@ $app->afterBootstrapping(LoadConfiguration::class, function ($app) use ($root) {
 ini_set('error_log', $root.'/php.log');
 $kernel = $app->make(PHP_SAPI === 'cli' ? \Illuminate\Contracts\Console\Kernel::class : Kernel::class);
 $kernel->bootstrap();
+\ZeroForLaravel\Tests\Fixtures\OwnerPermissions::configure();
 \Illuminate\Support\Facades\Route::post('/fixture/tasks', [FixtureMutations::class, 'store'])->middleware(FixtureIdentity::class);
 \Illuminate\Support\Facades\Route::put('/fixture/tasks/{task}', [FixtureMutations::class, 'update'])->middleware([FixtureIdentity::class, \Illuminate\Routing\Middleware\SubstituteBindings::class]);
 \Illuminate\Support\Facades\Route::get('/fixture/tasks/sorted/{direction}', [\ZeroForLaravel\Tests\Fixtures\QueryController::class, 'sorted'])->middleware([FixtureIdentity::class, \Illuminate\Routing\Middleware\SubstituteBindings::class]);
+\Illuminate\Support\Facades\Route::get('/fixture/tasks/{task}', [\ZeroForLaravel\Tests\Fixtures\QueryController::class, 'show'])->middleware([FixtureIdentity::class, \Illuminate\Routing\Middleware\SubstituteBindings::class]);
+\Illuminate\Support\Facades\Route::get('/fixture/related', [FixtureReads::class, 'index'])->middleware(FixtureIdentity::class);
 foreach (['create', 'update', 'delete', 'restore', 'forceDelete'] as $ability) {
     Gate::define($ability, fn ($user, $model) => $ability === 'create' || ($model->user_id === $user->getAuthIdentifier() && $model->title !== 'Locked'));
 }
 if (PHP_SAPI === 'cli') {
+    if (in_array($argv[1] ?? null, ['revoke', 'restore'], true)) {
+        $permissions = \ZeroForLaravel\Permissions\Casbin::model('owner');
+        $fields = ['owner:alice', 'tasks', 'view', 'owner', 'allow'];
+        if ($argv[1] === 'revoke') { $permissions->removePolicy(...$fields); }
+        else { $permissions->addPolicy(...$fields); }
+        exit(0);
+    }
     if (($argv[1] ?? null) === 'reset') { exit(Artisan::call('zero:reset', [($argv[2] ?? null) === 'force' ? '--force' : '--dry-run' => true], new \Symfony\Component\Console\Output\ConsoleOutput)); }
     if (($argv[1] ?? null) === 'dev') { exit(Artisan::call('zero:dev', [], new \Symfony\Component\Console\Output\ConsoleOutput)); }
     if (Artisan::call('migrate', ['--path' => __DIR__.'/migrations', '--realpath' => true, '--force' => true]) !== 0 || Artisan::call('zero:generate') !== 0 || Artisan::call('zero:generate', ['--check' => true]) !== 0) { throw new RuntimeException('Fixture setup failed.'); }

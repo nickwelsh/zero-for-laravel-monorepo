@@ -6,7 +6,7 @@ namespace ZeroForLaravel\Tests\Feature;
 
 use ZeroForLaravel\Generation\TypeScriptGenerator;
 use ZeroForLaravel\Metadata\ModelRegistry;
-use ZeroForLaravel\Tests\TestCase;
+use ZeroForLaravel\Tests\OwnerTestCase as TestCase;
 
 uses(TestCase::class);
 
@@ -24,7 +24,8 @@ test('only destructures relationship helpers used by each model', function (): v
     /** @var TestCase $this */
     $registry = new ModelRegistry($this->models());
     $task = $registry->get('Task');
-    $task->relations = ['list' => $task->relations['list']];
+    $registry->relation($task, 'list');
+    $registry->relation($registry->get('TaskList'), 'tasks');
 
     $output = (new TypeScriptGenerator)->generate($registry);
 

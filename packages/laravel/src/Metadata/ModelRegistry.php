@@ -21,7 +21,6 @@ use ReflectionClass;
 use ReflectionMethod;
 use ReflectionNamedType;
 use ZeroForLaravel\Attributes;
-use ZeroForLaravel\Definition\ZeroDefinition;
 use ZeroForLaravel\Mutation\Mutation;
 use ZeroForLaravel\Permissions\Binding;
 use ZeroForLaravel\Permissions\ProjectionManager;
@@ -70,13 +69,6 @@ final class ModelRegistry
             $this->models[$metadata->name] = $metadata;
         }
 
-        foreach ($this->models as $metadata) {
-            $this->describeRelations($metadata);
-        }
-
-        foreach ($this->models as $metadata) {
-            $this->validateAuthorizationPath($metadata, []);
-        }
     }
 
     public function get(string $name): ModelMetadata
@@ -163,22 +155,6 @@ final class ModelRegistry
         return (new (reset($this->models)->class))->getConnection();
     }
 
-    /** @param list<string> $ancestors */
-    private function validateAuthorizationPath(ModelMetadata $model, array $ancestors): void
-    {
-        if (in_array($model->name, $ancestors, true)) {
-            throw new LogicException("{$model->name}: Cyclic authorization relations are unsupported.");
-        }
-
-        if (count($ancestors) > 8) {
-            throw new LogicException('Authorization relations exceed the maximum depth.');
-        }
-
-        foreach ($model->authorizationRelations as $relation) {
-            $this->validateAuthorizationPath($this->get($model->relations[$relation]['model']), [...$ancestors, $model->name]);
-        }
-    }
-
     /**
      * @template T of object
      *
@@ -223,25 +199,18 @@ final class ModelRegistry
         }
 
         $this->connectionName = $connection;
-        $definition = method_exists($class, 'zero') ? $class::zero() : ZeroDefinition::make();
-        if (! $definition instanceof ZeroDefinition) {
-            throw new LogicException("{$name}: zero() must return ZeroDefinition.");
-        }
-
-        $authorization = $definition->authorization;
-        $authorizationRelations = array_values(array_unique($definition->authorizationRelations));
         $public = in_array($class, config()->array('zero.public_models', []), true);
         $policy = array_key_exists($class, config()->array('permissions.resources', []));
         if ($public && $policy) {
             throw new LogicException("{$name}: choose public reads or a permission binding, never both.");
         }
 
-        if ($authorization === [] && $authorizationRelations === [] && ! $definition->public && $definition->serverScopes === [] && ! $public && ! $policy) {
-            throw new LogicException("{$name}: declare publicReads, authorize, authorizeRelation, or enforceServerScope visibility.");
+        if (! $public && ! $policy) {
+            throw new LogicException("{$name}: declare an explicit zero.public_models entry or permissions.resources binding.");
         }
 
-        $fills = Mutation::contextFills($class, $definition->serverFill);
-        $search = ScoutSearch::registered($class) ?? $definition->search;
+        $fills = Mutation::contextFills($class);
+        $search = ScoutSearch::registered($class);
 
         $traits = class_uses_recursive($class);
         $deleted = in_array(SoftDeletes::class, $traits) && method_exists($model, 'getDeletedAtColumn') ? $model->getDeletedAtColumn() : null;
@@ -305,7 +274,7 @@ final class ModelRegistry
                 ...($castType !== null && ! $date && $enum === null ? ['cast' => $castType] : [])];
         }
 
-        $required = array_filter(array_merge([$model->getKeyName(), $created, $updated, $deleted], array_keys($fills), array_column($authorization, 'field')));
+        $required = array_filter(array_merge([$model->getKeyName(), $created, $updated, $deleted], array_keys($fills)));
         foreach ($required as $field) {
             $this->requireColumn($columns, $name, $field);
         }
@@ -316,18 +285,11 @@ final class ModelRegistry
             throw new LogicException("{$name}: the model key must match a single-column database primary key.");
         }
 
-        foreach ($authorization as $rule) {
-            if (! in_array($rule['op'], ['=', '!=', '<', '<=', '>', '>=', 'IS', 'IS NOT'], true)) {
-                throw new LogicException("{$name}: unsupported authorization operator.");
-            }
-        }
-
         $generator = in_array(HasUlids::class, $traits) ? 'ulid' : (in_array(HasUuids::class, $traits) ? 'uuid' : null);
         $writable = array_values(array_intersect(array_diff($this->fillable($model), array_filter(array_merge([$model->getKeyName(), $created, $updated, $deleted], array_keys($fills)))), array_keys($columns)));
 
-        return new ModelMetadata($class, $name, $model->getTable(), $model->getKeyName(), $columns, $authorization, $fills, $writable, $generator, $created, $updated, $deleted,
-            authorizationRelations: $authorizationRelations, serverScopes: $definition->serverScopes,
-            relationDependencies: $definition->scopeRelations, search: $search, policyVisibility: $policy);
+        return new ModelMetadata($class, $name, $model->getTable(), $model->getKeyName(), $columns, $fills, $writable, $generator, $created, $updated, $deleted,
+            search: $search, policyVisibility: $policy);
     }
 
     /** @return list<string> */
@@ -345,11 +307,11 @@ final class ModelRegistry
         return $fields;
     }
 
-    /** @param list<string>|null $names */
-    private function describeRelations(ModelMetadata $metadata, ?array $names = null): void
+    /** @param list<string> $names */
+    private function describeRelations(ModelMetadata $metadata, array $names): void
     {
         $model = new $metadata->class;
-        foreach ($names ?? array_unique([...$metadata->authorizationRelations, ...$metadata->relationDependencies]) as $name) {
+        foreach ($names as $name) {
             if (isset($metadata->columns[$name])) {
                 throw new LogicException("{$metadata->name}.{$name}: relation name conflicts with a model column or instance API.");
             }

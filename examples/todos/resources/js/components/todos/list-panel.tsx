@@ -1,4 +1,5 @@
 import { useControllerMutation } from '@nickwelsh/zero-for-laravel/react';
+import { Link } from '@inertiajs/react';
 import { Pencil, Trash2 } from 'lucide-react';
 import { useState } from 'react';
 import { toast } from 'sonner';
@@ -7,7 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { destroy as destroyList, update as updateList } from '@/zero/App/Http/Controllers/TodoListController';
-import { __invoke as shareList } from '@/zero/App/Http/Controllers/ShareListController';
+import { __invoke as shareList, destroy as unshareList } from '@/zero/App/Http/Controllers/ShareListController';
 import type { Inertia } from '@/wayfinder/types';
 import { ListTodos } from './list-todos';
 import { commitMutation } from './mutations';
@@ -24,6 +25,9 @@ export function ListPanel({ list, userId }: { list: ListRow; userId: number }) {
     const share = useControllerMutation(shareList, {
         list: list.id,
     });
+    const unshare = useControllerMutation(unshareList, {
+        list: list.id,
+    });
     const [email, setEmail] = useState('');
     const [renaming, setRenaming] = useState(false);
     const [name, setName] = useState(list.name);
@@ -33,7 +37,11 @@ export function ListPanel({ list, userId }: { list: ListRow; userId: number }) {
         <section aria-label={`${list.name} todos`} className="min-w-0 space-y-6 rounded-xl border bg-card p-5">
             <header className="flex items-start justify-between gap-3">
                 <div>
-                    <h2 className="text-xl font-semibold">{list.name}</h2>
+                    <h2 className="text-xl font-semibold">
+                        <Link href={`/lists/${list.id}`} className="hover:underline">
+                            {list.name}
+                        </Link>
+                    </h2>
                     <p className="mt-1 text-sm text-muted-foreground">
                         {owner ? 'Your list' : 'Shared with you'} · Everyone with access can edit todos.
                     </p>
@@ -120,8 +128,25 @@ export function ListPanel({ list, userId }: { list: ListRow; userId: number }) {
                                 <Button variant="outline" disabled={share.state.status === 'pending'}>
                                     Share list
                                 </Button>
+                                <Button
+                                    type="button"
+                                    variant="outline"
+                                    disabled={!email || unshare.state.status === 'pending'}
+                                    onClick={() => {
+                                        void commitMutation(
+                                            () => unshare({ email }),
+                                            () => {
+                                                setEmail('');
+                                                toast.success('List access removed.');
+                                            },
+                                        );
+                                    }}
+                                >
+                                    Remove access
+                                </Button>
                             </div>
                             <InputError message={share.state.fields.email?.join(' ')} />
+                            <InputError message={unshare.state.fields.email?.join(' ')} />
                         </div>
                     </form>
                 </div>

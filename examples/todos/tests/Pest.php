@@ -1,6 +1,10 @@
 <?php
 
+use App\Models\TodoList;
+use App\Models\User;
+use App\Permissions\ListPermissions;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Tests\TestCase;
 
 /*
@@ -47,4 +51,14 @@ expect()->extend('toBeOne', function () {
 function something()
 {
     // ..
+}
+
+function createTodoList(User $owner, string $name = 'Home'): TodoList
+{
+    return DB::transaction(function () use ($owner, $name): TodoList {
+        $list = TodoList::create(['name' => $name, 'user_id' => $owner->id]);
+        ListPermissions::grantOwner($list);
+
+        return $list;
+    });
 }

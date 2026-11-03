@@ -14,10 +14,11 @@ final class DashboardController extends Controller
     public function index(DashboardRequest $input): Response
     {
         $values = $input->validated();
-        $lists = TodoList::zeroQuery()
-            ->related('todos', fn ($todos) => $todos->orderBy('created_at', 'asc')->orderBy('id', 'asc'));
+        $lists = TodoList::zeroQuery()->visibleTo($input->user())
+            ->related('todos', fn ($todos) => $todos->visibleTo($input->user())->orderBy('created_at', 'asc')->orderBy('id', 'asc'));
         if (isset($values['status']) && $values['status'] !== 'all') {
-            $lists = TodoList::zeroQuery()->related('todos', fn ($todos) => $todos
+            $lists = TodoList::zeroQuery()->visibleTo($input->user())->related('todos', fn ($todos) => $todos
+                ->visibleTo($input->user())
                 ->where('completed', $values['status'] === 'completed')
                 ->orderBy('created_at', 'asc')->orderBy('id', 'asc'));
         }

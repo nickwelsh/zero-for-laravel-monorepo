@@ -9,6 +9,7 @@ final readonly class ControllerQuery
 {
     /** @param array<string, string> $parameters
      * @param  array<string, string>  $ordinary
+     * @param  list<array{parameter: string, class: class-string<\Illuminate\Database\Eloquent\Model>, ability: string, fingerprint: string}>  $guards
      */
     public function __construct(
         public string $action,
@@ -20,13 +21,14 @@ final readonly class ControllerQuery
         public int $line,
         public string $schemaFingerprint,
         public array $ordinary = [],
+        public array $guards = [],
     ) {}
 
     public function name(): string
     {
         // A single registry key: dots and slashes have native path semantics.
         // Never reuse a registration across changed construction, input, or model contracts.
-        return 'q_'.hash('sha256', $this->action."\0".$this->prop."\0".$this->php()."\0".$this->schemaFingerprint."\0".json_encode($this->parameters, JSON_THROW_ON_ERROR));
+        return 'q_'.hash('sha256', $this->action."\0".$this->prop."\0".$this->php()."\0".$this->schemaFingerprint."\0".json_encode([$this->parameters, $this->guards], JSON_THROW_ON_ERROR));
     }
 
     public function php(): string

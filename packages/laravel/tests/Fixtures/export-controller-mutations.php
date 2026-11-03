@@ -19,7 +19,7 @@ use ZeroForLaravel\Tests\Fixtures\ControllerMutationController;
 use ZeroForLaravel\Tests\Fixtures\MutationPreference;
 use ZeroForLaravel\Tests\Fixtures\PreferenceMutationController;
 use ZeroForLaravel\Tests\Fixtures\QueryController;
-use ZeroForLaravel\Tests\TestCase;
+use ZeroForLaravel\Tests\OwnerTestCase as TestCase;
 
 require __DIR__.'/../../vendor/autoload.php';
 

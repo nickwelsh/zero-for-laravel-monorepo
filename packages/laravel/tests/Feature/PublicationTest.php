@@ -9,7 +9,7 @@ use LogicException;
 use ZeroForLaravel\Metadata\ModelRegistry;
 use ZeroForLaravel\Publication\PublicationManager;
 use ZeroForLaravel\Tests\Fixtures\VisibleTask;
-use ZeroForLaravel\Tests\PostgresTestCase;
+use ZeroForLaravel\Tests\OwnerPostgresTestCase as PostgresTestCase;
 
 uses(PostgresTestCase::class);
 
@@ -56,14 +56,19 @@ test('refuses models resolved through another postgres schema', function (): voi
 
 test('publication matches the generated column plan and sync is idempotent', function (): void {
     /** @var PostgresTestCase $this */
-    $manager = new PublicationManager(new ModelRegistry($this->models()));
+    $registry = new ModelRegistry($this->models());
+    $registry->relation($registry->get('Task'), 'tags');
+
+    $manager = new PublicationManager($registry);
     try {
         $plan = $manager->plan('laravel_zero_test_publication');
         $this->assertStringNotContainsString('secret', implode("\n", $plan));
         $manager->sync('laravel_zero_test_publication');
         $manager->sync('laravel_zero_test_publication');
         $tables = DB::select("SELECT tablename, attnames FROM pg_publication_tables WHERE pubname = 'laravel_zero_test_publication' ORDER BY tablename");
-        $this->assertSame(['comments', 'lists', 'tags', 'task_tag', 'tasks'], array_column($tables, 'tablename'));
+        $expected = ['comments', 'lists', 'tags', 'task_tag', 'tasks', ...array_keys($registry->privateTables())];
+        sort($expected);
+        $this->assertSame($expected, array_column($tables, 'tablename'));
         $columns = DB::scalar("SELECT attnames::text FROM pg_publication_tables WHERE pubname = 'laravel_zero_test_publication' AND tablename = 'tasks'");
         $this->assertIsString($columns);
         $this->assertStringNotContainsString('secret', $columns);

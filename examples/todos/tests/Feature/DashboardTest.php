@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Inertia\Testing\AssertableInertia;
 use Tests\TestCase;
 
@@ -19,6 +20,10 @@ class DashboardTest extends TestCase
 
     public function test_authenticated_users_can_visit_the_dashboard()
     {
+        if (DB::connection()->getDriverName() !== 'pgsql') {
+            $this->markTestSkipped('Maintained policy visibility requires PostgreSQL 15+.');
+        }
+
         $user = User::factory()->create();
         $this->actingAs($user);
 
@@ -29,6 +34,11 @@ class DashboardTest extends TestCase
             ->assertOk()
             ->assertInertia(fn (AssertableInertia $page) => $page
                 ->where('__zero.bindings.lists.args.input.status', 'completed'));
+    }
+
+    public function test_the_dashboard_rejects_unknown_status_filters()
+    {
+        $this->actingAs(User::factory()->create());
         $this->getJson(route('dashboard', ['status' => 'unknown']))
             ->assertUnprocessable()
             ->assertJsonValidationErrors('status');

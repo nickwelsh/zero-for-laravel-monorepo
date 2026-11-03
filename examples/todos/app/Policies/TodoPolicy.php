@@ -3,22 +3,30 @@
 namespace App\Policies;
 
 use App\Models\Todo;
+use App\Models\TodoList;
 use App\Models\User;
+use Illuminate\Auth\Access\Response;
+use ZeroForLaravel\Permissions\Casbin;
 
 class TodoPolicy
 {
-    public function create(User $user): bool
+    public function view(User $user, Todo $todo): Response
     {
-        return true;
+        return Casbin::inspect($user, 'view', $todo)->asNotFound();
     }
 
-    public function update(User $user, Todo $todo): bool
+    public function create(User $user, TodoList $list): Response
     {
-        return $todo->list->accessibleBy($user);
+        return Casbin::inspect($user, 'create-todo', $list)->asNotFound();
     }
 
-    public function delete(User $user, Todo $todo): bool
+    public function update(User $user, Todo $todo): Response
     {
-        return $this->update($user, $todo);
+        return Casbin::inspect($user, 'update', $todo)->asNotFound();
+    }
+
+    public function delete(User $user, Todo $todo): Response
+    {
+        return Casbin::inspect($user, 'delete', $todo)->asNotFound();
     }
 }

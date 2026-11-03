@@ -12,13 +12,21 @@ use ZeroForLaravel\Attributes\ZeroColumns;
 use ZeroForLaravel\Attributes\ZeroExclude;
 use ZeroForLaravel\Attributes\ZeroIncludeColumns;
 use ZeroForLaravel\ContextField;
-use ZeroForLaravel\Definition\ZeroDefinition;
 use ZeroForLaravel\Generation\TypeScriptGenerator;
 use ZeroForLaravel\Metadata\ModelRegistry;
 use ZeroForLaravel\Tests\Fixtures\VisibleTask;
-use ZeroForLaravel\Tests\TestCase;
+use ZeroForLaravel\Tests\OwnerTestCase as TestCase;
 
 uses(TestCase::class);
+
+beforeEach(function (): void {
+    config(['zero.public_models' => [VisibleTask::class, HiddenVisibleTask::class, ExcludedVisibleTask::class,
+        ExplicitVisibleTask::class, IncludedVisibleTask::class, IncludedExcludedVisibleTask::class,
+        BoundedVisibleTask::class, VirtualVisibleTask::class, EmptyVisibleTask::class,
+        MissingVisibleKey::class, MissingVisibleTimestamp::class, MissingVisibleDeletedAt::class,
+        MissingVisibleFill::class, MissingVisibleRelationKey::class],
+        'zero.mutation_context.'.MissingVisibleFill::class => ['user_id' => ContextField::UserId]]);
+});
 
 test('visible columns restrict metadata, writable inputs and the generated client schema', function (): void {
     $registry = new ModelRegistry([VisibleTask::class]);
@@ -56,10 +64,31 @@ test('required columns omitted from visible fail closed', function (Model $model
     'primary key' => [fn (): Model => new MissingVisibleKey, 'id'],
     'timestamps' => [fn (): Model => new MissingVisibleTimestamp, 'created_at'],
     'soft delete timestamp' => [fn (): Model => new MissingVisibleDeletedAt, 'deleted_at'],
-    'authorization field' => [fn (): Model => new MissingVisibleAuthorization, 'user_id'],
     'server fill' => [fn (): Model => new MissingVisibleFill, 'user_id'],
-    'relationship key' => [fn (): Model => new MissingVisibleRelationKey, 'list_id'],
 ]);
+
+test('required relationship keys are checked when the relationship is collected', function (): void {
+    $registry = new ModelRegistry([MissingVisibleRelationKey::class]);
+    $registry->relation($registry->get('MissingVisibleRelationKey'), 'list');
+})->throws(LogicException::class, 'required column list_id');
+
+test('private ownership facts stay out of browser columns while policy visibility still uses them', function (): void {
+    \ZeroForLaravel\Tests\Fixtures\OwnerPermissions::configure([ReadOnlyOwnerTask::class]);
+    $registry = new ModelRegistry([ReadOnlyOwnerTask::class]);
+    $model = $registry->get('ReadOnlyOwnerTask');
+    expect($model->columns)->not->toHaveKeys(['user_id', 'secret']);
+    $source = (new TypeScriptGenerator)->generate($registry);
+    expect($source)->not->toContain('user_id', 'owner_id', 'permission_index');
+    $actor = (new \Illuminate\Foundation\Auth\User)->setKeyType('string')->forceFill(['id' => 'alice']);
+    $query = (new \ZeroForLaravel\Query\Query($model, $registry))->visibleTo($actor);
+    $ast = (new \ZeroForLaravel\Query\QueryCompiler($registry))->compileDeclaration($query, new \ZeroForLaravel\ZeroContext(['user_id' => 'alice']));
+    expect(json_encode($ast, JSON_THROW_ON_ERROR))->toContain('a_owner_id', 'permission_index');
+});
+
+class ReadOnlyOwnerTask extends \ZeroForLaravel\Tests\Fixtures\Task
+{
+    protected $hidden = ['secret', 'user_id'];
+}
 
 class HiddenVisibleTask extends VisibleTask
 {
@@ -111,29 +140,10 @@ class MissingVisibleDeletedAt extends VisibleTask
     use SoftDeletes;
 }
 
-class MissingVisibleAuthorization extends VisibleTask
-{
-    public static function zero(): ZeroDefinition
-    {
-        return ZeroDefinition::make()->authorize('user_id', '=', ContextField::UserId);
-    }
-}
-
-class MissingVisibleFill extends VisibleTask
-{
-    public static function zero(): ZeroDefinition
-    {
-        return parent::zero()->fillFromContext('user_id', ContextField::UserId);
-    }
-}
+class MissingVisibleFill extends VisibleTask {}
 
 class MissingVisibleRelationKey extends VisibleTask
 {
-    public static function zero(): ZeroDefinition
-    {
-        return parent::zero()->relations('list');
-    }
-
     /** @return BelongsTo<MissingVisibleRelationKey, $this> */
     public function list(): BelongsTo
     {

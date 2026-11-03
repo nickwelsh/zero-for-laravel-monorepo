@@ -6,35 +6,53 @@ namespace App\Http\Controllers;
 
 use App\Http\Requests\SaveTodoRequest;
 use App\Models\Todo;
+use App\Models\TodoList;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
 use ZeroForLaravel\Attributes\ZeroMutation;
-use ZeroForLaravel\Mutation\Mutation;
+use ZeroForLaravel\Permissions\ProjectionManager;
 
 final class TodoController extends Controller
 {
     /** @return array{id: string} */
-    #[ZeroMutation]
+    #[ZeroMutation(optimism: 'disabled', serverResult: 'array{id: string}')]
     public function store(SaveTodoRequest $request): array
     {
-        Gate::authorize('create', Todo::class);
-        $todo = Todo::create($request->validated());
+        $todo = DB::transaction(function () use ($request): Todo {
+            (new ProjectionManager)->lock();
+            $list = TodoList::query()->lockForUpdate()->findOrFail($request->input('list_id'));
+            Gate::authorize('create', [Todo::class, $list]);
+
+            return Todo::create($request->validated());
+        });
 
         return ['id' => $todo->id];
     }
 
-    #[ZeroMutation(conceal: true)]
-    public function update(SaveTodoRequest $request, Todo $todo, Mutation $mutation): void
+    #[ZeroMutation(optimism: 'disabled', conceal: true)]
+    public function update(SaveTodoRequest $request, Todo $todo): void
     {
-        $todo = $mutation->reloadForUpdate($todo);
-        Gate::authorize('update', $todo);
-        $todo->update($request->validated());
+        DB::transaction(function () use ($request, $todo): void {
+            (new ProjectionManager)->lock();
+            $todo = Todo::query()->lockForUpdate()->findOrFail($todo->id);
+            Gate::authorize('update', $todo);
+            if ($request->exists('list_id')) {
+                $list = TodoList::query()->lockForUpdate()->findOrFail($request->input('list_id'));
+                Gate::authorize('createTodo', $list);
+            }
+
+            $todo->update($request->validated());
+        });
     }
 
-    #[ZeroMutation(conceal: true)]
-    public function destroy(Todo $todo, Mutation $mutation): void
+    #[ZeroMutation(optimism: 'disabled', conceal: true)]
+    public function destroy(Todo $todo): void
     {
-        $todo = $mutation->reloadForUpdate($todo);
-        Gate::authorize('delete', $todo);
-        $todo->delete();
+        DB::transaction(function () use ($todo): void {
+            (new ProjectionManager)->lock();
+            $todo = Todo::query()->lockForUpdate()->findOrFail($todo->id);
+            Gate::authorize('delete', $todo);
+            $todo->delete();
+        });
     }
 }

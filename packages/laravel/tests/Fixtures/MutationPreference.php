@@ -6,7 +6,6 @@ namespace ZeroForLaravel\Tests\Fixtures;
 
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Model;
-use ZeroForLaravel\Definition\ZeroDefinition;
 
 /** @property string $id
  * @property bool $subscribed
@@ -19,11 +18,6 @@ final class MutationPreference extends Model
     protected $table = 'mutation_preferences';
 
     protected $fillable = ['recipient', 'issue', 'subscribed', 'note'];
-
-    public static function zero(): ZeroDefinition
-    {
-        return ZeroDefinition::make()->publicReads();
-    }
 
     protected function casts(): array
     {

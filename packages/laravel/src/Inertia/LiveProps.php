@@ -40,6 +40,7 @@ final readonly class LiveProps implements ProvidesInertiaProperties
         }
 
         $route = $context->request->route();
+        $boundProps = [];
         if ($route instanceof Route) {
             foreach ($props as $key => $value) {
                 if (! $value instanceof \Illuminate\Database\Eloquent\Model || ! in_array($value, $route->parameters(), true)) {
@@ -49,6 +50,7 @@ final readonly class LiveProps implements ProvidesInertiaProperties
                 $registry = resolve(\ZeroForLaravel\Metadata\ModelRegistry::class);
                 foreach ($registry->all() as $model) {
                     if ($value::class === $model->class) {
+                        $boundProps[$key] = $value;
                         $props[$key] = (new Query($model, $registry))->where($model->key, $value->getKey())->one();
                         break;
                     }
@@ -88,6 +90,14 @@ final readonly class LiveProps implements ProvidesInertiaProperties
 
             $name = array_key_first($matches);
             $registration = $matches[$name];
+            $registration->assertCurrent();
+            foreach ($registration->guards as $guard) {
+                if (isset($boundProps[$prop]) && $route->parameter($guard['parameter']) === $boundProps[$prop]) {
+                    $declaration = $declaration->guardedBy($context->request->user() ?? throw new LogicException('A protected prop requires an authenticated actor.'), $guard['ability']);
+                    break;
+                }
+            }
+
             // These are the actual Laravel-bound values, in the same positional
             // order used by the controller dispatcher, never parsed from a URL.
             $args = \ZeroForLaravel\Query\QueryInput::arguments($registration->parameters, $context->request, $route, $registration->inputContracts);
@@ -105,6 +115,12 @@ final readonly class LiveProps implements ProvidesInertiaProperties
             }
 
             $bindings[$prop] = ['query' => $name, 'args' => (object) $args];
+            if ($registration->guards !== []) {
+                $guard = $registration->guards[0];
+                $plan = (new \ZeroForLaravel\Permissions\PolicyCompiler)->compile($guard['class'], $guard['ability']);
+                $bindings[$prop]['access'] = ['status' => $plan->deniedStatus];
+            }
+
             unset($props[$prop]);
         }
 

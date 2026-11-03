@@ -110,7 +110,7 @@ final readonly class ControllerQueryGenerator
 
             $lines[] = '    '.var_export($query->name(), true).' => new \\ZeroForLaravel\\Query\\RegisteredQuery('.implode(', ', [
                 var_export($query->action, true), var_export($query->component, true), var_export($query->prop, true),
-                var_export($query->parameters, true), $query->php(), '['.implode(', ', $contracts).']',
+                var_export($query->parameters, true), $query->php(), '['.implode(', ', $contracts).']', var_export($query->guards, true), var_export($query->name(), true),
             ]).'),';
         }
 

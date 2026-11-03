@@ -27,11 +27,7 @@ const table3 = table("tags").columns({
   "user_id": string(),
   "name": string(),
 } ).primaryKey("id");
-const table4 = table("task_tag").columns({
-  "task_id": string(),
-  "tag_id": string(),
-} ).primaryKey("task_id", "tag_id");
-const table5 = table("tasks").columns({
+const table4 = table("tasks").columns({
   "id": string(),
   "user_id": string(),
   "list_id": string().optional(),
@@ -42,15 +38,7 @@ const table5 = table("tasks").columns({
   "updated_at": number().optional(),
   "deleted_at": number().optional(),
 } ).primaryKey("id");
-const table5Relations = relationships(table5, ({one, many}) => ({
-  "list": one({sourceField: ["list_id"], destField: ["id"], destSchema: table1}),
-  "tags": many({sourceField: ["id"], destField: ["task_id"], destSchema: table4}, {sourceField: ["tag_id"], destField: ["id"], destSchema: table3}),
-  "comments": many({sourceField: ["id"], destField: ["task_id"], destSchema: table0}),
-}));
-const table1Relations = relationships(table1, ({many}) => ({
-  "tasks": many({sourceField: ["id"], destField: ["list_id"], destSchema: table5}),
-}));
-export const schema = createSchema({tables: [table0, table1, table2, table3, table4, table5], relationships: [table5Relations, table1Relations], enableLegacyQueries: false, enableLegacyMutators: false});
+export const schema = createSchema({tables: [table0, table1, table2, table3, table4], relationships: [], enableLegacyQueries: false, enableLegacyMutators: false});
 export const definitions = {
     "Comment": {
         "name": "Comment",
@@ -90,15 +78,6 @@ export const definitions = {
                 "default": null
             }
         },
-        "authorization": [
-            {
-                "field": "user_id",
-                "op": "=",
-                "value": {
-                    "context": "user_id"
-                }
-            }
-        ],
         "serverFill": {},
         "writable": [],
         "idGenerator": null,
@@ -172,7 +151,6 @@ export const definitions = {
                 "default": null
             }
         },
-        "authorization": [],
         "serverFill": {},
         "writable": [
             "recipient",
@@ -218,15 +196,6 @@ export const definitions = {
                 "default": null
             }
         },
-        "authorization": [
-            {
-                "field": "user_id",
-                "op": "=",
-                "value": {
-                    "context": "user_id"
-                }
-            }
-        ],
         "serverFill": {},
         "writable": [],
         "idGenerator": null,
@@ -316,15 +285,6 @@ export const definitions = {
                 "default": null
             }
         },
-        "authorization": [
-            {
-                "field": "user_id",
-                "op": "=",
-                "value": {
-                    "context": "user_id"
-                }
-            }
-        ],
         "serverFill": {
             "user_id": "user_id"
         },
@@ -340,62 +300,7 @@ export const definitions = {
             "updated": "updated_at",
             "deleted": "deleted_at"
         },
-        "relations": {
-            "list": {
-                "model": "TaskList",
-                "cardinality": "one",
-                "path": [
-                    {
-                        "source": [
-                            "list_id"
-                        ],
-                        "dest": [
-                            "id"
-                        ],
-                        "table": "lists"
-                    }
-                ]
-            },
-            "tags": {
-                "model": "Tag",
-                "cardinality": "many",
-                "path": [
-                    {
-                        "source": [
-                            "id"
-                        ],
-                        "dest": [
-                            "task_id"
-                        ],
-                        "table": "task_tag"
-                    },
-                    {
-                        "source": [
-                            "tag_id"
-                        ],
-                        "dest": [
-                            "id"
-                        ],
-                        "table": "tags"
-                    }
-                ]
-            },
-            "comments": {
-                "model": "Comment",
-                "cardinality": "many",
-                "path": [
-                    {
-                        "source": [
-                            "id"
-                        ],
-                        "dest": [
-                            "task_id"
-                        ],
-                        "table": "comments"
-                    }
-                ]
-            }
-        }
+        "relations": {}
     },
     "TaskList": {
         "name": "TaskList",
@@ -427,15 +332,6 @@ export const definitions = {
                 "default": null
             }
         },
-        "authorization": [
-            {
-                "field": "user_id",
-                "op": "=",
-                "value": {
-                    "context": "user_id"
-                }
-            }
-        ],
         "serverFill": {},
         "writable": [],
         "idGenerator": null,
@@ -444,23 +340,7 @@ export const definitions = {
             "updated": null,
             "deleted": null
         },
-        "relations": {
-            "tasks": {
-                "model": "Task",
-                "cardinality": "many",
-                "path": [
-                    {
-                        "source": [
-                            "id"
-                        ],
-                        "dest": [
-                            "list_id"
-                        ],
-                        "table": "tasks"
-                    }
-                ]
-            }
-        }
+        "relations": {}
     }
 } as const satisfies ContractMap;
 export type CommentRow = ModelRow<typeof definitions, "Comment">;
@@ -475,7 +355,7 @@ import type {Schema} from '@rocicorp/zero';
 import {createControllerMutations, type ModelContract} from '@nickwelsh/zero-for-laravel';
 import {z} from 'zod';
 export const controllerMutationContracts = {
-    "m_9e30fefaacfdea569dc928aea82a6382": {
+    "m_0746de967f38eacca7e011445dcadae0": {
         "action": "ZeroForLaravel\\Tests\\Fixtures\\PreferenceMutationController@assign",
         "optimism": "generated",
         "conceal": false,
@@ -996,7 +876,7 @@ export const controllerMutationContracts = {
             "key:subscribe": "uuid",
             "key:unsubscribe": "uuid"
         },
-        "version": "9e30fefaacfdea569dc928aea82a6382fd2f807a4b1291572a4579552f230265",
+        "version": "0746de967f38eacca7e011445dcadae0452905b3da410a11711b77e9761a7803",
         "returnType": "array"
     }
 } as const;
@@ -1009,10 +889,10 @@ export const clientResultSchema0 = z.union([z.strictObject({"id": z.string()}), 
 const codec0 = {input: inputSchema0, encode: (input: Input0) => ({...(input["list_id"] === undefined ? {} : {"list_id": (input["list_id"] === null ? null : input["list_id"])})}), serverResult: serverResultSchema0, clientResult: clientResultSchema0};
 export function createControllerMutationBindings<S extends Schema>(schema: S, models: Readonly<Record<string, ModelContract>>) {
   const codecs = {
-    "m_9e30fefaacfdea569dc928aea82a6382": {...codec0},
+    "m_0746de967f38eacca7e011445dcadae0": {...codec0},
   };
   const runtime = createControllerMutations(schema, models, controllerMutationContracts, codecs);
   return {...runtime, actions: {
-    "ZeroForLaravel\\Tests\\Fixtures\\PreferenceMutationController@assign": runtime.bind("m_9e30fefaacfdea569dc928aea82a6382", codecs["m_9e30fefaacfdea569dc928aea82a6382"]),
+    "ZeroForLaravel\\Tests\\Fixtures\\PreferenceMutationController@assign": runtime.bind("m_0746de967f38eacca7e011445dcadae0", codecs["m_0746de967f38eacca7e011445dcadae0"]),
   }};
 }

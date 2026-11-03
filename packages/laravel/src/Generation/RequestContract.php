@@ -9,6 +9,12 @@ use Laravel\Surveyor\Analyzer\Analyzer;
 use Laravel\Surveyor\Types\ArrayType;
 use Laravel\Surveyor\Types\StringType;
 use LogicException;
+use PhpParser\Node;
+use PhpParser\NodeFinder;
+use PhpParser\NodeTraverser;
+use PhpParser\NodeVisitor\NameResolver;
+use PhpParser\Parser;
+use ReflectionMethod;
 use ZeroForLaravel\Generation\Mutations\ValueContract;
 
 /** Static request shapes; Laravel still executes all authoritative rules and hooks. */
@@ -21,11 +27,14 @@ final class RequestContract
             throw new LogicException('Expected a FormRequest contract.');
         }
 
-        $analyzer = resolve(Analyzer::class);
-        $analyzer->analyzeClass($class);
+        $type = self::literalRules($class);
+        if (! $type instanceof ArrayType) {
+            $analyzer = resolve(Analyzer::class);
+            $analyzer->analyzeClass($class);
+            $result = $analyzer->result();
+            $type = $result instanceof \Laravel\Surveyor\Analyzed\ClassLikeResult ? $result->getMethod('rules')?->returnType() : null;
+        }
 
-        $result = $analyzer->result();
-        $type = $result instanceof \Laravel\Surveyor\Analyzed\ClassLikeResult ? $result->getMethod('rules')?->returnType() : null;
         if (! $type instanceof ArrayType) {
             throw new LogicException($class.': rules() must have a statically known field shape.');
         }
@@ -114,5 +123,47 @@ final class RequestContract
         }
 
         throw new LogicException('Request field requires an explicit supported scalar validation type.');
+    }
+
+    /** Read ordinary literal rules without analyzing unrelated request hooks and their dependencies. */
+    private static function literalRules(string $class): ?ArrayType
+    {
+        $reflection = new ReflectionMethod($class, 'rules');
+        $source = file_get_contents($reflection->getFileName() ?: '') ?: '';
+        $nodes = (new NodeTraverser(new NameResolver))->traverse(resolve(Parser::class)->parse($source) ?? []);
+        $method = (new NodeFinder)->findFirst($nodes, fn (Node $node): bool => $node instanceof Node\Stmt\ClassMethod && $node->getStartLine() === $reflection->getStartLine());
+        if (! $method instanceof Node\Stmt\ClassMethod || count($method->stmts ?? []) !== 1
+            || ! $method->stmts[0] instanceof Node\Stmt\Return_ || ! $method->stmts[0]->expr instanceof Node\Expr\Array_) {
+            return null;
+        }
+
+        $fields = [];
+        foreach ($method->stmts[0]->expr->items as $field) {
+            if ($field === null || $field->unpack || ! $field->key instanceof Node\Scalar\String_) {
+                return null;
+            }
+
+            $rules = $field->value instanceof Node\Expr\Array_ ? $field->value->items : [new Node\ArrayItem($field->value)];
+            $values = [];
+            foreach ($rules as $rule) {
+                if ($rule === null || $rule->unpack) {
+                    return null;
+                }
+
+                if ($rule->value instanceof Node\Scalar\String_) {
+                    $values[] = new StringType($rule->value->value);
+                } elseif (! $rule->value instanceof Node\Expr\StaticCall || ! $rule->value->class instanceof Node\Name
+                    || $rule->value->class->toString() !== \Illuminate\Validation\Rule::class
+                    || ! $rule->value->name instanceof Node\Identifier || ! in_array($rule->value->name->name, ['enum', 'in'], true)) {
+                    return null;
+                }
+
+                // RequestChoices reads finite rules independently, without executing them.
+            }
+
+            $fields[$field->key->value] = new ArrayType($values);
+        }
+
+        return new ArrayType($fields);
     }
 }

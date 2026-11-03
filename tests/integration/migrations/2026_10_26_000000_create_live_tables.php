@@ -29,5 +29,6 @@ return new class extends Migration {
         Schema::create('task_tag', function (Blueprint $table) {
             $table->uuid('task_id'); $table->uuid('tag_id'); $table->primary(['task_id', 'tag_id']);
         });
+        \ZeroForLaravel\Tests\Fixtures\OwnerPermissions::install();
     }
 };

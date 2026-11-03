@@ -11,7 +11,6 @@ use Illuminate\Support\Facades\Schema;
 use LogicException;
 use ZeroForLaravel\Attributes\ZeroExclude;
 use ZeroForLaravel\ContextField;
-use ZeroForLaravel\Definition\ZeroDefinition;
 use ZeroForLaravel\Metadata\ModelRegistry;
 use ZeroForLaravel\Mutation\Mutation;
 use ZeroForLaravel\Query\Query;
@@ -19,10 +18,15 @@ use ZeroForLaravel\Tests\Fixtures\Comment;
 use ZeroForLaravel\Tests\Fixtures\Tag;
 use ZeroForLaravel\Tests\Fixtures\Task;
 use ZeroForLaravel\Tests\Fixtures\TaskList;
-use ZeroForLaravel\Tests\TestCase;
+use ZeroForLaravel\Tests\OwnerTestCase as TestCase;
 use ZeroForLaravel\ZeroContext;
 
 uses(TestCase::class);
+
+beforeEach(function (): void {
+    config(['zero.public_models' => [Calendar::class, WrongKeyTask::class, ExcludedTask::class, InvalidRelationTask::class, HiddenRelationTask::class, CastTask::class],
+        'zero.mutation_context.'.CastTask::class => ['user_id' => ContextField::UserId]]);
+});
 
 class ExternalTask extends Model
 {
@@ -77,16 +81,19 @@ test('resolves one column plan and separate public mutation inputs', function ()
     $this->assertSame(false, $task->columns['done']['default']);
     $this->assertSame(['list_id', 'title', 'done', 'completed_at'], $task->writable);
     $this->assertSame(['user_id' => 'user_id'], $task->serverFill);
-    $this->assertSame('TaskList', $task->relations['list']['model']);
-    $this->assertSame('one', $task->relations['list']['cardinality']);
+    $this->assertSame([], $task->relations);
+    $relation = $registry->relation($task, 'list');
+    $this->assertSame('TaskList', $relation['model']);
+    $this->assertSame('one', $relation['cardinality']);
 });
 
 test('reads fail closed without an explicit visibility declaration', function (): void {
     new ModelRegistry([UnprotectedTask::class]);
-})->throws(LogicException::class, 'visibility');
+})->throws(LogicException::class, 'explicit zero.public_models');
 
 test('hidden relation keys are not silently republished', function (): void {
-    new ModelRegistry([HiddenRelationTask::class, TaskList::class, Tag::class, Comment::class]);
+    $registry = new ModelRegistry([HiddenRelationTask::class, TaskList::class, Tag::class, Comment::class]);
+    $registry->relation($registry->get('HiddenRelationTask'), 'list');
 })->throws(LogicException::class, 'list_id');
 
 test('exclusions are additive to eloquent hidden columns', function (): void {
@@ -100,11 +107,6 @@ class Calendar extends Model
 {
     public $timestamps = false;
 
-    public static function zero(): ZeroDefinition
-    {
-        return ZeroDefinition::make()->publicReads();
-    }
-
     protected function casts(): array
     {
         return ['day' => 'immutable_date'];
@@ -114,11 +116,6 @@ class Calendar extends Model
 class WrongKeyTask extends Task
 {
     protected $primaryKey = 'title';
-
-    public static function zero(): ZeroDefinition
-    {
-        return ZeroDefinition::make()->publicReads();
-    }
 }
 
 class UnprotectedTask extends Model
@@ -137,43 +134,21 @@ class ExcludedTask extends Model
     protected $table = 'tasks';
 
     protected $hidden = ['secret'];
-
-    public static function zero(): ZeroDefinition
-    {
-        return ZeroDefinition::make()->publicReads();
-    }
-}
-
-class InvalidDefinitionTask extends Model
-{
-    protected $table = 'tasks';
-
-    public static function zero(): string
-    {
-        return 'invalid';
-    }
 }
 
 class InvalidRelationTask extends Task
 {
-    public static function zero(): ZeroDefinition
-    {
-        return ZeroDefinition::make()->publicReads()->relations('invalidRelation');
-    }
-
     public function invalidRelation(): string
     {
         return 'invalid';
     }
 }
 
-test('model definitions must return ZeroDefinition', function (): void {
-    new ModelRegistry([InvalidDefinitionTask::class]);
-})->throws(LogicException::class, 'zero() must return ZeroDefinition');
-
-test('included methods must return an Eloquent relation', function (): void {
-    new ModelRegistry([InvalidRelationTask::class]);
-})->throws(LogicException::class, 'method must return an Eloquent relation');
+test('relationships are validated lazily and require a typed public Eloquent method', function (): void {
+    $registry = new ModelRegistry([InvalidRelationTask::class]);
+    expect($registry->get('InvalidRelationTask')->relations)->toBe([]);
+    $registry->relation($registry->get('InvalidRelationTask'), 'invalidRelation');
+})->throws(LogicException::class, 'relationship');
 
 enum CastStatus: string
 {
@@ -184,11 +159,6 @@ enum CastStatus: string
 class CastTask extends Task
 {
     protected $fillable = ['title', 'options', 'status', 'completed_at', 'scheduled_at'];
-
-    public static function zero(): ZeroDefinition
-    {
-        return ZeroDefinition::make()->publicReads()->fillFromContext('user_id', ContextField::UserId);
-    }
 
     /** @return array<string, string> */
     protected function casts(): array

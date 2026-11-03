@@ -40,6 +40,16 @@ final class PolicyCompiler
         }
 
         $model = new $class;
+        if (! method_exists($model, 'scopeVisibleTo')) {
+            throw new LogicException("{$class} requires HasPolicyVisibility for portable collections.");
+        }
+
+        $scope = new ReflectionMethod($model, 'scopeVisibleTo');
+        $supportedScope = new ReflectionMethod(\ZeroForLaravel\Concerns\HasPolicyVisibility::class, 'scopeVisibleTo');
+        if ($scope->getFileName() !== $supportedScope->getFileName() || $scope->getStartLine() !== $supportedScope->getStartLine()) {
+            throw new LogicException('Custom visibleTo scopes are server-only; portable queries cannot replace application SQL.');
+        }
+
         foreach ($model->getGlobalScopes() as $scope) {
             if (! $scope instanceof SoftDeletingScope) {
                 throw new LogicException("{$class} has an unsupported global scope; portable queries must preserve every constraint.");

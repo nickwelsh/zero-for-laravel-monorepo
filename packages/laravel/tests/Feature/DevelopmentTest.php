@@ -11,7 +11,7 @@ use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Process;
 use LogicException;
 use ZeroForLaravel\Development\LocalEnvironment;
-use ZeroForLaravel\Tests\PostgresTestCase;
+use ZeroForLaravel\Tests\OwnerPostgresTestCase as PostgresTestCase;
 use ZeroForLaravel\ZeroServiceProvider;
 
 abstract class DevelopmentTestCase extends PostgresTestCase

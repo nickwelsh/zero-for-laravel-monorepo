@@ -6,11 +6,12 @@ namespace ZeroForLaravel\Tests\Fixtures;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
-use ZeroForLaravel\ContextField;
-use ZeroForLaravel\Definition\ZeroDefinition;
+use ZeroForLaravel\Concerns\HasPolicyVisibility;
 
 class TaskList extends Model
 {
+    use HasPolicyVisibility;
+
     public $timestamps = false;
 
     public $incrementing = false;
@@ -18,11 +19,6 @@ class TaskList extends Model
     protected $table = 'lists';
 
     protected $keyType = 'string';
-
-    public static function zero(): ZeroDefinition
-    {
-        return ZeroDefinition::make()->authorize('user_id', '=', ContextField::UserId)->relations('tasks');
-    }
 
     /**
      * @return HasMany<Task, $this>

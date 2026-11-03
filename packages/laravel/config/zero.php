@@ -5,14 +5,12 @@ declare(strict_types=1);
 use ZeroForLaravel\Http\ContextResolver;
 
 return [
-    // Empty discovers models with a zero() definition under app/Models.
+    // Explicit publication allowlist. An empty list publishes no application models.
     'models' => [],
     // Separate publication opt-in from visibility. Missing policy bindings never mean public reads.
     'public_models' => [],
     // Trusted creation fills, keyed by model class; never accepted as mutation input.
     'mutation_context' => [],
-    // When models is empty, only explicitly opted-in models in these PSR-4 roots are discovered.
-    'discovery' => [], // Empty retains app/Models and the application's namespace.
     'output' => resource_path('js/zero/generated.ts'),
     // TypeScript module root for the opt-in WayfinderServiceProvider (not a filesystem path).
     'wayfinder_import' => '@/zero',

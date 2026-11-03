@@ -21,7 +21,7 @@ use ZeroForLaravel\Mutation\ControllerMutationRegistry;
 use ZeroForLaravel\Mutation\MutationProcessor;
 use ZeroForLaravel\Tests\Fixtures\ControllerMutationController;
 use ZeroForLaravel\Tests\Fixtures\Task;
-use ZeroForLaravel\Tests\PostgresTestCase;
+use ZeroForLaravel\Tests\OwnerPostgresTestCase as PostgresTestCase;
 use ZeroForLaravel\ZeroContext;
 
 uses(PostgresTestCase::class);

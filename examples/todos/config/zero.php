@@ -2,14 +2,16 @@
 
 declare(strict_types=1);
 
-use App\Models\ListMembership;
 use App\Models\Todo;
 use App\Models\TodoList;
+use ZeroForLaravel\ContextField;
 use ZeroForLaravel\Http\ContextResolver;
 
 return [
-    // Empty discovers models with a zero() definition under app/Models.
-    'models' => [TodoList::class, Todo::class, ListMembership::class],
+    // Only these domain models may enter Zero's browser schema.
+    'models' => [TodoList::class, Todo::class],
+    'public_models' => [],
+    'mutation_context' => [TodoList::class => ['user_id' => ContextField::UserId]],
     'output' => resource_path('js/zero/generated.ts'),
     'react' => true,
     // Synchronize after successful, non-pretend PostgreSQL migration batches.

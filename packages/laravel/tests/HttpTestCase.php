@@ -6,7 +6,7 @@ namespace ZeroForLaravel\Tests;
 
 use ZeroForLaravel\ZeroServiceProvider;
 
-abstract class HttpTestCase extends TestCase
+abstract class HttpTestCase extends OwnerTestCase
 {
     protected function getPackageProviders($app): array
     {

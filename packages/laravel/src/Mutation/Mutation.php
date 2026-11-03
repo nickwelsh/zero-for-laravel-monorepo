@@ -35,18 +35,13 @@ final readonly class Mutation
         return $guard();
     }
 
-    /** @param array<string, string> $legacy
-     * @return array<string, string>
+    /** @return array<string, string>
      */
-    public static function contextFills(string $class, array $legacy = []): array
+    public static function contextFills(string $class): array
     {
-        $configured = config()->array('zero.mutation_context', [])[$class] ?? null;
-        if ($configured === null) {
-            return $legacy;
-        }
-
-        if (! is_array($configured) || $legacy !== []) {
-            throw new LogicException('Configure mutation context fills once, outside legacy model definitions.');
+        $configured = config()->array('zero.mutation_context', [])[$class] ?? [];
+        if (! is_array($configured)) {
+            throw new LogicException('Mutation context fills must be configured as a column map.');
         }
 
         $fills = [];

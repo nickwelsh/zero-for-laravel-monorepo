@@ -35,6 +35,9 @@ final class ControllerQueryCompiler
 
     private int $callbackId = 0;
 
+    /** @var list<array{parameter: string, class: class-string<Model>, ability: string, fingerprint: string}> */
+    private array $guards = [];
+
     public function __construct(private readonly Parser $parser, private readonly ModelRegistry $models) {}
 
     /** @return list<ControllerQuery> */
@@ -45,6 +48,7 @@ final class ControllerQueryCompiler
         $this->action = ltrim($controller, '\\').'@'.$method;
         $this->prop = '*';
         $this->callbackId = 0;
+        $this->guards = [];
         $source = file_get_contents($this->file);
         if ($source === false) {
             throw new LogicException("Cannot read controller {$this->file}.");
@@ -81,6 +85,8 @@ final class ControllerQueryCompiler
             if ($model !== null) {
                 $parameters[$name] = 'model:'.$type;
                 $variables[$name] = new QueryExpression('bound', $name, model: $model, type: 'query', singular: true);
+            } elseif ($type === \Illuminate\Http\Request::class) {
+                $variables[$name] = new QueryExpression('request', $name, type: 'http-request');
             } elseif (is_subclass_of($type, BackedEnum::class)) {
                 $parameters[$name] = 'enum:'.$type;
                 $variables[$name] = new QueryExpression('enum', $name, array_map(fn (BackedEnum $case): QueryExpression => new QueryExpression('literal', $case->value), $type::cases()), type: get_debug_type($type::cases()[0]->value));
@@ -119,7 +125,7 @@ final class ControllerQueryCompiler
             'models' => array_map(function (\ZeroForLaravel\Metadata\ModelMetadata $model): array {
                 $schema = $model->toArray();
                 // Lazy query dependencies belong to the query, not discovery order.
-                $schema['relations'] = array_intersect_key($model->relations, array_flip([...$model->authorizationRelations, ...$model->relationDependencies]));
+                $schema['relations'] = [];
 
                 return $schema;
             }, $models),
@@ -138,6 +144,19 @@ final class ControllerQueryCompiler
 
             $this->prop = $item->key->value;
             $expression = $this->expression($item->value, $variables);
+            if ($expression->kind === 'bound' && $expression->model?->policyVisibility) {
+                $guard = array_values(array_filter($this->guards, fn (array $guard): bool => $guard['parameter'] === $expression->value))[0] ?? null;
+                if ($guard === null) {
+                    $this->unsupported($item, 'Protected bound props require a captured instance Gate::authorize.');
+                }
+
+                $expression = new QueryExpression('guarded', $guard['ability'], [$expression], $expression->model, 'query', true);
+            }
+
+            if ($expression->type === 'query') {
+                $this->coverage($expression);
+            }
+
             $props[$this->prop] = [$expression, $item->getStartLine()];
             if (! $expression->model instanceof \ZeroForLaravel\Metadata\ModelMetadata) {
                 $ordinary[$this->prop] = match ($expression->type) {
@@ -151,17 +170,60 @@ final class ControllerQueryCompiler
         foreach ($props as $prop => [$expression, $line]) {
             if ($expression->model instanceof \ZeroForLaravel\Metadata\ModelMetadata) {
                 $fingerprint = hash('sha256', $schemaFingerprint.json_encode($this->dependencies($expression), JSON_THROW_ON_ERROR));
-                $queries[] = new ControllerQuery($this->action, $args[0]->value->value, $prop, $parameters, $expression, $this->file, $line, $fingerprint, $ordinary);
+                $queries[] = new ControllerQuery($this->action, $args[0]->value->value, $prop, $parameters, $expression, $this->file, $line, $fingerprint, $ordinary, $this->guards);
             }
         }
 
         return $queries;
     }
 
+    private function coverage(QueryExpression $expression): void
+    {
+        if ($expression->kind === 'conditional') {
+            $this->coverage($expression->children[1]);
+            $this->coverage($expression->children[2]);
+
+            return;
+        }
+
+        $covered = false;
+        for ($node = $expression; in_array($node->kind, ['method', 'paginate', 'infinite', 'guarded'], true); $node = $node->children[0]) {
+            $covered = $covered || $node->kind === 'guarded' || ($node->kind === 'method' && $node->value === 'visibleTo');
+            foreach (array_slice($node->children, 1) as $child) {
+                $this->coverage($child->kind === 'callback' ? $child->children[0] : $child);
+            }
+
+            if ($node->kind === 'method' && in_array($node->value, ['related', 'whereExists', 'exists'], true)
+                && (! isset($node->children[2]) || $node->children[2]->kind !== 'callback')) {
+                $name = $node->children[1]->value;
+                if ($node->model !== null && is_string($name)) {
+                    $target = $this->models->get($this->models->relation($node->model, $name)['model']);
+                    if ($target->policyVisibility) {
+                        throw new LogicException('Protected related paths require an explicit visibleTo refinement.');
+                    }
+                }
+            }
+        }
+
+        if ($node->kind === 'conditional') {
+            $this->coverage($node->children[1]);
+            $this->coverage($node->children[2]);
+            $covered = true;
+        }
+
+        if ($expression->type === 'query' && $expression->model?->policyVisibility && ! $covered) {
+            throw new LogicException($expression->model->name.': protected query paths require visibleTo or a captured instance Gate.');
+        }
+    }
+
     /** @return list<array<string, mixed>> */
     private function dependencies(QueryExpression $expression): array
     {
         $dependencies = [];
+        if ($expression->model?->policyVisibility && in_array($expression->kind, ['query', 'local', 'bound'], true)) {
+            $dependencies[] = ['policy' => (new \ZeroForLaravel\Permissions\PolicyCompiler)->compile($expression->model->class)->fingerprint];
+        }
+
         if ($expression->kind === 'method' && in_array($expression->value, ['related', 'whereExists', 'exists'], true)) {
             $model = $expression->model ?? throw new LogicException('Relationship has no source model.');
             $name = $expression->children[1]->value;
@@ -192,19 +254,39 @@ final class ControllerQueryCompiler
      * @param  array<string, QueryExpression>  $variables
      * @return array<string, QueryExpression>
      */
-    private function statements(array $statements, array $variables): array
+    private function statements(array $statements, array $variables, bool $conditional = false): array
     {
         foreach ($statements as $statement) {
             if ($statement instanceof Stmt\Expression && $statement->expr instanceof Expr\Assign && $statement->expr->var instanceof Expr\Variable && is_string($statement->expr->var->name)) {
                 $variables[$statement->expr->var->name] = $this->expression($statement->expr->expr, $variables);
+            } elseif ($statement instanceof Stmt\Expression && $statement->expr instanceof Expr\StaticCall
+                && $statement->expr->class instanceof Name && $statement->expr->class->toString() === \Illuminate\Support\Facades\Gate::class
+                && $statement->expr->name instanceof Identifier && $statement->expr->name->name === 'authorize') {
+                $args = $statement->expr->getArgs();
+                if ($conditional || count($args) !== 2 || ! $args[0]->value instanceof Scalar\String_
+                    || ! $args[1]->value instanceof Expr\Variable || ! is_string($args[1]->value->name)
+                    || ($variables[$args[1]->value->name]->kind ?? null) !== 'bound') {
+                    $this->unsupported($statement, 'Capture only unconditional instance Gate::authorize calls on bound resources.');
+                }
+
+                foreach ($args as $arg) {
+                    if ($arg->name !== null || $arg->unpack) {
+                        $this->unsupported($arg, 'Gate arguments must be positional.');
+                    }
+                }
+
+                $resource = $variables[$args[1]->value->name];
+                $class = $resource->model->class ?? throw new LogicException('Gate resource has no model.');
+                $plan = (new \ZeroForLaravel\Permissions\PolicyCompiler)->compile($class, $args[0]->value->value);
+                $this->guards[] = ['parameter' => (string) $resource->value, 'class' => $class, 'ability' => $args[0]->value->value, 'fingerprint' => $plan->fingerprint];
             } elseif ($statement instanceof Stmt\If_ && $statement->elseifs === []) {
                 $condition = $this->expression($statement->cond, $variables);
                 if (! $this->boolean($condition)) {
                     $this->unsupported($statement->cond, 'A portable condition must be explicitly boolean, not PHP truthiness.');
                 }
 
-                $yes = $this->statements($statement->stmts, $this->narrow($condition, $variables));
-                $no = $this->statements($statement->else->stmts ?? [], $variables);
+                $yes = $this->statements($statement->stmts, $this->narrow($condition, $variables), true);
+                $no = $this->statements($statement->else->stmts ?? [], $variables, true);
                 foreach (array_unique([...array_keys($yes), ...array_keys($no)]) as $name) {
                     if (str_starts_with($name, "\0")) {
                         continue;
@@ -351,11 +433,15 @@ final class ControllerQueryCompiler
         if ($node instanceof Expr\MethodCall && $node->name instanceof Identifier) {
             $receiver = $this->expression($node->var, $variables);
             $method = $node->name->name;
+            if ($receiver->kind === 'request' && $method === 'user' && $node->args === []) {
+                return new QueryExpression('actor', type: 'actor');
+            }
+
             if ($receiver->kind === 'request' && $method === 'validated' && $node->args === []) {
                 return new QueryExpression('validated', $receiver->value, type: $receiver->type);
             }
 
-            $operations = $receiver->type === 'builder' ? ['cmp', 'cmpLit', 'and', 'or', 'not', 'exists'] : ['where', 'whereExists', 'related', 'orderBy', 'limit', 'start', 'one', 'all', 'infinite', 'paginate'];
+            $operations = $receiver->type === 'builder' ? ['cmp', 'cmpLit', 'and', 'or', 'not', 'exists'] : ['where', 'whereExists', 'related', 'orderBy', 'limit', 'start', 'one', 'all', 'infinite', 'paginate', 'visibleTo'];
             if (in_array($receiver->kind, ['infinite', 'paginate'], true)) {
                 $this->unsupported($node, 'Pagination must be the final query operation.');
             }
@@ -545,7 +631,7 @@ final class ControllerQueryCompiler
         $count = count($arguments);
         $arity = match ($method) {
             'one', 'all' => $count === 0,
-            'limit', 'not', 'infinite', 'paginate' => $count === 1,
+            'limit', 'not', 'infinite', 'paginate', 'visibleTo' => $count === 1,
             'orderBy' => $count === 2,
             'related', 'start' => $count >= 1 && $count <= 2,
             'whereExists', 'exists' => $count >= 1 && $count <= 3,
@@ -557,6 +643,10 @@ final class ControllerQueryCompiler
         };
         if (! $arity) {
             $this->unsupported($node, "Invalid argument count for {$method}.");
+        }
+
+        if ($method === 'visibleTo' && $arguments[0]->kind !== 'actor') {
+            $this->unsupported($node, 'visibleTo requires the trusted request user, never an editable query argument.');
         }
 
         if (in_array($method, ['and', 'or', 'not'], true)) {

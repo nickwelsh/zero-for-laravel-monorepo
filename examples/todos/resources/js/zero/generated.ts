@@ -2,21 +2,14 @@
 import {table, string, number, boolean, json, relationships, createSchema} from '@rocicorp/zero';
 import type {ContractMap, ModelRow} from '@nickwelsh/zero-for-laravel';
 
-const table0 = table("list_memberships").columns({
-  "id": string(),
-  "list_id": string(),
-  "user_id": number(),
-  "created_at": number().optional(),
-  "updated_at": number().optional(),
-} ).primaryKey("id");
-const table1 = table("todo_lists").columns({
+const table0 = table("todo_lists").columns({
   "id": string(),
   "user_id": number(),
   "name": string(),
   "created_at": number().optional(),
   "updated_at": number().optional(),
 } ).primaryKey("id");
-const table2 = table("todos").columns({
+const table1 = table("todos").columns({
   "id": string(),
   "list_id": string(),
   "title": string(),
@@ -24,83 +17,11 @@ const table2 = table("todos").columns({
   "created_at": number().optional(),
   "updated_at": number().optional(),
 } ).primaryKey("id");
-const table2Relations = relationships(table2, ({one}) => ({
-  "list": one({sourceField: ["list_id"], destField: ["id"], destSchema: table1}),
+const table0Relations = relationships(table0, ({many}) => ({
+  "todos": many({sourceField: ["id"], destField: ["list_id"], destSchema: table1}),
 }));
-const table1Relations = relationships(table1, ({many}) => ({
-  "memberships": many({sourceField: ["id"], destField: ["list_id"], destSchema: table0}),
-  "todos": many({sourceField: ["id"], destField: ["list_id"], destSchema: table2}),
-}));
-export const schema = createSchema({tables: [table0, table1, table2], relationships: [table2Relations, table1Relations], enableLegacyQueries: false, enableLegacyMutators: false});
+export const schema = createSchema({tables: [table0, table1], relationships: [table0Relations], enableLegacyQueries: false, enableLegacyMutators: false});
 export const definitions = {
-    "ListMembership": {
-        "name": "ListMembership",
-        "table": "list_memberships",
-        "key": "id",
-        "columns": {
-            "id": {
-                "type": "string",
-                "nullable": false,
-                "date": false,
-                "enum": null,
-                "hasDefault": false,
-                "default": null
-            },
-            "list_id": {
-                "type": "string",
-                "nullable": false,
-                "date": false,
-                "enum": null,
-                "hasDefault": false,
-                "default": null
-            },
-            "user_id": {
-                "type": "number",
-                "nullable": false,
-                "date": false,
-                "enum": null,
-                "hasDefault": false,
-                "default": null
-            },
-            "created_at": {
-                "type": "number",
-                "nullable": true,
-                "date": true,
-                "enum": null,
-                "hasDefault": false,
-                "default": null
-            },
-            "updated_at": {
-                "type": "number",
-                "nullable": true,
-                "date": true,
-                "enum": null,
-                "hasDefault": false,
-                "default": null
-            }
-        },
-        "authorization": [
-            {
-                "field": "user_id",
-                "op": "=",
-                "value": {
-                    "context": "user_id"
-                }
-            }
-        ],
-        "serverFill": {},
-        "writable": [
-            "list_id",
-            "user_id"
-        ],
-        "idGenerator": "uuid",
-        "timestamps": {
-            "created": "created_at",
-            "updated": "updated_at",
-            "deleted": null
-        },
-        "relations": {}
-    },
     "Todo": {
         "name": "Todo",
         "table": "todos",
@@ -156,10 +77,6 @@ export const definitions = {
                 "default": null
             }
         },
-        "authorization": [],
-        "authorizationRelations": [
-            "list"
-        ],
         "serverFill": {},
         "writable": [
             "list_id",
@@ -172,23 +89,7 @@ export const definitions = {
             "updated": "updated_at",
             "deleted": null
         },
-        "relations": {
-            "list": {
-                "model": "TodoList",
-                "cardinality": "one",
-                "path": [
-                    {
-                        "source": [
-                            "list_id"
-                        ],
-                        "dest": [
-                            "id"
-                        ],
-                        "table": "todo_lists"
-                    }
-                ]
-            }
-        }
+        "relations": {}
     },
     "TodoList": {
         "name": "TodoList",
@@ -236,10 +137,6 @@ export const definitions = {
                 "default": null
             }
         },
-        "authorization": [],
-        "authorizationRelations": [
-            "memberships"
-        ],
         "serverFill": {
             "user_id": "user_id"
         },
@@ -253,21 +150,6 @@ export const definitions = {
             "deleted": null
         },
         "relations": {
-            "memberships": {
-                "model": "ListMembership",
-                "cardinality": "many",
-                "path": [
-                    {
-                        "source": [
-                            "id"
-                        ],
-                        "dest": [
-                            "list_id"
-                        ],
-                        "table": "list_memberships"
-                    }
-                ]
-            },
             "todos": {
                 "model": "Todo",
                 "cardinality": "many",
@@ -286,6 +168,5 @@ export const definitions = {
         }
     }
 } as const satisfies ContractMap;
-export type ListMembershipRow = ModelRow<typeof definitions, "ListMembership">;
 export type TodoRow = ModelRow<typeof definitions, "Todo">;
 export type TodoListRow = ModelRow<typeof definitions, "TodoList">;

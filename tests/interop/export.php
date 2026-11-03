@@ -4,60 +4,54 @@ declare(strict_types=1);
 
 require __DIR__.'/../../packages/laravel/vendor/autoload.php';
 
-use Illuminate\Container\Container;
-use Illuminate\Database\Capsule\Manager;
-use Illuminate\Database\Schema\Blueprint;
 use ZeroForLaravel\Generation\TypeScriptGenerator;
 use ZeroForLaravel\Metadata\ModelRegistry;
+use ZeroForLaravel\Query\Query;
 use ZeroForLaravel\Query\QueryCompiler;
-use ZeroForLaravel\Tests\Fixtures\Comment;
-use ZeroForLaravel\Tests\Fixtures\Tag;
-use ZeroForLaravel\Tests\Fixtures\Task;
-use ZeroForLaravel\Tests\Fixtures\TaskList;
+use ZeroForLaravel\Tests\OwnerTestCase as TestCase;
 use ZeroForLaravel\ZeroContext;
 
-$capsule = new Manager;
-$capsule->addConnection(['driver' => 'sqlite', 'database' => ':memory:', 'prefix' => '']);
-$capsule->setAsGlobal();
-$capsule->bootEloquent();
-$capsule->schema()->create('tasks', function (Blueprint $table) {
-    $table->uuid('id')->primary();
-    $table->string('user_id');
-    $table->uuid('list_id')->nullable();
-    $table->string('title');
-    $table->boolean('done')->default(false);
-    $table->timestamp('completed_at')->nullable();
-    $table->string('secret')->nullable();
-    $table->timestamps();
-    $table->softDeletes();
-});
-$capsule->schema()->create('lists', function (Blueprint $table) {
-    $table->uuid('id')->primary();
-    $table->string('user_id');
-    $table->string('name');
-});
-$capsule->schema()->create('tags', function (Blueprint $table) {
-    $table->uuid('id')->primary();
-    $table->string('user_id');
-    $table->string('name');
-});
-$capsule->schema()->create('task_tag', function (Blueprint $table) {
-    $table->uuid('task_id');
-    $table->uuid('tag_id');
-    $table->primary(['task_id', 'tag_id']);
-});
-$capsule->schema()->create('comments', function (Blueprint $table) {
-    $table->uuid('id')->primary();
-    $table->uuid('task_id');
-    $table->string('user_id');
-    $table->string('body');
-});
-Container::setInstance($capsule->getContainer());
-$registry = new ModelRegistry([Task::class, TaskList::class, Tag::class, Comment::class]);
+$fixture = new class('bootFixture') extends TestCase
+{
+    public function bootFixture(): ModelRegistry
+    {
+        $this->setUp();
+        $alice = (new Illuminate\Foundation\Auth\User)->setKeyType('string')->forceFill(['id' => 'alice']);
+        request()->setUserResolver(fn () => $alice);
+        $registry = new ModelRegistry($this->models());
+        app()->instance(ModelRegistry::class, $registry);
+        // This fixture exports every relationship used by the cross-language cases.
+        // Production query analysis collects just the paths an application uses.
+        foreach (['list', 'tags', 'comments'] as $name) {
+            $registry->relation($registry->get('Task'), $name);
+        }
+
+        $registry->relation($registry->get('TaskList'), 'tasks');
+
+        return $registry;
+    }
+};
+$registry = $fixture->bootFixture();
+
+/** Public construction AST, excluding trusted PHP-only actor markers. */
+function publicAst(Query $query): array
+{
+    $strip = function (array $value) use (&$strip): array {
+        unset($value['__visibility'], $value['__ability']);
+        foreach ($value as $key => $child) {
+            if (is_array($child)) {
+                $value[$key] = $strip($child);
+            }
+        }
+
+        return $value;
+    };
+
+    return $strip($query->ast());
+}
 if (($argv[1] ?? null) === 'generate') {
     echo (new TypeScriptGenerator)->generate($registry);
 } elseif (in_array($argv[1] ?? null, ['controller', 'controller-module'], true)) {
-    Container::getInstance()->instance(ModelRegistry::class, $registry);
     $compiler = new ZeroForLaravel\Generation\ControllerQueryCompiler((new PhpParser\ParserFactory)->createForHostVersion(), $registry);
     $definition = $compiler->compile(ZeroForLaravel\Tests\Fixtures\QueryController::class, 'index')[0];
     $filtered = $compiler->compile(ZeroForLaravel\Tests\Fixtures\QueryController::class, 'filtered')[0];
@@ -74,13 +68,13 @@ if (($argv[1] ?? null) === 'generate') {
     $cases = [];
     foreach (['', '0', 'actual'] as $title) {
         $query = $factory(['title' => $title]);
-        $cases[] = ['args' => ['title' => $title], 'ast' => $query->ast(), 'format' => $query->format()];
+        $cases[] = ['args' => ['title' => $title], 'ast' => publicAst($query), 'format' => $query->format()];
     }
     $filteredFactory = eval('return '.$filtered->php().';');
     $filteredCases = [];
     foreach ([['title' => '', 'showDone' => false, 'window' => 0], ['title' => '0', 'showDone' => true, 'window' => 2], ['title' => 'actual', 'showDone' => false, 'window' => 3]] as $args) {
         $query = $filteredFactory($args);
-        $filteredCases[] = ['args' => $args, 'ast' => $query->ast(), 'format' => $query->format()];
+        $filteredCases[] = ['args' => $args, 'ast' => publicAst($query), 'format' => $query->format()];
     }
     $relationshipFactory = eval('return '.$relationships->php().';');
     $relationshipQuery = $relationshipFactory(['title' => '0']);
@@ -91,11 +85,11 @@ if (($argv[1] ?? null) === 'generate') {
         'sorted' => ['typescript' => $sorted->typescript(), 'schema' => $schemas->object($sorted->parameters)],
         'typescript' => $definition->typescript(), 'schema' => $schemas->object($definition->parameters), 'cases' => $cases,
         'filtered' => ['typescript' => $filtered->typescript(), 'schema' => $schemas->object($filtered->parameters), 'cases' => $filteredCases],
-        'relationships' => ['typescript' => $relationships->typescript(), 'ast' => $relationshipQuery->ast(), 'format' => $relationshipQuery->format()],
-        'window' => ['typescript' => $window->typescript(), 'ast' => $windowQuery->ast()],
+        'relationships' => ['typescript' => $relationships->typescript(), 'ast' => publicAst($relationshipQuery), 'format' => $relationshipQuery->format()],
+        'window' => ['typescript' => $window->typescript(), 'ast' => publicAst($windowQuery)],
     ], JSON_THROW_ON_ERROR);
 } elseif (($argv[1] ?? null) === 'declarations') {
-    $query = new ZeroForLaravel\Query\Query($registry->get('Task'), $registry);
+    $query = new Query($registry->get('Task'), $registry);
     $queries = [
         'unbounded' => $query->all(),
         'zeroLimit' => $query->limit(0),
@@ -123,21 +117,21 @@ if (($argv[1] ?? null) === 'generate') {
     }
     echo json_encode(array_map(fn ($q) => ['ast' => $q->ast(), 'format' => $q->format()], $queries), JSON_THROW_ON_ERROR);
 } elseif (($argv[1] ?? null) === 'authorized') {
-    $query = new ZeroForLaravel\Query\Query($registry->get('Task'), $registry);
+    $alice = request()->user();
+    $query = (new Query($registry->get('Task'), $registry))->visibleTo($alice);
     $queries = [
         'root' => $query,
-        'related' => $query->related('list')->related('comments', fn ($q) => $q->limit(3)),
-        'junction' => $query->whereExists('tags', fn ($q) => $q->where('id', 'owned')),
+        'related' => $query->related('list', fn ($q) => $q->visibleTo($alice))->related('comments', fn ($q) => $q->visibleTo($alice)->limit(3)),
+        'junction' => $query->whereExists('tags', fn ($q) => $q->visibleTo($alice)->where('id', 'owned')),
         'groups' => $query->where(fn ($eb) => $eb->or(
-            $eb->exists('tags', fn ($q) => $q->where('name', 'Reading')),
-            $eb->exists('tags', fn ($q) => $q->where('name', 'Other')),
+            $eb->exists('tags', fn ($q) => $q->visibleTo($alice)->where('name', 'Reading')),
+            $eb->exists('tags', fn ($q) => $q->visibleTo($alice)->where('name', 'Other')),
         )),
     ];
     $compiler = new QueryCompiler($registry);
     $context = new ZeroContext(['user_id' => 'alice']);
     $asts = array_map(fn ($q) => $compiler->compileDeclaration($q, $context), $queries);
-    $registry->get('Task')->definition->enforceServerScope(fn (ZeroForLaravel\Query\ZQLBuilder $q) => $q->where(fn (ZeroForLaravel\Query\ZeroOperator $op) => $op->or($op->cmp('done', true), $op->cmp('title', 'shared'))));
-    $asts['scope'] = $compiler->compileDeclaration($query, $context);
+    $asts['scope'] = $compiler->compileDeclaration($query->where(fn ($op) => $op->or($op->cmp('done', true), $op->cmp('title', 'shared'))), $context);
     echo json_encode($asts, JSON_THROW_ON_ERROR);
 } else {
     throw new RuntimeException('Unknown controller interop fixture mode.');

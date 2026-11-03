@@ -5,18 +5,21 @@ declare(strict_types=1);
 namespace ZeroForLaravel\Query;
 
 use Closure;
+use Illuminate\Contracts\Auth\Authenticatable;
+use Illuminate\Database\Eloquent\Model;
 use InvalidArgumentException;
 use JsonSerializable;
 use LogicException;
 use stdClass;
 use ZeroForLaravel\Metadata\ModelMetadata;
 use ZeroForLaravel\Metadata\ModelRegistry;
+use ZeroForLaravel\Permissions\Binding;
 use ZeroForLaravel\Support\Input;
 
 /**
  * An immutable declaration. It never executes SQL or serializes result rows.
  *
- * @phpstan-type Ast array{table: string, alias?: string, where?: array<string, mixed>, related?: list<array<string, mixed>>, orderBy?: list<array{string, string}>, limit?: int, start?: array{row: stdClass, exclusive: bool}}
+ * @phpstan-type Ast array{table: string, alias?: string, __visibility?: string, __ability?: string, where?: array<string, mixed>, related?: list<array<string, mixed>>, orderBy?: list<array{string, string}>, limit?: int, start?: array{row: stdClass, exclusive: bool}}
  */
 final class Query implements JsonSerializable
 {
@@ -40,6 +43,31 @@ final class Query implements JsonSerializable
         private readonly ?string $junction = null,
     ) {
         $this->ast = ['table' => $model->table];
+    }
+
+    public function visibleTo(?Authenticatable $user): self
+    {
+        if (! $user instanceof Authenticatable) {
+            throw new \Illuminate\Auth\Access\AuthorizationException('Visibility requires an authenticated actor.');
+        }
+
+        if (! $this->model->policyVisibility || ! $user instanceof Model || ! is_a($user, config()->string('permissions.subject.class'))) {
+            throw new LogicException('visibleTo requires a bound permission resource and the configured Eloquent actor.');
+        }
+
+        $query = clone $this;
+        $query->ast['__visibility'] = Binding::id($user->getAuthIdentifier());
+
+        return $query;
+    }
+
+    /** @internal Captured policy ability for a route-bound singleton. */
+    public function guardedBy(Authenticatable $user, string $ability): self
+    {
+        $query = $this->visibleTo($user);
+        $query->ast['__ability'] = $ability;
+
+        return $query;
     }
 
     /** @param string|Closure(ExpressionBuilder): Condition $field */

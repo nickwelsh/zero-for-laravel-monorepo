@@ -17,10 +17,15 @@ use ZeroForLaravel\Query\Query;
 use ZeroForLaravel\Query\QueryCompiler;
 use ZeroForLaravel\Query\RegisteredQuery;
 use ZeroForLaravel\Tests\Fixtures\QueryController;
-use ZeroForLaravel\Tests\TestCase;
+use ZeroForLaravel\Tests\OwnerTestCase as TestCase;
 use ZeroForLaravel\ZeroContext;
 
 uses(TestCase::class);
+
+beforeEach(function (): void {
+    $alice = (new \Illuminate\Foundation\Auth\User)->setKeyType('string')->forceFill(['id' => 'alice']);
+    request()->setUserResolver(fn () => $alice);
+});
 
 test('finite FormRequest choices generate literal unions and runtime options without requiring optional fields', function (): void {
     app()->register(SurveyorServiceProvider::class);
@@ -85,7 +90,7 @@ test('registered controller queries preserve input branches without executing th
         $compiler = new QueryCompiler(resolve(ModelRegistry::class));
         $context = new ZeroContext(['user_id' => 'alice']);
         $ast = $registered->compile(['title' => '0'], $context, $compiler);
-        expect(data_get($ast, 'where.conditions.0.right.value'))->toBe('alice');
+        expect(json_encode(data_get($ast, 'where.conditions.0'), JSON_THROW_ON_ERROR))->toContain('permission_index', 'user:alice');
         expect(data_get($ast, 'where.conditions.2.right.value'))->toBe('0');
         foreach ([[], ['title' => null], ['title' => false], ['title' => '0', 'user_id' => 'other']] as $invalid) {
             expect(fn (): array => $registered->compile($invalid, $context, $compiler))->toThrow(ValidationException::class);
