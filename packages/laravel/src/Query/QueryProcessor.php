@@ -10,7 +10,7 @@ use ZeroForLaravel\Support\Input;
 use ZeroForLaravel\ZeroContext;
 
 /**
- * @phpstan-type QueryResult array{id: string, name: string, ast?: array<string, mixed>, error?: 'parse'|'app', message?: string, details?: array{fields: array<array-key, mixed>}}
+ * @phpstan-type QueryResult array{id: string, name: string, ast?: array<string, mixed>, error?: 'parse'|'app', message?: string, details?: array{fields: array<array-key, mixed>}|array{status: int}}
  * @phpstan-type TransformFailed array{kind: 'TransformFailed', origin: 'server', reason: 'parse', message: string, queryIDs: list<string>}
  * @phpstan-type QueryResponse array{kind: 'QueryResponse', queries: list<QueryResult>, userID: string|null}
  */
@@ -65,8 +65,13 @@ final readonly class QueryProcessor
                 $result['ast'] = $registered->invoke($request['args'][0], $context, $this->compiler);
             } catch (ValidationException $error) {
                 $result += ['error' => 'parse', 'message' => 'Invalid query arguments.', 'details' => ['fields' => $error->errors()]];
-            } catch (AuthorizationException|\Illuminate\Database\Eloquent\ModelNotFoundException|\Symfony\Component\HttpKernel\Exception\HttpExceptionInterface) {
-                $result += ['error' => 'app', 'message' => 'This query is not authorized.'];
+            } catch (AuthorizationException|\Illuminate\Database\Eloquent\ModelNotFoundException|\Symfony\Component\HttpKernel\Exception\HttpExceptionInterface $error) {
+                $status = match (true) {
+                    $error instanceof AuthorizationException => $error->status() ?? config()->integer('permissions.denied_status'),
+                    $error instanceof \Illuminate\Database\Eloquent\ModelNotFoundException => 404,
+                    default => $error->getStatusCode(),
+                };
+                $result += ['error' => 'app', 'message' => $status === 404 ? 'Not found.' : 'This query is not authorized.', 'details' => ['status' => $status]];
             }
 
             $queries[] = $result;

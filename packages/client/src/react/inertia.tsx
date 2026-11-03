@@ -10,12 +10,14 @@ import {
     type ReactNode,
 } from 'react';
 import { object, selectionKey } from '../validation';
-import { useData, type Data, type ReadSelection, type QueryInputs } from './data';
+import { useData, QueryAccessError, type Data, type ReadSelection, type QueryInputs } from './data';
 import { StartingZero } from './provider';
+import { AccessBoundary, type AccessOptions } from './access';
 
 interface Binding {
     query: string;
     args: Record<string, unknown>;
+    access?: { status: 403 | 404 };
 }
 interface Metadata {
     version: 1;
@@ -31,6 +33,7 @@ export interface InertiaInputOptions {
     /** Component name -> live prop -> input field -> URL query parameter. Scalars only. */
     url?: Record<string, Record<string, Record<string, string>>>;
     history?: 'replace' | 'push';
+    access?: AccessOptions;
 }
 const EffectiveProps = createContext<Record<string, unknown> | undefined>(undefined);
 
@@ -55,7 +58,13 @@ function metadata(input: unknown): Metadata {
         else {
             const binding = object(value, `__zero.bindings.${prop}`);
             if (typeof binding.query !== 'string') throw new Error('Invalid live query binding.');
-            bindings[prop] = { query: binding.query, args: object(binding.args, 'args') };
+            const access = binding.access === undefined ? undefined : object(binding.access, 'access');
+            if (access && access.status !== 403 && access.status !== 404) throw new Error('Invalid access contract.');
+            bindings[prop] = {
+                query: binding.query,
+                args: object(binding.args, 'args'),
+                ...(access ? { access: { status: access.status as 403 | 404 } } : {}),
+            };
         }
     }
     return { version: 1, mode: source.mode, bindings };
@@ -164,6 +173,7 @@ function InputSubscription({
 }
 
 const noop = () => {};
+const defaultAccess: AccessOptions = {};
 
 function loading(selection: ReadSelection): Data<unknown> {
     return {
@@ -277,7 +287,7 @@ export function createInertiaAdapter(factories: BindingFactories, options: Inert
                                         mode: 'replace',
                                         bindings: {
                                             ...previous.bindings,
-                                            [prop]: { query: binding.query, args },
+                                            [prop]: { ...binding, args },
                                         },
                                     },
                                 };
@@ -297,7 +307,23 @@ export function createInertiaAdapter(factories: BindingFactories, options: Inert
                             starting={starting}
                             synchronize={synchronize}
                         >
-                            {(data) => render(index + 1, { ...effective, [prop]: data })}
+                            {(data) =>
+                                binding.access && !starting ? (
+                                    <AccessBoundary
+                                        binding={binding}
+                                        prop={prop}
+                                        options={options.access ?? defaultAccess}
+                                        unavailable={factory(binding.args).one && data.data === undefined}
+                                        deniedStatus={
+                                            data.error instanceof QueryAccessError ? data.error.status : undefined
+                                        }
+                                    >
+                                        {render(index + 1, { ...effective, [prop]: data })}
+                                    </AccessBoundary>
+                                ) : (
+                                    render(index + 1, { ...effective, [prop]: data })
+                                )
+                            }
                         </InputSubscription>
                     );
                 }

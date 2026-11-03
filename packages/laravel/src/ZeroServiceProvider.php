@@ -85,6 +85,7 @@ final class ZeroServiceProvider extends ServiceProvider
         $this->callAfterResolving(\Illuminate\Contracts\Http\Kernel::class, static function (\Illuminate\Foundation\Http\Kernel $kernel): void {
             // Capture original transport cookies before the web group decrypts them.
             $kernel->prependToMiddlewarePriority(AuthenticateZeroCache::class);
+            $kernel->prependToMiddlewarePriority(Http\CaptureTransportCookies::class);
         });
         if ($this->app->runningInConsole()) {
             $this->publishes([__DIR__.'/../config/zero.php' => config_path('zero.php')], 'zero-config');
@@ -129,6 +130,12 @@ final class ZeroServiceProvider extends ServiceProvider
             Route::prefix(config()->string('zero.route_prefix'))->middleware(array_merge([AuthenticateZeroCache::class], $names))->group(function (): void {
                 Route::post('query', [ZeroController::class, 'query'])->name('zero.query');
                 Route::post('mutate', [ZeroController::class, 'mutate'])->name('zero.mutate');
+            });
+            // Browser control channel, authenticated independently of zero-cache.
+            Route::prefix(config()->string('zero.route_prefix'))->middleware([Http\CaptureTransportCookies::class, ...config()->array('permissions.access.middleware', ['web', 'auth'])])->group(function (): void {
+                Route::post('access', [Access\AccessController::class, 'store'])->name('zero.access.store');
+                Route::get('access/events', [Access\AccessController::class, 'events'])->name('zero.access.events');
+                Route::delete('access/{id}', [Access\AccessController::class, 'destroy'])->name('zero.access.destroy');
             });
         }
     }

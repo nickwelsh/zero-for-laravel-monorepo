@@ -33,5 +33,15 @@ final class PermissionSchema
             $table->bigInteger('revision');
             $table->timestamp('created_at')->useCurrent();
         });
+        $schema->create('permission_access_watches', function (Blueprint $table): void {
+            $table->uuid('id')->primary();
+            $table->string('actor', 64);
+            $table->string('query');
+            $table->json('args');
+            $table->string('generation', 128);
+            $table->timestamp('expires_at');
+            $table->index(['actor', 'expires_at']);
+            $table->index('expires_at');
+        });
     }
 }

@@ -6,6 +6,13 @@ import { selectionKey } from '../validation';
 
 type SelectionData<Q> = Q extends { decode(raw: unknown): infer Result } ? Result : never;
 
+export class QueryAccessError extends Error {
+    constructor(public readonly status: 403 | 404) {
+        super(status === 404 ? 'Not found' : 'Not authorized');
+        this.name = 'QueryAccessError';
+    }
+}
+
 export type DataStatus = 'idle' | 'loading' | 'refreshing' | 'failure' | 'stale' | 'success';
 export type RenderHandlers<T, R> = {
     onIdle: () => R;
@@ -136,7 +143,17 @@ export function useData<Q extends ReadSelection>(input: Q, options: UseQueryOpti
     if (committed.scope !== scope || (enabled && details.type === 'complete' && !committed.complete)) {
         setCommitted({ scope, complete: enabled && details.type === 'complete' });
     }
+    const errorDetails = details.type === 'error' ? details.error.details : undefined;
+    const accessStatus =
+        errorDetails &&
+        typeof errorDetails === 'object' &&
+        !Array.isArray(errorDetails) &&
+        'status' in errorDetails &&
+        (errorDetails.status === 403 || errorDetails.status === 404)
+            ? errorDetails.status
+            : undefined;
     const decodedResult = useMemo(() => {
+        if (accessStatus) return { value: selection.one ? undefined : [], error: new QueryAccessError(accessStatus) };
         try {
             return { value: selection.decode(raw), error: undefined };
         } catch (error) {
@@ -145,7 +162,7 @@ export function useData<Q extends ReadSelection>(input: Q, options: UseQueryOpti
                 error: error instanceof Error ? error : new Error(String(error)),
             };
         }
-    }, [raw, selection]);
+    }, [raw, selection, accessStatus]);
     const decoded = decodedResult.value;
     const data = useMemo(
         () =>

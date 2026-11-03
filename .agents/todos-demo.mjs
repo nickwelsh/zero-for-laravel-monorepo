@@ -71,6 +71,8 @@ switch (process.argv[2]) {
         await run('pnpm', ['build']);
         break;
     case 'app':
+        // SSE must not prevent ordinary HTTP requests or another browser's mutations.
+        process.env.PHP_CLI_SERVER_WORKERS = '8';
         // PostgreSQL is independently supervised; tolerate service startup ordering.
         for (let attempt = 0; ; attempt++) {
             try {

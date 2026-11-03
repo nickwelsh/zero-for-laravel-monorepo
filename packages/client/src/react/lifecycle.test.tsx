@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, render, renderHook, screen } from '@testing-library/react';
+import { act, cleanup, render, renderHook, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vite-plus/test';
 import { createBuilder, defineQueries, defineQuery } from '@rocicorp/zero';
 import { schema, definitions } from '../../../../tests/interop/generated';
@@ -7,11 +7,17 @@ import { index } from '../../../../tests/interop/controller-api/ZeroForLaravel/T
 import { liveQuery, withQueryInputs } from '../live-query';
 import { z } from 'zod';
 import { router } from '@inertiajs/react';
-import { useData, type Data, type QueryInputs } from './data';
+import { useData, QueryAccessError, type Data, type QueryInputs } from './data';
 import { createInertiaAdapter, useLiveProps } from './inertia';
 
 const native = vi.hoisted(() => ({
-    results: new Map<string, readonly [unknown, { type: string; error?: { message: string }; retry?: () => void }]>(),
+    results: new Map<
+        string,
+        readonly [
+            unknown,
+            { type: string; error?: { message: string; details?: { status: number } }; retry?: () => void },
+        ]
+    >(),
     zero: { context: { user_id: 'alice' } },
     retry: vi.fn(),
 }));
@@ -52,6 +58,119 @@ it('keeps completed empty results usable through background sync and errors', ()
     act(() => result.current.retry());
     expect(native.retry).toHaveBeenCalledOnce();
 });
+
+it.each([403, 404] as const)('discards previously decoded rows on an authoritative %s query error', (status) => {
+    put({ title: '' }, rows);
+    const { result, rerender } = renderHook(() => useData(index.tasks.live({ title: '' })));
+    expect(result.current.data).toHaveLength(2);
+    native.results.set(JSON.stringify({ title: '' }), [
+        rows,
+        { type: 'error', error: { message: 'Denied', details: { status } }, retry: native.retry },
+    ]);
+    rerender();
+    expect(result.current.status).toBe('failure');
+    expect(result.current.data).toEqual([]);
+    expect(result.current.error).toBeInstanceOf(QueryAccessError);
+    expect((result.current.error as QueryAccessError).status).toBe(status);
+});
+
+it.each([403, 404] as const)(
+    'blocks a protected page before its %s callback and ignores duplicate or obsolete events',
+    async (status) => {
+        const streams: FakeStream[] = [];
+        let generation = '';
+        class FakeStream extends EventTarget {
+            onerror: (() => void) | null = null;
+            close = vi.fn();
+            constructor() {
+                super();
+                streams.push(this);
+            }
+            send(state: string, revision: string, selectedGeneration = generation) {
+                this.dispatchEvent(
+                    new MessageEvent('access', {
+                        data: JSON.stringify({ id: 'watch', generation: selectedGeneration, state, revision, status }),
+                    }),
+                );
+            }
+        }
+        vi.stubGlobal('EventSource', FakeStream);
+        vi.stubGlobal(
+            'fetch',
+            vi.fn(async (_url: string, init: RequestInit) => {
+                if (init.method === 'POST' && typeof init.body === 'string')
+                    generation = JSON.parse(init.body).generation;
+                return { ok: true, status: 201, json: async () => ({ id: 'watch' }) };
+            }),
+        );
+        const revoked = vi.fn(() => expect(screen.queryByText('Private contents')).toBeNull());
+        const adapter = createInertiaAdapter(
+            { tasks: (args: { title: string }) => index.tasks.live(args) },
+            { access: { onRevoked: revoked } },
+        );
+        const page = {
+            component: 'tasks/index',
+            props: {
+                __zero: {
+                    version: 1,
+                    mode: 'replace',
+                    bindings: { tasks: { query: 'tasks', args: { title: '' }, access: { status } } },
+                },
+            },
+        };
+        const Wrapped = adapter.wrap(() => <p>Private contents</p>, page);
+        put({ title: '' }, rows);
+        const view = render(<Wrapped {...page.props} />);
+        try {
+            expect(screen.queryByText('Private contents')).toBeNull();
+            await waitFor(() => expect(streams).toHaveLength(1));
+            act(() => streams[0]!.send('denied', 'initial-denial'));
+            expect(screen.getByRole('alert').getAttribute('data-zero-access')).toBe(String(status));
+            expect(revoked).not.toHaveBeenCalled();
+            act(() => streams[0]!.send('allowed', 'opaque-revision'));
+            expect(screen.getByText('Private contents')).toBeTruthy();
+            act(() => {
+                streams[0]!.dispatchEvent(new Event('error'));
+            });
+            expect(screen.queryByText('Private contents')).toBeNull();
+            expect(revoked).not.toHaveBeenCalled();
+            await waitFor(() => expect(streams).toHaveLength(2), { timeout: 3000 });
+            act(() => streams[0]!.send('allowed', 'late-old-connection'));
+            expect(screen.queryByText('Private contents')).toBeNull();
+            const stream = streams[1]!;
+            // Even an unchanged revision must authorize afresh on reconnect.
+            act(() => stream.send('allowed', 'opaque-revision'));
+            expect(screen.getByText('Private contents')).toBeTruthy();
+            // An empty collection is successful, not a revoked singleton.
+            put({ title: '' }, []);
+            view.rerender(<Wrapped {...page.props} />);
+            expect(screen.getByText('Private contents')).toBeTruthy();
+            // An unavailable server recheck can retain the last opaque revision.
+            act(() => stream.send('unknown', 'opaque-revision'));
+            expect(screen.queryByText('Private contents')).toBeNull();
+            expect(revoked).not.toHaveBeenCalled();
+            act(() => stream.send('allowed', 'opaque-revision'));
+            expect(screen.getByText('Private contents')).toBeTruthy();
+            act(() => stream.send('denied', '5', 'old-route'));
+            expect(screen.getByText('Private contents')).toBeTruthy();
+            act(() => stream.send('denied', '5'));
+            expect(screen.getByRole('alert').getAttribute('data-zero-access')).toBe(String(status));
+            expect(revoked).toHaveBeenCalledOnce();
+            act(() => stream.send('denied', '5'));
+            act(() => stream.send('allowed', '6', 'old-route'));
+            expect(revoked).toHaveBeenCalledOnce();
+            expect(screen.queryByText('Private contents')).toBeNull();
+            view.unmount();
+            expect(stream.close).toHaveBeenCalled();
+            act(() => stream.send('allowed', '6'));
+            expect(screen.queryByText('Private contents')).toBeNull();
+        } finally {
+            view.unmount();
+            adapter.dispose();
+            vi.unstubAllGlobals();
+        }
+    },
+);
 
 it('does not retain data across controller arguments or authorization identities', () => {
     put({ title: '' }, rows);
