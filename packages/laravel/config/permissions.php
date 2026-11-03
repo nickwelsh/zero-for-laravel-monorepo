@@ -13,6 +13,12 @@ return [
         'poll_milliseconds' => 250,
         'heartbeat_seconds' => 5,
     ],
+    // Advisory browser checks are opt-in; authority attributes stay private by default.
+    'predictions' => [
+        'abilities' => [],
+        'subject_attributes' => [],
+        'resource_attributes' => [],
+    ],
     'models' => ['default' => __DIR__.'/permissions/scoped-rbac-abac.conf'],
     'subject' => [
         'class' => App\Models\User::class,

@@ -1,89 +1,263 @@
 ---
-title: Authorization and context
-description: Separate trusted read constraints, server scopes, write policies, and field permissions.
+title: Policies and live visibility
+description: Share Laravel policies across REST, Zero, and subscribed access errors with managed Casbin rules.
 ---
 
-Use `->authorizeRelation('memberships')` to require at least one related row
-that is visible under the related model's own authorization. For a shared list,
-configure memberships with `->authorize('user_id', '=', ContextField::UserId)`
-and the list with `->authorizeRelation('memberships')`. Todos can then use
-`->authorizeRelation('list')` to inherit access to their parent list.
+Laravel remains authoritative. Policies use normal discovery or `Gate::policy()`;
+there is no separate Zero policy map or authentication-dependent global scope.
+The managed Casbin integration stores grants and role assignments in the database.
+Its model file defines the matcher, role layout and effect, not individual grants.
 
-These predicates compile to correlated `EXISTS` queries in both Laravel and the
-native client. Multiple scalar and relationship authorization declarations combine
-with AND. Authorization relationships are schema dependencies, not result selections;
-select related rows with `related()` in controllers. Register every target model. Cycles and authorization
-paths deeper than eight relationships fail generation. Write policies and
-FormRequests still control mutations and association changes.
-
-See [the authenticated todos example](https://github.com/nickwelsh/zero-for-laravel-monorepo/tree/main/examples/todos) for shared lists,
-PostgreSQL, and Herd HTTPS setup.
-
-## Trusted context and server scopes
+## One policy for REST and Zero
 
 ```php
-return ZeroDefinition::make()
-    ->authorize('user_id', '=', ContextField::UserId)
-    ->fillFromContext('user_id', ContextField::UserId)
-    ->relations('list');
+use Illuminate\Auth\Access\Response;
+use ZeroForLaravel\Permissions\Casbin;
+
+final class TodoListPolicy
+{
+    public function view(User $user, TodoList $list): Response
+    {
+        return Casbin::inspect($user, 'view', $list)->asNotFound();
+    }
+}
 ```
 
-Use `publicReads()` for explicitly public models, or `authorizeRelation('list')`
-to require a related row visible under that model's own definition. These
-constraints are generated for local queries and independently enforced by Laravel.
-Context fills apply on create, are resolved separately on client/server, and are
-excluded from caller-writable fields. Custom context keys can use string references.
-The server context resolver must derive their values from authenticated state.
-
-For runtime PHP, use a mandatory server scope:
+Add `HasPolicyVisibility` to the model for the ordinary Eloquent local scope and
+`HasZeroQueries` when using Zero. Policies still work without a running Zero-cache
+or generated query registry.
 
 ```php
-->enforceServerScope(
-    function (ZQLBuilder $query, ZeroContext $context): void {
-        $query->whereExists('list', fn (ZQLBuilder $list) => $list->where(
-            fn (ZeroOperator $op) => $op->or(
-                $op->cmp('user_id', $context->get('user_id')),
-                $op->exists('shares', fn (ZQLBuilder $share) =>
-                    $share->where('user_id', $context->get('user_id'))),
-            ),
-        ));
+// REST show: ordinary route binding, then Laravel Gate.
+Gate::authorize('view', $list);
+return new TodoListResource($list);
+
+// REST index: filter before pagination, counts, or other collection operations.
+return TodoListResource::collection(
+    TodoList::query()->visibleTo($request->user())->paginate()
+);
+
+// Live index: same view policy; inaccessible rows are absent, not page errors.
+return Inertia::render('lists/index', [
+    'lists' => TodoList::zeroQuery()->visibleTo($request->user())->infinite(25),
+]);
+```
+
+`visibleTo($user)` means the policy's instance `view` method, not `viewAny`.
+An empty collection succeeds. Supply the actor explicitly; registered Zero queries
+only accept the server-authenticated actor, not a browser-provided user ID.
+Related selections and user-authored existence filters require their own explicit
+visibility. Authorizing a root is not blanket permission for its related rows.
+
+```php
+TodoList::zeroQuery()
+    ->visibleTo($request->user())
+    ->related('todos', fn ($todos) => $todos->visibleTo($request->user()));
+```
+
+The default denied status is `permissions.denied_status` (403). Choose 404 globally
+or override a policy response with `asNotFound()` / `asNotAuthorized()` (403, not
+401). Normal Laravel route-binding failures still produce 404.
+
+## Configure bindings and managed grants
+
+```sh
+php artisan vendor:publish --tag=permissions-config
+php artisan vendor:publish --tag=permissions-migrations
+php artisan migrate
+```
+
+The following binding uses the shipped `scoped-rbac-abac.conf`. All matcher attributes
+must bind declared non-null database columns. Trim unused matcher branches and
+bindings when the app only needs RBAC.
+
+```php
+// config/permissions.php
+return [
+    'connection' => null,
+    'denied_status' => 404,
+    'models' => ['default' => config_path('permissions/scoped-rbac-abac.conf')],
+    'subject' => [
+        'class' => User::class, 'prefix' => 'user:',
+        'attributes' => [
+            'department_id' => ['column' => 'department_id', 'type' => 'string'],
+            'is_admin' => ['column' => 'is_admin', 'type' => 'boolean'],
+        ],
+    ],
+    'resources' => [
+        TodoList::class => [
+            'type' => 'todo-list',
+            'domain' => ['column' => 'id', 'prefix' => 'list:'],
+            'attributes' => [
+                'owner_id' => ['column' => 'user_id', 'type' => 'id'],
+                'department_id' => ['column' => 'department_id', 'type' => 'string'],
+            ],
+        ],
+    ],
+];
+```
+
+Use the managed facade for every grant/role change, optionally inside the same
+database transaction as business writes:
+
+```php
+Casbin::addPolicy('role:reader', 'list:7', 'todo-list', 'view', 'any', 'allow');
+Casbin::addGroupingPolicy('user:42', 'role:reader', 'list:7');
+Casbin::removeGroupingPolicy('user:42', 'role:reader', 'list:7');
+```
+
+`Casbin::model('name')` selects another configured model. Global roles use the
+two-argument grouping layout. Domains isolate assignments and inherited roles;
+ownership alone is not a grant. The rule's condition is interpreted by the matcher,
+not by a reserved magic role name.
+
+Before serving portable queries, run `php artisan permissions:rebuild` on PostgreSQL
+15+. This transaction installs/backfills private subject, grant and resource-key
+projections plus monitored-column database triggers. Direct business SQL and mass
+updates therefore maintain authority facts too. Source rows, rules and projections
+must share one configured connection. Managed writes participate in the caller's
+transaction. Take `ProjectionManager::lock()` before model-row locks when combining
+permission and business changes; retry a failed transaction, not partial writes.
+Do not write raw `permission_rules`, private projections, or an independently cached
+Casbin enforcer around the managed integration.
+
+Rebuild after changing model files, bindings or authority schemas; regenerate
+contracts and synchronize the dedicated publication. Missing/stale projections and
+stale generated fingerprints fail closed. Authorization-only columns/tables are
+replicated to trusted zero-cache, but excluded from browser schemas and row results.
+
+## Portable compiler boundaries
+
+The compiler analyzes the policy source; it never runs a fake resource and guesses
+SQL from a boolean. Supported policy methods directly return `Casbin::inspect()`
+with a literal action and optional denial override. Literal allow/deny responses
+are supported too. Normal Laravel registration determines the effective policy.
+
+Supported model families are direct ACL, global RBAC, domain RBAC, role-free ABAC,
+and RBAC/ABAC hybrids. The supported layouts use `r = sub, obj, act` or
+`r = sub, dom, obj, act`, corresponding exact policy selectors and optional positive
+`g(subject, role[, domain])`. Role graphs must be acyclic and at most eight levels
+deep. Effects are allow-only or allow with deny override; no matching allow denies.
+
+Matchers support typed AND/OR/NOT, exact selectors, non-null resource comparisons
+with literals, owner equality with subject ID, subject attributes against literals,
+and resource/subject attribute equality (for example departments). Types are IDs,
+strings, booleans and JavaScript-safe integers. Equality stays type-consistent.
+Cross-row ordering such as `resource.level <= user.clearance` is not representable
+live in Zero 1.11.3 and rejects rather than capturing stale user attributes.
+
+`eval`, custom functions, regex/pattern roles, nullable/JSON/float/date comparisons,
+time-dependent grants, priority effects, negated role reachability and arbitrary
+PHP lookups/hooks are server-only. They cannot be used in `visibleTo()` or browser
+predictions. Custom Eloquent visibility scopes and unrepresentable global scopes
+also reject; the compiler never silently substitutes another implementation.
+
+### A live super-admin override
+
+The narrowly supported ordinary policy hook is:
+
+```php
+public function before(User $user, string $ability): ?bool
+{
+    return $user->is_admin ? true : null;
+}
+```
+
+`is_admin` must bind a non-null database boolean. This bypasses even Casbin denies,
+but keeps caller filters, tenant boundaries, route constraints and soft deletes:
+`existing filters AND (live_admin OR (allow AND NOT deny))`. A regular Casbin admin
+role remains subject to the Casbin effect. Removing the flag updates subscriptions
+without a retransform. Other policy hooks and global Gate hooks reject on portable
+paths, including hooks registered after generation.
+
+## Subscribed show errors and callbacks
+
+An ordinary show route needs no query wrapper:
+
+```php
+public function show(TodoList $list): \Inertia\Response
+{
+    Gate::authorize('view', $list);
+    return Inertia::render('lists/show', ['list' => $list]);
+}
+```
+
+The generator captures this supported unconditional instance Gate. Initial requests
+use normal Laravel/Inertia exception handling. Named query transforms replay binding,
+middleware and the real Gate without rerunning controller effects. Their native
+Zero predicates also include the live guard, including descendant queries.
+
+The Inertia adapter registers bounded actor-owned watches and opens an authenticated
+SSE channel independent of resource access. It waits for an authoritative snapshot
+before displaying cached protected content. Durable permission revisions trigger
+fresh actor/resource/Gate checks; reconnect always resnapshots instead of replaying
+historical allow decisions. Streams poll revisions (250 ms by default), so connected
+revocation follows commit and normal network/replication delivery, not zero latency.
+
+```tsx
+const livePages = createInertiaAdapter(bindings, {
+    access: {
+        onRevoked: ({ status, query, prop }) => {
+            router.visit('/lists');
+            toast.error('This list is no longer available.');
+        },
+        // Optional: endpoint, onError(status), onPending().
     },
-    relations: ['list'],
-)
+});
 ```
 
-Register `shares` on the list definition with `->relations('shares')` or through
-its own scope's `relations` argument. This declares schema dependencies; controllers
-choose which related rows to select. Every target must define its own visibility.
-Scopes also apply to included rows and relationship predicates. Conditions within
-a scope can use OR; the mandatory scope as a whole is ANDed with user filters.
-An empty scope is an error. Missing required context denies access.
+Confirmed loss unmounts the protected page before the callback. Callbacks fire once
+per allowed-to-denied transition, not on initial denial, network failure, an obsolete
+route event or an empty collection. Deleted and inaccessible resources share the
+same concealed 404 state. An unavailable expected singleton blocks while rechecking.
+A disconnected control channel is unknown and blocks protected rendering until
+fresh validation. Previously downloaded/offline data cannot be erased; native data
+predicates, not callbacks, prevent future unauthorized streaming.
 
-Callbacks execute with fresh trusted context during server query compilation,
-never during generation. Their PHP source is not exported. Zero permits server
-queries to add permission constraints absent from the local implementation.
-Local queries can still match other already-synced authorized rows, so mirror
-predicates with `authorize`/`authorizeRelation` when exact local behavior matters.
+Deploy SSE without proxy buffering and with enough concurrent PHP workers; a single
+`artisan serve` worker cannot also handle mutations while streaming. Watches expire,
+renew while connected and release on unmount. Browser endpoints retain session
+authentication and CSRF protection; do not put the private cache API key in the
+browser. Set `access.endpoint` when `zero.route_prefix` differs from `/zero`.
 
-## Write authorization
+## Optional current-user UI predictions
 
-Read visibility does not grant write permission. Controller mutations must call
-the appropriate Laravel policy or gate, in the action or its FormRequest.
-FormRequests authorize and validate the payload separately, including foreign key
-association permissions. See [mutations](./mutations.mdx) for complete examples.
+Use `Predictions::forUser($request->user(), $abilities)` from an authenticated,
+application-registered endpoint when UI predictions are needed. The server chooses
+the actor and supported abilities; there is no arbitrary-subject permission route.
+Opt into safe attributes explicitly:
 
-## Column exposure
+```php
+'predictions' => [
+    'abilities' => [TodoList::class => ['view']],
+    'subject_attributes' => ['department_id', 'is_admin'],
+    'resource_attributes' => [TodoList::class => ['id', 'owner_id', 'department_id']],
+],
+```
 
-Read authorization decides which rows a client may receive. Every selected column
-on those rows is exposed through Zero, so define [column privacy](./models.mdx#columns-and-privacy)
-as well. A nonempty Eloquent `$visible` list restricts columns by default;
-`ZeroColumns` can supply a separate explicit replication allowlist.
+The feed contains applicable effective grants and validated predicate descriptors,
+not the raw graph or another user's memberships. Abilities needing an unexposed
+attribute are omitted. Feed endpoints must return private/no-store responses and
+refresh on permission changes. Do not persist one identity's feed for another.
 
-Keep ownership fields used by `authorize()` and `fillFromContext()` in that
-allowlist. Generation fails if those fields or registered relationship keys are
-excluded. `$fillable` and mutation policies do not hide replicated columns.
+When `predictions.abilities` is nonempty, the package registers authenticated
+`GET /zero/permissions` (under `zero.route_prefix`). It takes no query parameters
+and returns only the configured abilities for the authenticated user.
 
-The browser's context supplies local values and optimistic fills. Laravel resolves
-a fresh `ZeroContext` through `zero.context_resolver`; derive custom tenant values
-only after checking the authenticated user's membership. Never trust a tenant ID
-or user ID supplied in the browser to establish server access.
+`predictPermission(feed, resourceClass, ability, row, authenticatedUserId)` returns
+`true`, `false`, or `undefined` for an unavailable or malformed prediction. It
+checks identity and scalar types before evaluation; it cannot detect a same-user
+feed that an application has not refreshed. These are UI hints only; never accept
+a browser prediction as authorization for reads, writes or watch registration.
+
+## Migrating the previous API
+
+Remove model `zero()` methods and `ZeroDefinition` imports. Move publication to
+`zero.models`, deliberate public reads to `zero.public_models`, trusted creation
+fills to `zero.mutation_context`, and search to the registered search integration.
+Replace scalar/relation authorization and server-scope closures with ordinary
+policies plus explicit visibility on every protected query path. Backfill old ACL
+tables into managed grants; do not maintain two permission authorities. Use
+`Mutation::server(...)` with disabled optimism for permission writes. Rebuild
+projections, regenerate paired PHP/TypeScript and review publication changes before
+deployment. See the todos example for transactional share/unshare and ACL backfill.

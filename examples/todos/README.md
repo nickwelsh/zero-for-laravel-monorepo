@@ -7,7 +7,7 @@ controller-declared live queries and controller mutations. It consumes the local
 - Application: <https://todos.test>
 - Zero cache: <https://zero.todos.test> (local port 4858)
 - Owners create, rename, delete, and share lists with registered users.
-- Every member can add, edit, complete, and delete todos.
+- Every reader can add, edit, complete, and delete todos.
 - Private lists and todos are hidden from other users. User/auth tables are never
   published to Zero. Sharing uses a registered controller mutation with explicitly
   disabled optimism, preserving Laravel validation, binding, and policies.
@@ -105,7 +105,9 @@ does not require Herd or a certificate. It never disables TLS verification.
 The upstream, CVR, and change databases use the same local PostgreSQL database,
 with separate internal Zero schemas keyed by `todos`; `ZERO_UPSTREAM_SCHEMA=todos_0`
 matches the cache. The replica is stored in ignored `storage/app/zero`.
-The dedicated `laravel_zero_todos` publication contains only the domain tables.
+The dedicated `laravel_zero_todos` publication contains the allowlisted domain
+tables and private permission projections needed by Zero's query predicates.
+Permission projections never enter the browser schema.
 
 ## Generated page types
 
@@ -176,22 +178,42 @@ You can also register accounts through the starter kit.
 
 ## Authorization
 
-A list has one owner and explicit memberships, including its owner. List queries
-use `ZeroDefinition::authorizeRelation('memberships')`; memberships are visible only to their
-user. Todo queries use `ZeroDefinition::authorizeRelation('list')`. Policies enforce writes,
-and FormRequests validate destination-list access, preventing a member from moving
-a todo into someone else's private list. Deleting a list cascades its todos and
-memberships. Sharing adds membership by registered email; duplicate shares are safe.
+Managed Casbin grants are the sole ACL. Ordinary discovered Laravel policies use
+`Casbin::inspect` for list and todo view/update/delete decisions and for sharing
+and destination-list creation privileges. An owner role can rename, delete and
+share its list; a reader role can view the list and add, edit, complete and delete
+its todos. Both roles are scoped to the immutable list ID. The `user_id` column
+is ownership metadata for display, not an authorization fallback.
+
+`TodoList` and `Todo` use `HasPolicyVisibility`. Dashboard list roots and related
+todos explicitly call `visibleTo($input->user())`; filters and pagination apply
+after visibility. `zero.models` explicitly allows only these two models, with no
+public models. User/auth columns, legacy membership rows, raw permission rules
+and projection facts are not part of the browser contract. FormRequests and
+transactional controller Gates both check destination-list access before moving
+a todo, so an earlier request check cannot outlive revocation.
 
 `DashboardController` declares the list query, its related todos, ordering, and live
 window. The Inertia adapter injects plain typed live rows. `TodoController`,
 `TodoListController`, and `ShareListController` explicitly opt into Zero mutations;
 the frontend calls generated action bindings, not model-level automatic CRUD.
 
-List creation inserts its owner membership on the server. The new list becomes
-visible once that membership replicates; the example waits for native server
-completion before selecting it. Direct membership mutations are not exposed.
-Revocation/invitations and richer sharing management are outside this example.
+List creation, sharing and unsharing write managed grants inside server-only
+mutation boundaries in the same transaction as domain changes. All mutation
+actions disable optimism: their authoritative transactions acquire the permission
+lock before row locks and recheck policies against current grants. The example
+waits for native server completion before selecting a newly created list. Sharing
+by registered email is idempotent; the `lists.unshare` action removes only that
+user's direct reader role, leaving the owner's independent grant intact. Deleting
+a list cascades its todos and removes its scoped grants.
+
+The migration backfills owners and existing memberships to managed grants and
+installs maintained projections on PostgreSQL. The old membership table is left
+as migration history only: no model, relation, controller or policy reads it for
+live authority. Do not re-run the backfill to restore a revoked user. After
+changing permission bindings or the Casbin model, run `php artisan
+permissions:rebuild` on PostgreSQL before regenerating contracts. Scalar Gates
+work on SQLite; maintained Eloquent/Zero visibility requires PostgreSQL 15+.
 
 ## Checks
 
@@ -209,9 +231,12 @@ php artisan zero:generate --check
 
 The test command supplies an ephemeral encryption key without changing `.env` or
 the demo's separate launcher credentials. A configured local `APP_KEY` also works.
-Tests use in-memory SQLite, never the local application database. PHP tests cover
+Tests default to in-memory SQLite, never the local application database. PHP tests cover
 shared CRUD, owner-only list deletion/sharing, outsiders, validation, destination
-access, duplicate shares, cascade deletion, and generated query authorization.
+access, duplicate shares, revocation, atomic rollback, legacy membership backfill
+and ordinary policy discovery. Dashboard rendering and maintained visibility tests
+require PostgreSQL 15+; run them against a separate disposable test database, not
+the application database.
 Frontend lint/format rules belong to the root Vite+ config. Generated Zero and
 Wayfinder code and build outputs are excluded from formatters/lint, with generated
 contracts checked separately. No new lint rules are disabled for this example.

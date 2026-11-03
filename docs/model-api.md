@@ -6,17 +6,26 @@ See the [main guide](../README.md) and [working example](../examples/todos/READM
 
 ## Visibility remains authoritative
 
-`ZeroDefinition::authorize()` and `authorizeRelation()` constrain root reads,
-includes, and relationship predicates. All relation targets must be registered.
-`publicReads()` is an explicit public-data decision. The server resolves fresh
-trusted context independently of the browser. Keep publication columns restricted
-with Eloquent visibility and Zero column attributes.
+Ordinary Laravel policies select managed Casbin actions. The explicit local scope
+`visibleTo($user)` compiles the policy's instance `view` method to Eloquent and native
+Zero predicates. Use `HasPolicyVisibility` for Eloquent and `HasZeroQueries` for Zero.
+Roots, related results and existence predicates require explicit coverage; a
+supported captured instance Gate can protect its bound resource and descendants.
+Related targets must be registered. Caller filters remain outside the admin OR.
 
-Server scopes may add authoritative predicates not portable to the browser. They
-must declare their relationship dependencies. An empty mandatory scope fails
-closed. Model read visibility does not grant write permissions: use action
-middleware, FormRequests, and explicit Gates/policies. Association IDs need their
-own authorization checks.
+There is no `ZeroDefinition`, model `zero()` method, implicit visibility global scope,
+or PHP-only server-scope escape hatch. `zero.models` explicitly selects publication;
+`zero.public_models` explicitly selects public reads. Database bindings live in
+`permissions.resources`; normal Laravel discovery resolves policies. Unsupported
+hooks, scopes or matchers fail instead of weakening a query. See
+[the authorization guide](../apps/docs/content/docs/0.x/docs/authorization.mdx).
+
+Trusted actor/context values come from authentication, never editable query inputs.
+Managed grants and database triggers maintain private projections transactionally
+on PostgreSQL 15+. Private tables reach trusted zero-cache, never client schemas or
+result rows. Column privacy still uses Eloquent visibility and Zero column attributes.
+Read visibility does not grant write permission: use middleware, FormRequests and
+explicit Gates. Association IDs require their own checks.
 
 ## Checked query declarations
 
@@ -39,7 +48,10 @@ identity changes. They do not promise total counts or snapshot pagination.
 
 Directly returned bound models become live singular queries after Laravel binding.
 Initial missing rows remain normal binding failures. Later unauthorized, deleted,
-or missing singular rows become absent data rather than stale retained snapshots.
+or missing singular rows block protected rendering while fresh access is checked.
+Captured instance guards are rechecked through an authenticated SSE channel; denied
+states preserve the configured 403/404 and unmount the page before `onRevoked`.
+Disconnects are unknown, not revocation. Reconnects require a fresh snapshot.
 
 ## Inputs, casts, and results
 

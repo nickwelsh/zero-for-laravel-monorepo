@@ -1,22 +1,21 @@
 ---
-title: Model definitions
-description: Define replicated columns, casts, relationships, and mandatory visibility.
+title: Models and publication
+description: Use ordinary Eloquent models, explicit publication, and Laravel policies.
 ---
 
-Models own replication metadata and row visibility. Controllers own queries and
+Models own columns, casts and relationships. Policies own visibility. Controllers own queries and
 mutation actions. The generated client exposes plain row types, not model instances
 with `query`, `update`, or `destroy` methods.
 
 ```php
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Model;
+use ZeroForLaravel\Concerns\HasPolicyVisibility;
 use ZeroForLaravel\Concerns\HasZeroQueries;
-use ZeroForLaravel\ContextField;
-use ZeroForLaravel\Definition\ZeroDefinition;
 
 class Task extends Model
 {
-    use HasUuids, HasZeroQueries;
+    use HasUuids, HasZeroQueries, HasPolicyVisibility;
 
     protected $fillable = ['title', 'done'];
     protected $visible = ['id', 'user_id', 'title', 'done', 'created_at', 'updated_at'];
@@ -26,19 +25,17 @@ class Task extends Model
         return ['done' => 'boolean'];
     }
 
-    public static function zero(): ZeroDefinition
-    {
-        return ZeroDefinition::make()
-            ->authorize('user_id', '=', ContextField::UserId)
-            ->fillFromContext('user_id', ContextField::UserId);
-    }
 }
 ```
 
-Register every participating relationship target. Use `relations(...)` to expose
-schema relationships, `authorizeRelation(...)` for mandatory related visibility,
-and `publicReads()` only for deliberately public rows. Missing required context
-denies access. Read visibility never grants write permission.
+Register participating models and relationship targets explicitly in `zero.models`.
+Relationships used by supported queries are discovered from ordinary Eloquent
+methods; no `zero()` method or `ZeroDefinition` is needed. Use
+`Task::zeroQuery()->visibleTo($request->user())` for protected reads, and scope related
+paths explicitly. The corresponding REST query is `Task::query()->visibleTo($user)`.
+See [authorization](./authorization.mdx) for policies, Casbin and the portable subset.
+Intentionally public models opt into `zero.public_models`. Missing permissions
+never imply public access. Read visibility never grants write permission.
 
 ## Columns and privacy
 
@@ -49,11 +46,15 @@ PostgreSQL publication. Nonempty `$visible` is the default allowlist.
 explicit `ZeroColumns` allowlist. Accessors and appended properties are not stored
 columns and do not become replicated values.
 
-Primary keys, enabled timestamps, authorization/context fields, and relationship
+Primary keys, enabled timestamps, trusted context fields, and relationship
 keys must remain available. Missing required columns fail generation instead of
 silently expanding exposure. `$fillable` separately controls write fields; it does
 not hide replicated data. Ownership, primary keys, and lifecycle timestamps are
 not patchable business input.
+
+Authority-only attributes may remain private in maintained permission projections.
+They do not need to become public business columns. Declare trusted creation fills
+separately in `zero.mutation_context`, keyed by model and column.
 
 UUID/ULID identities support generated optimistic creation. Numeric identities
 can use explicitly disabled optimism for authoritative creation. See

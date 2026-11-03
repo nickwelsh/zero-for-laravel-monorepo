@@ -136,6 +136,9 @@ final class ZeroServiceProvider extends ServiceProvider
                 Route::post('access', [Access\AccessController::class, 'store'])->name('zero.access.store');
                 Route::get('access/events', [Access\AccessController::class, 'events'])->name('zero.access.events');
                 Route::delete('access/{id}', [Access\AccessController::class, 'destroy'])->name('zero.access.destroy');
+                if (config()->array('permissions.predictions.abilities') !== []) {
+                    Route::get('permissions', Permissions\PredictionController::class)->name('zero.permissions');
+                }
             });
         }
     }

@@ -14,22 +14,24 @@ The source defaults live in
 
 ## Laravel settings
 
-| Key                           | Default                                      | Purpose                                                                                                             |
-| ----------------------------- | -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| `models`                      | `[]`                                         | Discover models under `app/Models` with a `zero()` definition; otherwise list every participating model explicitly. |
-| `output`                      | `resources/js/zero/generated.ts`             | Generated schema, metadata, and plain row types; query/mutation modules are written alongside it.                   |
-| `controller_output`           | `bootstrap/zero-queries.php`                 | Authoritative controller query registrations.                                                                       |
-| `mutation_output`             | `bootstrap/zero-mutations.php`               | Authoritative controller mutation registrations.                                                                    |
-| `react`                       | `false`                                      | Also generate the React wrapper and check it for drift.                                                             |
-| `wayfinder_import`            | `@/zero`                                     | TypeScript module root for the opt-in Wayfinder page converter; not a filesystem path.                              |
-| `sync_publication_on_migrate` | `false`                                      | Synchronize the dedicated publication after successful PostgreSQL `up` migration batches.                           |
-| `publication`                 | `ZERO_PUBLICATION` or `laravel_zero`         | Dedicated PostgreSQL publication managed by the package.                                                            |
-| `app_id`                      | `ZERO_APP_ID` or `zero`                      | Application identity shared with Zero cache.                                                                        |
-| `upstream_schema`             | `ZERO_UPSTREAM_SCHEMA` or `zero_0`           | Zero-owned bookkeeping schema; match the cache's `<app-id>_0`.                                                      |
-| `api_key`                     | `ZERO_API_KEY`                               | Private cache API key; never include it in browser code.                                                            |
-| `route_prefix`                | `zero`                                       | Prefix for query and mutation endpoints.                                                                            |
-| `middleware`                  | `['api', 'auth']`                            | Authenticate the end user independently of cache authentication.                                                    |
-| `context_resolver`            | `ZeroForLaravel\Http\ContextResolver::class` | Resolve trusted `ZeroContext`; by default supplies the authenticated `user_id`.                                     |
+| Key                           | Default                                      | Purpose                                                                                           |
+| ----------------------------- | -------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| `models`                      | `[]`                                         | Explicit model publication allowlist; empty means no application models.                          |
+| `public_models`               | `[]`                                         | Explicitly public read models; publication alone never grants read access.                        |
+| `mutation_context`            | `[]`                                         | Model-keyed trusted creation fills, excluded from writable input.                                 |
+| `output`                      | `resources/js/zero/generated.ts`             | Generated schema, metadata, and plain row types; query/mutation modules are written alongside it. |
+| `controller_output`           | `bootstrap/zero-queries.php`                 | Authoritative controller query registrations.                                                     |
+| `mutation_output`             | `bootstrap/zero-mutations.php`               | Authoritative controller mutation registrations.                                                  |
+| `react`                       | `false`                                      | Also generate the React wrapper and check it for drift.                                           |
+| `wayfinder_import`            | `@/zero`                                     | TypeScript module root for the opt-in Wayfinder page converter; not a filesystem path.            |
+| `sync_publication_on_migrate` | `false`                                      | Synchronize the dedicated publication after successful PostgreSQL `up` migration batches.         |
+| `publication`                 | `ZERO_PUBLICATION` or `laravel_zero`         | Dedicated PostgreSQL publication managed by the package.                                          |
+| `app_id`                      | `ZERO_APP_ID` or `zero`                      | Application identity shared with Zero cache.                                                      |
+| `upstream_schema`             | `ZERO_UPSTREAM_SCHEMA` or `zero_0`           | Zero-owned bookkeeping schema; match the cache's `<app-id>_0`.                                    |
+| `api_key`                     | `ZERO_API_KEY`                               | Private cache API key; never include it in browser code.                                          |
+| `route_prefix`                | `zero`                                       | Prefix for query and mutation endpoints.                                                          |
+| `middleware`                  | `['api', 'auth']`                            | Authenticate the end user independently of cache authentication.                                  |
+| `context_resolver`            | `ZeroForLaravel\Http\ContextResolver::class` | Resolve trusted `ZeroContext`; by default supplies the authenticated `user_id`.                   |
 
 Register relationship targets even if they expose no top-level queries or writes.
 Choose the middleware and guard appropriate to your application. Session
@@ -77,18 +79,29 @@ route/context fields as filters. See [editable live inputs](./react.mdx#editable
 
 ## Modular model registration
 
-`zero.models` is an explicit list and takes precedence over discovery. When it is
-empty, `zero.discovery` lists PSR-4 roots to scan:
+`zero.models` is the sole publication allowlist, including models from modules:
 
 ```php
-'discovery' => [
-    ['path' => app_path('Models'), 'namespace' => 'App\\Models'],
-    ['path' => base_path('modules/Tasks/Models'), 'namespace' => 'Modules\\Tasks\\Models'],
-],
+'models' => [App\Models\Task::class, Modules\Tasks\Models\Label::class],
 ```
 
-Only concrete Eloquent models with a Zero definition or visibility/query/mutation
-attributes opt in. Discovery does not expose every model in those directories.
+No directory scan implicitly exposes Eloquent models.
 Explicit visibility, required keys, `$visible` replication allowlists, and override
 precedence remain enforced. No modular-framework dependency is required.
 Use `zero:exposure` to inspect the resulting columns and permissions.
+
+## Permission settings
+
+Publish `permissions-config` and `permissions-migrations`, migrate, configure
+`permissions.models`, `permissions.subject` and `permissions.resources`, then run
+`permissions:rebuild` on PostgreSQL before serving portable queries. Policies are
+resolved by Laravel, not a second configuration map.
+
+`permissions.denied_status` defaults to 403; choose 404 for concealment. Policy
+responses can override it with `asNotFound()` or `asNotAuthorized()`. Access-watch
+controls live under `permissions.access`: maximum 32 active watches per actor,
+300-second renewable leases, 20-second streaming connections and 250-millisecond
+revision polling by default. `middleware` defaults to `['web', 'auth']`; use the
+application's browser authentication guard and retain CSRF protection on writes.
+Permission predictions are opt-in through `permissions.predictions` safe attribute
+and ability allowlists. See [authorization](./authorization.mdx).

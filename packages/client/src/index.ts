@@ -22,3 +22,5 @@ export type { Column, ColumnValue, ModelContract, ContractMap, ClientContext, Mo
 
 export { completeMutation, MutationResultError } from './operation';
 export type { MutationClient } from './operation';
+export { predictPermission } from './permissions';
+export type { PermissionPredictions, PermissionPredictionPlan } from './permissions';

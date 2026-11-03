@@ -23,13 +23,14 @@ record the architecture and acceptance requirements.
 ## Declare live props in controllers
 
 ```php
-public function index(): \Inertia\Response
+public function index(\Illuminate\Http\Request $request): \Inertia\Response
 {
     return \Inertia\Inertia::render('tasks/index', [
         'heading' => 'Tasks',
         'tasks' => Task::zeroQuery()
+            ->visibleTo($request->user())
             ->where('done', false)
-            ->related('list')
+            ->related('list', fn ($list) => $list->visibleTo($request->user()))
             ->orderBy('created_at', 'desc')
             ->infinite(25),
     ]);
@@ -54,26 +55,41 @@ remain explicit. `infinite()` grows a live window; `paginate()` navigates raw cu
 Neither promises total counts or immutable historical pages. Plain queries acquire
 no hidden limit or ordering.
 
-## Keep visibility on models
+## Use ordinary Laravel policies
 
 ```php
-use ZeroForLaravel\ContextField;
-use ZeroForLaravel\Definition\ZeroDefinition;
+use Illuminate\Auth\Access\Response;
+use ZeroForLaravel\Permissions\Casbin;
 
-public static function zero(): ZeroDefinition
+// Discovered normally by Laravel. No Zero-specific model definition.
+public function view(User $user, Task $task): Response
 {
-    return ZeroDefinition::make()
-        ->authorize('user_id', '=', ContextField::UserId)
-        ->fillFromContext('user_id', ContextField::UserId)
-        ->relations('list');
+    return Casbin::inspect($user, 'view', $task)->asNotFound();
 }
+
+Gate::authorize('view', $task); // REST and Inertia show routes.
+Task::query()->visibleTo($user)->paginate(); // REST collections.
+Task::zeroQuery()->visibleTo($request->user()); // Live collections.
 ```
 
-Use `publicReads()` only for intentionally public data. `authorizeRelation()` requires
-a related row visible under its own model's constraints. Visibility applies to roots,
-included rows, and existence predicates. Browser context predicts; the server resolves
-its own authenticated context. Write authorization belongs in FormRequests, route
-middleware, and explicit controller Gates/policies.
+Add `HasPolicyVisibility` alongside `HasZeroQueries` to opt into the Eloquent local
+scope. Policies choose actions; `config/permissions.php` binds database attributes
+and domains to a supported Casbin model. Managed database grants are the authority.
+The portable compiler supports ACL, global/domain RBAC and a typed ABAC subset;
+unsupported policies fail explicitly. A supported policy `before()` admin override
+stays live without bypassing caller filters. There is no auth-dependent global scope.
+
+Explicitly list participating models in `zero.models`. Every protected root,
+related selection and existence path needs `visibleTo()` or a supported captured
+instance Gate. `zero.public_models` opts into intentionally public reads. Trusted
+creation fills belong in `zero.mutation_context`; search uses its own registration.
+Write authorization stays in FormRequests, middleware and controller Gates.
+
+Captured show Gates also create actor-owned access watches: confirmed access loss
+blocks the page before the optional Inertia adapter `access.onRevoked` callback.
+Disconnects block pending revalidation; empty collections remain successful.
+See [authorization and migration](apps/docs/content/docs/0.x/docs/authorization.mdx)
+for setup, supported compiler boundaries and deployment requirements.
 
 Column privacy uses `$visible`, `$hidden`, `ZeroColumns`, `ZeroExclude`, and
 `ZeroIncludeColumns`. Generation fails if required keys are excluded. Synchronize a
