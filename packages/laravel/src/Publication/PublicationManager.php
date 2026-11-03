@@ -84,6 +84,14 @@ final readonly class PublicationManager
             $tables[$table] = $columns;
         }
 
+        foreach ($this->registry->privateTables() as $table => $columns) {
+            if (isset($tables[$table])) {
+                throw new LogicException('Private permission tables cannot be registered as public Zero models or pivots.');
+            }
+
+            $tables[$table] = $columns;
+        }
+
         ksort($tables);
         if ($tables === []) {
             throw new LogicException('Register at least one Zero model before syncing a publication.');

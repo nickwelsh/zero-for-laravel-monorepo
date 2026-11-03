@@ -10,6 +10,18 @@ The target API uses normal Laravel policies and Gates. Collection visibility is 
 explicit local `visibleTo($user)` scope, shared by Eloquent and `Model::zeroQuery()`.
 There is no authentication-dependent global scope or second policy registration map.
 
+Schema publication remains an explicit `zero.models` allowlist. Definition-free
+public models also require `zero.public_models`; a missing permission binding never
+makes a model public. Trusted creation fills live in `zero.mutation_context`, and
+Scout search configurations register through `ScoutSearch::for(...)->register()`
+in an application provider. Column exposure rules remain unchanged.
+
+Relationship dependencies are collected from supported declarations before final
+schema generation. Private permission facts participate only in trusted database
+publication, never the generated client schema or public model registrations. The
+temporary internal legacy-definition reader preserves existing applications during
+this refactor; removing it belongs to the native policy-query migration.
+
 A portable policy returns `Casbin::inspect($user, 'view', $resource)`. The default
 denial status is configurable; `asNotFound()` chooses 404 and `asNotAuthorized()`
 chooses 403. A policy-level `before()` super-admin override is distinct from a Casbin

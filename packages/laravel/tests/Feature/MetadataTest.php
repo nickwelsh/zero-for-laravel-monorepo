@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace ZeroForLaravel\Tests\Feature;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
 use LogicException;
@@ -22,6 +23,33 @@ use ZeroForLaravel\Tests\TestCase;
 use ZeroForLaravel\ZeroContext;
 
 uses(TestCase::class);
+
+class ExternalTask extends Model
+{
+    protected $table = 'tasks';
+
+    protected $fillable = ['user_id', 'title'];
+
+    protected $hidden = ['secret'];
+
+    /** @return BelongsTo<UnprotectedTask, $this> */
+    public function parent(): BelongsTo
+    {
+        return $this->belongsTo(UnprotectedTask::class, 'list_id');
+    }
+}
+
+test('external publication and mutation metadata need no model definition and relationships are collected on demand', function (): void {
+    config(['zero.public_models' => [ExternalTask::class], 'zero.mutation_context' => [ExternalTask::class => ['user_id' => ContextField::UserId]]]);
+    $registry = new ModelRegistry([ExternalTask::class]);
+    $task = $registry->get('ExternalTask');
+    expect($task->serverFill)->toBe(['user_id' => 'user_id']);
+    expect($task->writable)->toBe(['title']);
+    expect($task->relations)->toBe([]);
+    expect(fn (): Query => (new Query($task, $registry))->related('delete'))->toThrow(LogicException::class, 'relationship');
+    expect(fn (): Query => (new Query($task, $registry))->related('parent'))->toThrow(LogicException::class, 'Unknown Zero model');
+    expect($task->columns)->not->toHaveKey('secret');
+});
 
 test('model identity must match the database primary key', function (): void {
     new ModelRegistry([WrongKeyTask::class]);

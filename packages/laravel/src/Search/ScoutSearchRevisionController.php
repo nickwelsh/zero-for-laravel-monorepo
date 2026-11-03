@@ -18,7 +18,7 @@ final class ScoutSearchRevisionController
         $request->validate(['index' => ['required', 'string', 'max:255']]);
         $index = $request->string('index')->toString();
         foreach ($registry->all() as $model) {
-            $search = $model->definition->search;
+            $search = $model->search;
             if ($search !== null && $search->metadata()['index'] === $index) {
                 $search->filter($resolver($request));
 

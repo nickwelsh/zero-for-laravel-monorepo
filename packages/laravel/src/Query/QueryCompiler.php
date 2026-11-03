@@ -127,12 +127,16 @@ final readonly class QueryCompiler
     /** @return list<WireCondition> */
     private function visibility(ModelMetadata $model, ZeroContext $context, int $depth): array
     {
+        if ($model->policyVisibility) {
+            throw new LogicException('Portable Zero policy visibility must be compiled before this query can run.');
+        }
+
         $conditions = array_map(fn (array $rule): array => $this->comparison($rule['field'], $rule['op'], array_key_exists('context', $rule['value']) ? $context->get($rule['value']['context']) : $rule['value']['literal']), $model->authorization);
         foreach ($model->authorizationRelations as $relation) {
             $conditions[] = ['type' => 'correlatedSubquery', 'related' => $this->related($model, $relation, $context, $depth + 1), 'op' => 'EXISTS'];
         }
 
-        foreach ($model->definition->serverScopes as $scope) {
+        foreach ($model->serverScopes as $scope) {
             $query = $this->scopeBuilder($model, $context, $depth);
             $scope($query, $context);
             $conditions[] = $query->condition();

@@ -30,6 +30,9 @@ class SearchProjection extends Model
 test('Scout model schema overrides config and public metadata excludes credentials', function (): void {
     config(['scout.typesense.model-settings.'.SearchProjection::class => ['collection-schema' => ['fields' => []], 'search-parameters' => ['query_by' => 'title']], 'scout.typesense.client-settings.api_key' => 'private-key']);
     $search = ScoutSearch::for(SearchProjection::class)->sorts('created_at:desc');
+    $search->register();
+
+    expect(ScoutSearch::registered(SearchProjection::class))->toBe($search);
     $metadata = $search->metadata();
     expect($metadata['facets'])->toBe(['tags'])->and($metadata['index'])->toBe('scoped_records')->and(json_encode($metadata))->not->toContain('private-key');
     expect(fn (): string => $search->filter(new ZeroContext(['user_id' => 'alice'])))->toThrow(LogicException::class);

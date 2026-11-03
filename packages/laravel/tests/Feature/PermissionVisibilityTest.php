@@ -12,10 +12,13 @@ use LogicException;
 use RuntimeException;
 use stdClass;
 use Symfony\Component\Process\Process;
+use ZeroForLaravel\Generation\TypeScriptGenerator;
+use ZeroForLaravel\Metadata\ModelRegistry;
 use ZeroForLaravel\Permissions\Casbin;
 use ZeroForLaravel\Permissions\PermissionSchema;
 use ZeroForLaravel\Permissions\PermissionServiceProvider;
 use ZeroForLaravel\Permissions\ProjectionManager;
+use ZeroForLaravel\Publication\PublicationManager;
 use ZeroForLaravel\Tests\Fixtures\PermissionAdminPolicy;
 use ZeroForLaravel\Tests\Fixtures\PermissionList;
 use ZeroForLaravel\Tests\Fixtures\PermissionSoftDeletedList;
@@ -66,6 +69,14 @@ afterEach(function (): void {
             DB::connection()->getPdo()->exec('DROP FUNCTION IF EXISTS "'.$row->proname.'"('.$row->args.') CASCADE');
         }
     }
+});
+
+test('private permission projections replicate without entering the browser schema', function (): void {
+    $registry = new ModelRegistry([PermissionList::class]);
+    $sql = implode("\n", (new PublicationManager($registry))->plan('permission_test_publication'));
+    expect($sql)->toContain('permission_subjects', 'permission_index');
+    $browser = (new TypeScriptGenerator)->generate($registry);
+    expect($browser)->not->toContain('permission_subjects', 'permission_index', 's_is_admin', 'a_owner_id');
 });
 
 test('visible collections agree with Gates before counts and windows and preserve caller filters for admins', function (): void {

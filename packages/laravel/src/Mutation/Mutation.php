@@ -9,6 +9,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\UniqueConstraintViolationException;
 use LogicException;
 use Ramsey\Uuid\Uuid;
+use ZeroForLaravel\ContextField;
 use ZeroForLaravel\Metadata\ModelMetadata;
 use ZeroForLaravel\Metadata\ModelRegistry;
 use ZeroForLaravel\Support\Input;
@@ -32,6 +33,33 @@ final readonly class Mutation
     public static function server(Closure $guard): mixed
     {
         return $guard();
+    }
+
+    /** @param array<string, string> $legacy
+     * @return array<string, string>
+     */
+    public static function contextFills(string $class, array $legacy = []): array
+    {
+        $configured = config()->array('zero.mutation_context', [])[$class] ?? null;
+        if ($configured === null) {
+            return $legacy;
+        }
+
+        if (! is_array($configured) || $legacy !== []) {
+            throw new LogicException('Configure mutation context fills once, outside legacy model definitions.');
+        }
+
+        $fills = [];
+        foreach ($configured as $column => $context) {
+            if (! is_string($column) || ! preg_match('/^[a-zA-Z_][a-zA-Z0-9_]*$/D', $column)
+                || (! is_string($context) && ! $context instanceof ContextField)) {
+                throw new LogicException('Mutation context fills must map database columns to trusted context keys.');
+            }
+
+            $fills[$column] = $context instanceof ContextField ? $context->value : $context;
+        }
+
+        return $fills;
     }
 
     public function timestamp(): int

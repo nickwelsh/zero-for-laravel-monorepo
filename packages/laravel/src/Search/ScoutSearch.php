@@ -37,6 +37,26 @@ final class ScoutSearch
         return new self($model, $key);
     }
 
+    public static function registered(string $model): ?self
+    {
+        $key = self::class.':'.$model;
+        if (! app()->bound($key)) {
+            return null;
+        }
+
+        $search = app()->make($key);
+
+        return $search instanceof self ? $search : throw new LogicException('Invalid registered Scout search configuration.');
+    }
+
+    /** Register in an application provider, outside model schema/permission definitions. */
+    public function register(): self
+    {
+        app()->instance(self::class.':'.$this->model, $this);
+
+        return $this;
+    }
+
     public function filters(string ...$fields): self
     {
         $this->filters = array_values($fields);

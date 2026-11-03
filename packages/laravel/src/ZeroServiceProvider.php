@@ -109,6 +109,7 @@ final class ZeroServiceProvider extends ServiceProvider
                 // Migrations may have changed columns on an already-resolved registry.
                 $this->app->forgetInstance(ModelRegistry::class);
                 $registry = $this->app->make(ModelRegistry::class);
+                $this->app->make(Generation\ControllerDiscovery::class)->queries();
 
                 (new PublicationManager($registry))->sync(config()->string('zero.publication'));
             });

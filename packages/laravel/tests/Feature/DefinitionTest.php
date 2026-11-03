@@ -123,7 +123,7 @@ test('scope relations keep target authorization without adding result relationsh
 
 test('an empty mandatory scope cannot silently grant access', function (): void {
     $registry = new ModelRegistry([DefinedTask::class, ScopedList::class]);
-    $registry->get('ScopedList')->definition->serverScopes = [fn (): null => null];
+    $registry->get('ScopedList')->serverScopes = [fn (): null => null];
     (new QueryCompiler($registry))->compileDeclaration((new Query($registry->get('DefinedTask'), $registry))->related('list'), new ZeroContext(['user_id' => 'alice']));
 })->throws(LogicException::class, 'must add');
 

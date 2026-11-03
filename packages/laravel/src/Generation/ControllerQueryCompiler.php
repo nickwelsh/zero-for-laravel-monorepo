@@ -116,8 +116,13 @@ final class ControllerQueryCompiler
         ksort($models);
         $schemaFingerprint = hash('sha256', json_encode([
             'zero' => '1.11.3',
-            'models' => array_map(fn (\ZeroForLaravel\Metadata\ModelMetadata $model): array => $model->toArray(), $models),
-            'pivots' => $this->models->pivotColumns(),
+            'models' => array_map(function (\ZeroForLaravel\Metadata\ModelMetadata $model): array {
+                $schema = $model->toArray();
+                // Lazy query dependencies belong to the query, not discovery order.
+                $schema['relations'] = array_intersect_key($model->relations, array_flip([...$model->authorizationRelations, ...$model->relationDependencies]));
+
+                return $schema;
+            }, $models),
             'inputs' => array_map(static fn (string $type): mixed => match (true) {
                 str_starts_with($type, 'request:') => RequestContract::rules(substr($type, 8)),
                 str_starts_with($type, 'enum:') => QueryInput::enumValues($type),
@@ -145,11 +150,41 @@ final class ControllerQueryCompiler
         $queries = [];
         foreach ($props as $prop => [$expression, $line]) {
             if ($expression->model instanceof \ZeroForLaravel\Metadata\ModelMetadata) {
-                $queries[] = new ControllerQuery($this->action, $args[0]->value->value, $prop, $parameters, $expression, $this->file, $line, $schemaFingerprint, $ordinary);
+                $fingerprint = hash('sha256', $schemaFingerprint.json_encode($this->dependencies($expression), JSON_THROW_ON_ERROR));
+                $queries[] = new ControllerQuery($this->action, $args[0]->value->value, $prop, $parameters, $expression, $this->file, $line, $fingerprint, $ordinary);
             }
         }
 
         return $queries;
+    }
+
+    /** @return list<array<string, mixed>> */
+    private function dependencies(QueryExpression $expression): array
+    {
+        $dependencies = [];
+        if ($expression->kind === 'method' && in_array($expression->value, ['related', 'whereExists', 'exists'], true)) {
+            $model = $expression->model ?? throw new LogicException('Relationship has no source model.');
+            $name = $expression->children[1]->value;
+            if (! is_string($name)) {
+                throw new LogicException('Relationship requires a literal name.');
+            }
+
+            $relation = $this->models->relation($model, $name);
+            $pivots = [];
+            foreach ($relation['path'] as $path) {
+                if (isset($this->models->pivotColumns()[$path['table']])) {
+                    $pivots[$path['table']] = $this->models->pivotColumns()[$path['table']];
+                }
+            }
+
+            $dependencies[] = ['source' => $model->name, 'relation' => $name, 'path' => $relation, 'pivots' => $pivots];
+        }
+
+        foreach ($expression->children as $child) {
+            array_push($dependencies, ...$this->dependencies($child));
+        }
+
+        return $dependencies;
     }
 
     /**
@@ -340,11 +375,11 @@ final class ControllerQueryCompiler
                     $type = 'builder';
                     if ($index === 1 && in_array($method, ['related', 'whereExists', 'exists'], true)) {
                         $relation = $arguments[0] ?? null;
-                        if ($relation?->kind !== 'literal' || ! is_string($relation->value) || ! isset($model->relations[$relation->value])) {
+                        if ($relation?->kind !== 'literal' || ! is_string($relation->value)) {
                             $this->unsupported($argument, 'Relationship callback requires a registered relationship.');
                         }
 
-                        $model = $this->models->get($model->relations[$relation->value]['model']);
+                        $model = $this->models->get($this->models->relation($model, $relation->value)['model']);
                         $type = 'query';
                     } elseif ($index !== 0 || $method !== 'where') {
                         $this->unsupported($argument, 'Callback is not supported in this argument position.');
@@ -395,6 +430,10 @@ final class ControllerQueryCompiler
 
             if (in_array($method, ['where', 'cmp', 'orderBy', 'related', 'whereExists', 'exists'], true) && ($method !== 'where' || ($arguments[0]->kind ?? null) !== 'callback')) {
                 $field = $arguments[0] ?? null;
+                if (in_array($method, ['related', 'whereExists', 'exists'], true) && $field?->kind === 'literal' && is_string($field->value)) {
+                    $this->models->relation($receiver->model, $field->value);
+                }
+
                 $names = in_array($method, ['related', 'whereExists', 'exists'], true) ? $receiver->model->relations : $receiver->model->columns;
                 if ($field?->kind !== 'literal' || ! is_string($field->value) || ! array_key_exists($field->value, $names)) {
                     $this->unsupported($node, 'Query fields and relationships must name a registered column or relationship.');

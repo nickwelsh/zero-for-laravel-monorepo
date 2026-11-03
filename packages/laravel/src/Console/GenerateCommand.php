@@ -30,9 +30,9 @@ final class GenerateCommand extends Command
             return self::FAILURE;
         }
 
-        $source = $generator->generate($registry);
         $definitions = array_values(array_column($controllers->queries(), 'query'));
         $mutations = $controllers->mutations();
+        $source = $generator->generate($registry);
         $mutationGenerator = resolve(ControllerMutationGenerator::class);
         $base = pathinfo($path, PATHINFO_FILENAME);
         $outputs = [

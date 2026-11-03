@@ -30,11 +30,11 @@ final class ScoutSearchController
             $search = null;
             $sort = null;
             foreach ($registry->all() as $model) {
-                if ($model->definition->search === null) {
+                if ($model->search === null) {
                     continue;
                 }
 
-                $candidate = $model->definition->search;
+                $candidate = $model->search;
                 $meta = $candidate->metadata();
                 if ($index === $meta['index']) {
                     $search = $candidate;

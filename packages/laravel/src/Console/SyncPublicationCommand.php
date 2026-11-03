@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace ZeroForLaravel\Console;
 
 use Illuminate\Console\Command;
+use ZeroForLaravel\Generation\ControllerDiscovery;
 use ZeroForLaravel\Publication\PublicationManager;
 
 final class SyncPublicationCommand extends Command
@@ -13,7 +14,7 @@ final class SyncPublicationCommand extends Command
 
     protected $description = 'Synchronize a dedicated PostgreSQL publication with generated Zero columns';
 
-    public function handle(PublicationManager $manager): int
+    public function handle(PublicationManager $manager, ControllerDiscovery $controllers): int
     {
         $name = $this->option('name') ?: config()->string('zero.publication');
         if (! is_string($name)) {
@@ -22,6 +23,7 @@ final class SyncPublicationCommand extends Command
             return self::FAILURE;
         }
 
+        $controllers->queries();
         if ($this->option('dry-run')) {
             foreach ($manager->plan($name) as $statement) {
                 $this->line($statement.';');

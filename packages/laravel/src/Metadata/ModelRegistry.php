@@ -18,8 +18,14 @@ use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Database\Query\JoinClause;
 use LogicException;
 use ReflectionClass;
+use ReflectionMethod;
+use ReflectionNamedType;
 use ZeroForLaravel\Attributes;
 use ZeroForLaravel\Definition\ZeroDefinition;
+use ZeroForLaravel\Mutation\Mutation;
+use ZeroForLaravel\Permissions\Binding;
+use ZeroForLaravel\Permissions\ProjectionManager;
+use ZeroForLaravel\Search\ScoutSearch;
 
 /** @phpstan-import-type Column from \ZeroForLaravel\Metadata\ModelMetadata */
 final class ModelRegistry
@@ -84,6 +90,44 @@ final class ModelRegistry
     public function all(): array
     {
         return $this->models;
+    }
+
+    /** @return array{model: string, cardinality: string, path: list<array{source: list<string>, dest: list<string>, table: string}>} */
+    public function relation(ModelMetadata $model, string $name): array
+    {
+        if (! isset($model->relations[$name])) {
+            $method = method_exists($model->class, $name) ? new ReflectionMethod($model->class, $name) : null;
+            $type = $method?->getReturnType();
+            if (! $method instanceof ReflectionMethod || ! $method->isPublic() || $method->getNumberOfRequiredParameters() !== 0
+                || ! $type instanceof ReflectionNamedType || ! is_a($type->getName(), Relation::class, true)) {
+                throw new LogicException("{$model->name}.{$name}: expected a typed, public Eloquent relationship.");
+            }
+
+            $this->describeRelations($model, [$name]);
+        }
+
+        return $model->relations[$name];
+    }
+
+    /** Trusted replication metadata only; never part of the public model/schema contract.
+     * @return array<string, list<string>>
+     */
+    public function privateTables(): array
+    {
+        $tables = [];
+        foreach ($this->models as $model) {
+            if ($model->policyVisibility) {
+                resolve(ProjectionManager::class)->assertReady();
+                $tables = array_unique([...$tables, 'permission_subjects', 'permission_index', Binding::resource($model->class)->projectionTable()]);
+            }
+        }
+
+        $columns = [];
+        foreach ($tables as $table) {
+            $columns[$table] = array_column($this->connection()->getSchemaBuilder()->getColumns($table), 'name');
+        }
+
+        return $columns;
     }
 
     /**
@@ -186,11 +230,18 @@ final class ModelRegistry
 
         $authorization = $definition->authorization;
         $authorizationRelations = array_values(array_unique($definition->authorizationRelations));
-        if ($authorization === [] && $authorizationRelations === [] && ! $definition->public && $definition->serverScopes === []) {
+        $public = in_array($class, config()->array('zero.public_models', []), true);
+        $policy = array_key_exists($class, config()->array('permissions.resources', []));
+        if ($public && $policy) {
+            throw new LogicException("{$name}: choose public reads or a permission binding, never both.");
+        }
+
+        if ($authorization === [] && $authorizationRelations === [] && ! $definition->public && $definition->serverScopes === [] && ! $public && ! $policy) {
             throw new LogicException("{$name}: declare publicReads, authorize, authorizeRelation, or enforceServerScope visibility.");
         }
 
-        $fills = $definition->serverFill;
+        $fills = Mutation::contextFills($class, $definition->serverFill);
+        $search = ScoutSearch::registered($class) ?? $definition->search;
 
         $traits = class_uses_recursive($class);
         $deleted = in_array(SoftDeletes::class, $traits) && method_exists($model, 'getDeletedAtColumn') ? $model->getDeletedAtColumn() : null;
@@ -274,7 +325,9 @@ final class ModelRegistry
         $generator = in_array(HasUlids::class, $traits) ? 'ulid' : (in_array(HasUuids::class, $traits) ? 'uuid' : null);
         $writable = array_values(array_intersect(array_diff($this->fillable($model), array_filter(array_merge([$model->getKeyName(), $created, $updated, $deleted], array_keys($fills)))), array_keys($columns)));
 
-        return new ModelMetadata($class, $name, $model->getTable(), $model->getKeyName(), $columns, $authorization, $fills, $writable, $generator, $created, $updated, $deleted, $definition, authorizationRelations: $authorizationRelations);
+        return new ModelMetadata($class, $name, $model->getTable(), $model->getKeyName(), $columns, $authorization, $fills, $writable, $generator, $created, $updated, $deleted,
+            authorizationRelations: $authorizationRelations, serverScopes: $definition->serverScopes,
+            relationDependencies: $definition->scopeRelations, search: $search, policyVisibility: $policy);
     }
 
     /** @return list<string> */
@@ -292,10 +345,11 @@ final class ModelRegistry
         return $fields;
     }
 
-    private function describeRelations(ModelMetadata $metadata): void
+    /** @param list<string>|null $names */
+    private function describeRelations(ModelMetadata $metadata, ?array $names = null): void
     {
         $model = new $metadata->class;
-        foreach (array_unique([...$metadata->authorizationRelations, ...$metadata->definition->scopeRelations]) as $name) {
+        foreach ($names ?? array_unique([...$metadata->authorizationRelations, ...$metadata->relationDependencies]) as $name) {
             if (isset($metadata->columns[$name])) {
                 throw new LogicException("{$metadata->name}.{$name}: relation name conflicts with a model column or instance API.");
             }

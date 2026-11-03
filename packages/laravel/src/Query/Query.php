@@ -249,7 +249,7 @@ final class Query implements JsonSerializable
      */
     private function relationship(string $name, ?Closure $refine, bool $predicate, array $options = []): array
     {
-        $relation = $this->model->relations[$name] ?? throw new InvalidArgumentException("Unknown relationship {$this->model->name}.{$name}.");
+        $relation = $this->registry->relation($this->model, $name);
         if (str_starts_with($name, 'zsubq_')) {
             throw new InvalidArgumentException('The zsubq_ relationship prefix is reserved.');
         }
