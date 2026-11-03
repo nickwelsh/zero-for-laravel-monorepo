@@ -9,7 +9,9 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Schema;
+use LogicException;
 use RuntimeException;
+use stdClass;
 use ZeroForLaravel\Metadata\ModelRegistry;
 use ZeroForLaravel\Permissions\Casbin;
 use ZeroForLaravel\Permissions\PermissionManager;
@@ -145,4 +147,98 @@ test('attribute decisions refresh persisted facts and normal Laravel admin overr
     expect(Gate::forUser($admin)->allows('view', $list))->toBeTrue();
     $admin->update(['is_admin' => false]);
     expect(Gate::forUser($admin)->allows('view', $list))->toBeFalse();
+});
+
+test('portable policy compilation follows normal policy remapping and denial overrides', function (): void {
+    $compiler = new \ZeroForLaravel\Permissions\PolicyCompiler;
+    $original = $compiler->compile(PermissionList::class);
+    expect($original->action)->toBe('view');
+    expect($original->deniedStatus)->toBe(403);
+    expect($compiler->compile(PermissionList::class, 'update')->deniedStatus)->toBe(404);
+    Gate::policy(PermissionList::class, PermissionAdminPolicy::class);
+    $remapped = $compiler->compile(PermissionList::class);
+    expect($remapped->adminAttribute)->toBe('is_admin');
+    expect($remapped->fingerprint)->not->toBe($original->fingerprint);
+    Gate::before(fn (): bool => true);
+    expect(fn (): \ZeroForLaravel\Permissions\PolicyPlan => $compiler->compile(PermissionList::class))->toThrow(LogicException::class, 'Global Gate before/after hooks');
+});
+
+test('portable compilation rejects missing abilities and arbitrary policy bodies even for admins', function (): void {
+    $compiler = new \ZeroForLaravel\Permissions\PolicyCompiler;
+    Gate::policy(PermissionList::class, stdClass::class);
+    expect(fn (): \ZeroForLaravel\Permissions\PolicyPlan => $compiler->compile(PermissionList::class))->toThrow(LogicException::class, 'requires a Laravel policy');
+    $policy = new class extends \ZeroForLaravel\Tests\Fixtures\PermissionListPolicy
+    {
+        public function view(PermissionUser $user, PermissionList $list): \Illuminate\Auth\Access\Response
+        {
+            return Casbin::inspect($user, 'view', $list)->withStatus(404);
+        }
+    };
+    Gate::policy(PermissionList::class, $policy::class);
+    expect(fn (): \ZeroForLaravel\Permissions\PolicyPlan => $compiler->compile(PermissionList::class))->toThrow(LogicException::class, 'denial overrides');
+});
+
+test('unsupported Casbin expressions fail explicitly instead of becoming an unrestricted query', function (string $expression, string $diagnostic): void {
+    $path = tempnam(sys_get_temp_dir(), 'portable-model-');
+    if ($path === false) {
+        throw new RuntimeException('Cannot create a model fixture.');
+    }
+
+    $source = resolve(PermissionManager::class)->source();
+    file_put_contents($path, preg_replace('/^m = .+$/m', 'm = '.$expression, $source));
+    config(['permissions.models.default' => $path]);
+    try {
+        expect(fn (): \ZeroForLaravel\Permissions\PolicyPlan => (new \ZeroForLaravel\Permissions\PolicyCompiler)->compile(PermissionList::class))->toThrow(LogicException::class, $diagnostic);
+    } finally {
+        \Illuminate\Support\Facades\File::delete($path);
+    }
+})->with([
+    'eval' => ['eval(p.cond)', 'custom functions, eval and clock'],
+    'unscoped role' => ['r.obj.type == p.obj && r.act == p.act && g(r.sub.key, p.sub, r.dom)', 'Every portable matcher branch'],
+    'negated roles' => ['!g(r.sub.key, p.sub, r.dom)', 'Negated Casbin role'],
+    'mutable cross-row ordering' => ['r.obj.department_id <= r.sub.department_id', 'ordering requires bounded integers'],
+    'missing attributes' => ['r.obj.classification == 3', 'Unmapped or non-database'],
+    'implicit conversion' => ['r.obj.owner_id == 42', 'identical scalar types'],
+]);
+
+test('published model families produce ordinary Gate decisions and portable plans', function (string $profile, string $grant, string $role): void {
+    config(['permissions.models.default' => dirname(__DIR__, 2).'/config/permissions/'.$profile.'.conf']);
+    $alice = PermissionUser::create(['id' => 42, 'department_id' => 'engineering']);
+    $bob = PermissionUser::create(['id' => 84, 'department_id' => 'support']);
+    $list = PermissionList::create(['id' => 7, 'owner_id' => '42', 'department_id' => 'engineering', 'name' => 'Private plans']);
+    Casbin::addPolicy(...explode(', ', $grant));
+    if ($role !== '') {
+        Casbin::addGroupingPolicy(...explode(', ', $role));
+    }
+
+    expect(Gate::forUser($alice)->allows('view', $list))->toBeTrue();
+    expect(Gate::forUser($bob)->allows('view', $list))->toBeFalse();
+    expect((new \ZeroForLaravel\Permissions\PolicyCompiler)->compile(PermissionList::class)->action)->toBe('view');
+})->with([
+    'ACL' => ['global-acl', 'user:42, todo-list, view, any, allow', ''],
+    'global RBAC' => ['global-rbac', 'role:reader, todo-list, view, any, allow', 'user:42, role:reader'],
+    'domain ACL' => ['domain-acl', 'user:42, list:7, todo-list, view, any, allow', ''],
+    'domain RBAC and ABAC' => ['scoped-rbac-abac', 'role:reader, list:7, todo-list, view, owner, allow', 'user:42, role:reader, list:7'],
+    'role-free ABAC' => ['abac', 'list:7, todo-list, view, department, allow', ''],
+]);
+
+test('role cycles and over-depth writes roll back while surviving inheritance paths remain effective', function (): void {
+    $alice = PermissionUser::create(['id' => 42, 'department_id' => 'engineering']);
+    $list = PermissionList::create(['id' => 7, 'owner_id' => '42', 'department_id' => 'engineering', 'name' => 'Private plans']);
+    Casbin::addPolicy('role:reader', 'list:7', 'todo-list', 'view', 'any', 'allow');
+    Casbin::addGroupingPolicy('user:42', 'role:left', 'list:7');
+    Casbin::addGroupingPolicy('user:42', 'role:right', 'list:7');
+    Casbin::addGroupingPolicy('role:left', 'role:reader', 'list:7');
+    Casbin::addGroupingPolicy('role:right', 'role:reader', 'list:7');
+    Casbin::removeGroupingPolicy('role:left', 'role:reader', 'list:7');
+    expect(Gate::forUser($alice)->allows('view', $list))->toBeTrue();
+    $count = DB::table('permission_rules')->count();
+    expect(fn () => Casbin::addGroupingPolicy('role:reader', 'role:right', 'list:7'))->toThrow(LogicException::class, 'acyclic');
+    expect(DB::table('permission_rules')->count())->toBe($count);
+    for ($i = 0; $i < 8; $i++) {
+        Casbin::addGroupingPolicy('role:depth-'.$i, 'role:depth-'.($i + 1), 'list:7');
+    }
+
+    expect(fn () => Casbin::addGroupingPolicy('user:42', 'role:depth-0', 'list:7'))->toThrow(LogicException::class, 'eight edges');
+    expect(Gate::forUser($alice)->allows('view', $list))->toBeTrue();
 });

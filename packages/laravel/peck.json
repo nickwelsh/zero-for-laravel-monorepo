@@ -23,6 +23,8 @@
             "cmp",
             "zero",
             "casbin",
+            "matcher",
+            "arity",
             "phpstan",
             "pest",
             "rector",

@@ -179,6 +179,7 @@ final readonly class PermissionManager
             }
 
             if ($changed) {
+                new RoleGraph($this->rules());
                 $connection->table('permission_models')->where('id', $this->name)->increment('revision');
                 $revision = $connection->table('permission_models')->where('id', $this->name)->value('revision');
                 $connection->table('permission_events')->insert(['model' => $this->name, 'revision' => $revision]);
