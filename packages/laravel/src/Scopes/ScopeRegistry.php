@@ -17,6 +17,7 @@ use ZeroForLaravel\Attributes\ZeroScope;
 use ZeroForLaravel\Attributes\ZeroScopedBy;
 use ZeroForLaravel\Generation\ScopeCompiler;
 use ZeroForLaravel\Metadata\ModelMetadata;
+use ZeroForLaravel\Permissions\VisibleToCurrentUser;
 use ZeroForLaravel\Query\ZeroQuery;
 
 final class ScopeRegistry
@@ -91,6 +92,12 @@ final class ScopeRegistry
 
         if ($metadata->deletedAt !== null) {
             $scopes[SoftDeletingScope::class] = new SoftDeletingScope;
+        }
+
+        foreach ((new $metadata->class)->getGlobalScopes() as $scope) {
+            if ($scope instanceof VisibleToCurrentUser) {
+                $scopes[VisibleToCurrentUser::class] = $scope;
+            }
         }
 
         return $scopes;

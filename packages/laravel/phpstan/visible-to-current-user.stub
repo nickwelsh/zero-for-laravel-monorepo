@@ -1,0 +1,6 @@
+<?php
+
+namespace ZeroForLaravel\Permissions;
+
+/** Before Laravel 13.5, Eloquent Scope has no class-level model template. */
+final class VisibleToCurrentUser {}

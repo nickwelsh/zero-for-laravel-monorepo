@@ -20,6 +20,7 @@ use Symfony\Component\Console\Output\ConsoleOutput;
 use ZeroForLaravel\Attributes\ZeroMutation;
 use ZeroForLaravel\Generation\Mutations\ControllerMutationCompiler;
 use ZeroForLaravel\Permissions\Casbin;
+use ZeroForLaravel\Permissions\VisibleToCurrentUser;
 use ZeroForLaravel\Tests\Fixtures\Comment;
 use ZeroForLaravel\Tests\Fixtures\ContextResolver;
 use ZeroForLaravel\Tests\Fixtures\ControllerMutationRequest;
@@ -50,11 +51,10 @@ class FixtureIdentity
 
 class FixtureReads
 {
-    public function index(Request $request): Response
+    public function index(): Response
     {
         return Inertia::render('fixture/related', [
-            'tasks' => Task::zeroQuery()->visibleTo($request->user())
-                ->with('tags', fn ($tags) => $tags->visibleTo($request->user())),
+            'tasks' => Task::zeroQuery()->with('tags'),
         ]);
     }
 }
@@ -108,6 +108,8 @@ ini_set('error_log', $root.'/php.log');
 $kernel = $app->make(PHP_SAPI === 'cli' ? Illuminate\Contracts\Console\Kernel::class : Kernel::class);
 $kernel->bootstrap();
 OwnerPermissions::configure();
+Task::addGlobalScope(new VisibleToCurrentUser);
+Tag::addGlobalScope(new VisibleToCurrentUser);
 Route::post('/fixture/tasks', [FixtureMutations::class, 'store'])->middleware(FixtureIdentity::class);
 Route::put('/fixture/tasks/{task}', [FixtureMutations::class, 'update'])->middleware([FixtureIdentity::class, SubstituteBindings::class]);
 Route::get('/fixture/tasks/sorted/{direction}', [QueryController::class, 'sorted'])->middleware([FixtureIdentity::class, SubstituteBindings::class]);

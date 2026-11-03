@@ -9,7 +9,7 @@ use Illuminate\Support\Facades\Route;
 Route::inertia('/', 'welcome')->name('home');
 
 Route::middleware(['auth', 'verified'])->group(function () {
-    Route::post('lists/{list}/share', ShareListController::class)->name('lists.share');
+    Route::post('lists/{list}/share', [ShareListController::class, 'store'])->name('lists.share');
     Route::delete('lists/{list}/share', [ShareListController::class, 'destroy'])->name('lists.unshare');
     Route::get('dashboard', [DashboardController::class, 'index'])->name('dashboard');
     Route::get('lists/{list}', [TodoListController::class, 'show'])->name('lists.show');

@@ -18,6 +18,7 @@ use ZeroForLaravel\Metadata\ModelMetadata;
 use ZeroForLaravel\Metadata\ModelRegistry;
 use ZeroForLaravel\Mutation\Mutation;
 use ZeroForLaravel\Permissions\Binding;
+use ZeroForLaravel\Permissions\VisibleToCurrentUser;
 use ZeroForLaravel\Scopes\ScopeRegistry;
 use ZeroForLaravel\Support\Input;
 
@@ -120,6 +121,7 @@ final class ZeroQuery implements JsonSerializable
         }
 
         $this->ast['__visibility'] = Binding::id($user->getAuthIdentifier());
+        $this->withoutGlobalScope(VisibleToCurrentUser::class);
 
         return $this;
     }

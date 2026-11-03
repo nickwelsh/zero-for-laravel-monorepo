@@ -4,7 +4,7 @@ description: Share Laravel policies across REST, Zero, and subscribed access err
 ---
 
 Laravel remains authoritative. Policies use normal discovery or `Gate::policy()`;
-there is no separate Zero policy map or authentication-dependent global scope.
+there is no separate Zero policy map. Current-user global visibility is opt-in.
 The managed Casbin integration stores grants and role assignments in the database.
 Its model file defines the matcher, role layout and effect, not individual grants.
 
@@ -54,6 +54,46 @@ TodoList::zeroQuery()
     ->visibleTo($request->user())
     ->with('todos', fn ($todos) => $todos->visibleTo($request->user()));
 ```
+
+### Optional current-user global visibility
+
+Use Laravel's ordinary `ScopedBy` attribute on each model that should always use
+the current user's `view` policy. The package recognizes the same scope in Zero;
+no separate Zero attribute or model method is needed.
+
+```php
+use Illuminate\Database\Eloquent\Attributes\ScopedBy;
+use ZeroForLaravel\Concerns\HasPolicyVisibility;
+use ZeroForLaravel\Concerns\HasZeroQueries;
+use ZeroForLaravel\Permissions\VisibleToCurrentUser;
+
+#[ScopedBy([VisibleToCurrentUser::class])]
+class TodoList extends Model
+{
+    use HasPolicyVisibility;
+    use HasZeroQueries;
+}
+```
+
+When `Todo` opts in too, both `TodoList::with('todos')->get()` and
+`TodoList::zeroQuery()->with('todos')` scope roots and related todos automatically.
+This includes lazy/eager Eloquent relationships and Zero existence filters. Models
+without the attribute retain the explicit `visibleTo($user)` contract.
+
+The scope resolves the authenticated actor at query execution, never model boot.
+Missing users fail closed with an authorization exception. Jobs and privileged
+server code can select an explicit actor with `visibleTo($user)`, which replaces
+the current-user default for that query, or remove the scope with Laravel's normal
+`withoutGlobalScope(VisibleToCurrentUser::class)`. Removing it from a protected Zero
+query still requires explicit visibility or a captured instance Gate; removal is
+not a way to publish unrestricted protected data. Removing a root's scope does not
+remove related models' scopes. Admin overrides still preserve caller filters.
+
+As with any Eloquent global scope, route model binding now hides inaccessible
+records before the controller runs, producing 404. Leave the scope off models
+whose binding must reach a Gate to choose 403. This opt-in affects reads, bulk
+updates/deletes, counts and relationships; it does not authorize writes or stamp
+creation attributes. Maintained scopes require PostgreSQL 15+ and projections.
 
 The default denied status is `permissions.denied_status` (403). Choose 404 globally
 or override a policy response with `asNotFound()` / `asNotAuthorized()` (403, not

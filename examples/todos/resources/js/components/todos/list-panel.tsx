@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { destroy as destroyList, update as updateList } from '@/zero/App/Http/Controllers/TodoListController';
-import { __invoke as shareList, destroy as unshareList } from '@/zero/App/Http/Controllers/ShareListController';
+import { store as shareList, destroy as unshareList } from '@/zero/App/Http/Controllers/ShareListController';
 import type { Inertia } from '@/wayfinder/types';
 import { ListTodos } from './list-todos';
 import { commitMutation } from './mutations';

@@ -2,34 +2,7 @@
 declare(strict_types=1);
 // Generated controller mutation registrations.
 return static fn (\ZeroForLaravel\Metadata\ModelRegistry $models, \ZeroForLaravel\Http\ControllerRouteDispatcher $routes): \ZeroForLaravel\Mutation\ControllerMutationRegistry => new \ZeroForLaravel\Mutation\ControllerMutationRegistry($models, $routes, [
-'m_fb12517f9e15822b1ebb45256b2e1ae2' => ['contract' => array (
-  'action' => 'App\\Http\\Controllers\\ShareListController@__invoke',
-  'optimism' => 'disabled',
-  'conceal' => true,
-  'returns' => false,
-  'parameters' => 
-  array (
-    'request' => 
-    array (
-      'kind' => 'request',
-      'type' => 'App\\Http\\Requests\\ShareListRequest',
-    ),
-    'list' => 
-    array (
-      'kind' => 'model',
-      'type' => 'App\\Models\\TodoList',
-    ),
-  ),
-  'operations' => 
-  array (
-  ),
-  'sites' => 
-  array (
-  ),
-  'version' => 'fb12517f9e15822b1ebb45256b2e1ae28ee96d86d2ac8791db300452e70ca546',
-  'returnType' => 'void',
-), 'guards' => [], 'result' => static fn (mixed $value): mixed => (new \ZeroForLaravel\Generation\Mutations\ValueContract('void', [], [], false, false))->normalize($value)],
-'m_5ffdc2c247eeb9f26d81b4dfa3330d23' => ['contract' => array (
+'m_9a2016beb6e3f9b7eea8e8dfd916eaaf' => ['contract' => array (
   'action' => 'App\\Http\\Controllers\\ShareListController@destroy',
   'optimism' => 'disabled',
   'conceal' => true,
@@ -53,10 +26,37 @@ return static fn (\ZeroForLaravel\Metadata\ModelRegistry $models, \ZeroForLarave
   'sites' => 
   array (
   ),
-  'version' => '5ffdc2c247eeb9f26d81b4dfa3330d238c7b36c3ae57c20f48a45656cb4fd87e',
+  'version' => '9a2016beb6e3f9b7eea8e8dfd916eaaf63c0ca76159b69c4742fe66320b61218',
   'returnType' => 'void',
 ), 'guards' => [], 'result' => static fn (mixed $value): mixed => (new \ZeroForLaravel\Generation\Mutations\ValueContract('void', [], [], false, false))->normalize($value)],
-'m_edece6e788ca5b6f5bdc6051c7b884f7' => ['contract' => array (
+'m_3ec7d00e58c97dc9a75db22761e186f2' => ['contract' => array (
+  'action' => 'App\\Http\\Controllers\\ShareListController@store',
+  'optimism' => 'disabled',
+  'conceal' => true,
+  'returns' => false,
+  'parameters' => 
+  array (
+    'request' => 
+    array (
+      'kind' => 'request',
+      'type' => 'App\\Http\\Requests\\ShareListRequest',
+    ),
+    'list' => 
+    array (
+      'kind' => 'model',
+      'type' => 'App\\Models\\TodoList',
+    ),
+  ),
+  'operations' => 
+  array (
+  ),
+  'sites' => 
+  array (
+  ),
+  'version' => '3ec7d00e58c97dc9a75db22761e186f26b8f0066723ad62ee7aa1b6e29d3ef0a',
+  'returnType' => 'void',
+), 'guards' => [], 'result' => static fn (mixed $value): mixed => (new \ZeroForLaravel\Generation\Mutations\ValueContract('void', [], [], false, false))->normalize($value)],
+'m_99ce22fc3246831e59df058def11c14e' => ['contract' => array (
   'action' => 'App\\Http\\Controllers\\TodoController@destroy',
   'optimism' => 'disabled',
   'conceal' => true,
@@ -75,10 +75,10 @@ return static fn (\ZeroForLaravel\Metadata\ModelRegistry $models, \ZeroForLarave
   'sites' => 
   array (
   ),
-  'version' => 'edece6e788ca5b6f5bdc6051c7b884f7539128724fc590e51204a301710eaabc',
+  'version' => '99ce22fc3246831e59df058def11c14ecdc83c22dafb9d255919cf27f15b0ae6',
   'returnType' => 'void',
 ), 'guards' => [], 'result' => static fn (mixed $value): mixed => (new \ZeroForLaravel\Generation\Mutations\ValueContract('void', [], [], false, false))->normalize($value)],
-'m_708922da5a66a37a158fc820729ed0af' => ['contract' => array (
+'m_640d225a7810cbd17415c6f9342c97d0' => ['contract' => array (
   'action' => 'App\\Http\\Controllers\\TodoController@store',
   'optimism' => 'disabled',
   'conceal' => false,
@@ -97,10 +97,10 @@ return static fn (\ZeroForLaravel\Metadata\ModelRegistry $models, \ZeroForLarave
   'sites' => 
   array (
   ),
-  'version' => '708922da5a66a37a158fc820729ed0aff688b9832e239a31375a89bcea48fce4',
+  'version' => '640d225a7810cbd17415c6f9342c97d0cd6c48c0c181c8360a6d01984429607c',
   'returnType' => 'array',
 ), 'guards' => [], 'result' => static fn (mixed $value): mixed => (new \ZeroForLaravel\Generation\Mutations\ValueContract('object', ['id' => new \ZeroForLaravel\Generation\Mutations\ValueContract('string', [], [], false, false)], [], false, false))->normalize($value)],
-'m_5b14b21f7c848d03d2c7a61881d9c7e4' => ['contract' => array (
+'m_94e0c20498029a89e470793a1def5e4d' => ['contract' => array (
   'action' => 'App\\Http\\Controllers\\TodoController@update',
   'optimism' => 'disabled',
   'conceal' => true,
@@ -124,7 +124,7 @@ return static fn (\ZeroForLaravel\Metadata\ModelRegistry $models, \ZeroForLarave
   'sites' => 
   array (
   ),
-  'version' => '5b14b21f7c848d03d2c7a61881d9c7e4a3a822d3e8e110b51e5521f85f4992d3',
+  'version' => '94e0c20498029a89e470793a1def5e4de15468fa4710e306fb2dd1be23e932c9',
   'returnType' => 'void',
 ), 'guards' => [], 'result' => static fn (mixed $value): mixed => (new \ZeroForLaravel\Generation\Mutations\ValueContract('void', [], [], false, false))->normalize($value)],
 'm_e7f494d11025bc4a9529622e4fbafd5b' => ['contract' => array (

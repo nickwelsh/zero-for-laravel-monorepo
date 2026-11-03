@@ -15,13 +15,12 @@ final class DashboardController extends Controller
     {
         $values = $input->validated();
         $lists = TodoList::zeroQuery()->visibleTo($input->user())
-            ->with('todos', fn ($todos) => $todos->visibleTo($input->user())->orderBy('created_at', 'asc')->orderBy('id', 'asc'));
-        if (isset($values['status']) && $values['status'] !== 'all') {
-            $lists = TodoList::zeroQuery()->visibleTo($input->user())->with('todos', fn ($todos) => $todos
-                ->visibleTo($input->user())
-                ->where('completed', $values['status'] === 'completed')
-                ->orderBy('created_at', 'asc')->orderBy('id', 'asc'));
-        }
+            ->with('todos', function ($todos) use ($input, $values): void {
+                $todos->visibleTo($input->user())->orderBy('created_at', 'asc')->orderBy('id', 'asc');
+                if (isset($values['status']) && $values['status'] !== 'all') {
+                    $todos->where('completed', $values['status'] === 'completed');
+                }
+            });
 
         return Inertia::render('dashboard', [
             'lists' => $lists->orderBy('name', 'asc')->infinite(50),

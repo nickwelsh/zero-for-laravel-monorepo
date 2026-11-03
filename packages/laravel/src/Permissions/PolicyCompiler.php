@@ -53,7 +53,7 @@ final class PolicyCompiler
         }
 
         foreach ($model->getGlobalScopes() as $scope) {
-            if (! $scope instanceof SoftDeletingScope) {
+            if (! $scope instanceof SoftDeletingScope && ! $scope instanceof VisibleToCurrentUser) {
                 throw new LogicException("{$class} has an unsupported global scope; portable queries must preserve every constraint.");
             }
         }

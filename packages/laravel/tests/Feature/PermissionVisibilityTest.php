@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace ZeroForLaravel\Tests\Feature;
 
 use Illuminate\Auth\Access\AuthorizationException;
+use Illuminate\Database\Eloquent\Attributes\ScopedBy;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\QueryException;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Routing\Middleware\SubstituteBindings;
@@ -27,6 +29,7 @@ use ZeroForLaravel\Permissions\Casbin;
 use ZeroForLaravel\Permissions\PermissionSchema;
 use ZeroForLaravel\Permissions\PermissionServiceProvider;
 use ZeroForLaravel\Permissions\ProjectionManager;
+use ZeroForLaravel\Permissions\VisibleToCurrentUser;
 use ZeroForLaravel\Publication\PublicationManager;
 use ZeroForLaravel\Query\QueryCompiler;
 use ZeroForLaravel\Query\RegisteredQuery;
@@ -40,6 +43,29 @@ use ZeroForLaravel\Tests\Fixtures\PermissionUser;
 use ZeroForLaravel\Tests\PostgresTestCase;
 
 uses(PostgresTestCase::class);
+
+#[ScopedBy([VisibleToCurrentUser::class])]
+class AutomaticallyVisibleList extends PermissionList
+{
+    /** @return HasMany<self, $this> */
+    public function siblings(): HasMany
+    {
+        return $this->hasMany(self::class, 'owner_id', 'owner_id');
+    }
+}
+
+final class AutomaticallyVisibleController
+{
+    public function index(): \Inertia\Response
+    {
+        return \Inertia\Inertia::render('lists/index', ['lists' => AutomaticallyVisibleList::zeroQuery()->with('siblings')->where('id', 7)]);
+    }
+
+    public function bypass(): \Inertia\Response
+    {
+        return \Inertia\Inertia::render('lists/index', ['lists' => AutomaticallyVisibleList::zeroQuery()->withoutGlobalScope(VisibleToCurrentUser::class)]);
+    }
+}
 
 beforeEach(function (): void {
     app()->register(PermissionServiceProvider::class);
@@ -380,4 +406,51 @@ test('binding changes fail closed until a transactional rebuild and foreign acto
     config(['database.connections.foreign.name' => 'foreign']);
     $alice->setConnection('foreign');
     expect(fn () => PermissionList::query()->visibleTo($alice)->get())->toThrow(LogicException::class, 'one PostgreSQL');
+});
+
+test('opt-in current-user visibility scopes Eloquent and Zero roots and string-only relationships', function (): void {
+    config(['permissions.resources' => [AutomaticallyVisibleList::class => config('permissions.resources.'.PermissionList::class)]]);
+    Gate::policy(AutomaticallyVisibleList::class, PermissionAdminPolicy::class);
+    (new ProjectionManager)->rebuild();
+    $alice = PermissionUser::create(['id' => 42, 'department_id' => 'engineering']);
+    $bob = PermissionUser::create(['id' => 84, 'department_id' => 'support']);
+    foreach ([7, 8, 9] as $id) {
+        PermissionList::create(['id' => $id, 'owner_id' => '42', 'department_id' => 'engineering', 'name' => 'List '.$id]);
+        Casbin::addPolicy($id === 9 ? 'user:84' : 'user:42', 'list:'.$id, 'todo-list', 'view', 'any', 'allow');
+    }
+
+    \Pest\Laravel\actingAs($alice);
+    expect(AutomaticallyVisibleList::query()->orderBy('id')->pluck('id')->all())->toBe([7, 8]);
+    $list = AutomaticallyVisibleList::with('siblings')->findOrFail(7);
+    expect($list->siblings->pluck('id')->sort()->values()->all())->toBe([7, 8]);
+    expect(AutomaticallyVisibleList::findOrFail(7)->siblings->pluck('id')->sort()->values()->all())->toBe([7, 8]);
+    expect(AutomaticallyVisibleList::whereHas('siblings', fn ($query) => $query->whereKey(9))->count())->toBe(0);
+    expect(AutomaticallyVisibleList::query()->update(['name' => 'Visible']))->toBe(2);
+    expect(PermissionList::findOrFail(9)->getAttribute('name'))->toBe('List 9');
+    expect(AutomaticallyVisibleList::query()->visibleTo($bob)->pluck('id')->all())->toBe([9]);
+    expect(AutomaticallyVisibleList::withoutGlobalScope(VisibleToCurrentUser::class)->count())->toBe(3);
+
+    $registry = new ModelRegistry([AutomaticallyVisibleList::class]);
+    app()->instance(ModelRegistry::class, $registry);
+    $compiler = new ControllerQueryCompiler((new ParserFactory)->createForHostVersion(), $registry);
+    $definition = $compiler->compile(AutomaticallyVisibleController::class, 'index')[0];
+    expect($definition->typescript())->toContain('.related("siblings"');
+    expect($definition->typescript())->not->toContain('42', 'visibleTo', 'actor');
+    expect(fn (): array => $compiler->compile(AutomaticallyVisibleController::class, 'bypass'))->toThrow(LogicException::class, 'visibleTo');
+
+    $native = new QueryCompiler($registry);
+    $query = AutomaticallyVisibleList::zeroQuery()->with('siblings')->where('id', 7);
+    $ast = $native->compileDeclaration($query, new ResolvedContext(['user_id' => '42'], '42'));
+    expect(json_encode($ast['related'], JSON_THROW_ON_ERROR))->toContain('permission_index', 'user:42');
+    expect(fn (): array => $native->compileDeclaration(AutomaticallyVisibleList::zeroQuery()->withoutGlobalScopes(), new ResolvedContext(['user_id' => '42'], '42')))->toThrow(LogicException::class, 'visibleTo');
+
+    // One builder must resolve the active identity when executed, not when created.
+    $eloquent = AutomaticallyVisibleList::query();
+    \Pest\Laravel\actingAs($bob);
+    expect($eloquent->pluck('id')->all())->toBe([9]);
+    expect(fn (): array => $native->compileDeclaration($query, new ResolvedContext(['user_id' => '42'], '42')))->toThrow(AuthorizationException::class);
+    expect(json_encode($native->compileDeclaration($query, new ResolvedContext(['user_id' => '84'], '84')), JSON_THROW_ON_ERROR))->toContain('user:84');
+    \Illuminate\Support\Facades\Auth::forgetGuards();
+    expect(fn () => AutomaticallyVisibleList::query()->count())->toThrow(AuthorizationException::class);
+    expect(fn (): array => $query->ast())->toThrow(AuthorizationException::class);
 });

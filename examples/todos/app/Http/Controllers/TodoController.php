@@ -38,7 +38,7 @@ final class TodoController extends Controller
             Gate::authorize('update', $todo);
             if ($request->exists('list_id')) {
                 $list = TodoList::query()->lockForUpdate()->findOrFail($request->input('list_id'));
-                Gate::authorize('createTodo', $list);
+                Gate::authorize('create', [Todo::class, $list]);
             }
 
             $todo->update($request->validated());

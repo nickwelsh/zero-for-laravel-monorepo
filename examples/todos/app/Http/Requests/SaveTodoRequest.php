@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests;
 
+use App\Models\Todo;
 use App\Models\TodoList;
 use App\Models\User;
 use Illuminate\Foundation\Http\FormRequest;
@@ -19,7 +20,7 @@ class SaveTodoRequest extends FormRequest
 
         $list = is_string($id) ? TodoList::find($id) : null;
 
-        return $user instanceof User && $list instanceof TodoList && $user->can('createTodo', $list);
+        return $user instanceof User && $list instanceof TodoList && $user->can('create', [Todo::class, $list]);
     }
 
     /** @return array<string, list<string>> */

@@ -31,6 +31,7 @@ use ZeroForLaravel\Context\ContextDefinition;
 use ZeroForLaravel\Metadata\ModelMetadata;
 use ZeroForLaravel\Metadata\ModelRegistry;
 use ZeroForLaravel\Permissions\PolicyCompiler;
+use ZeroForLaravel\Permissions\VisibleToCurrentUser;
 use ZeroForLaravel\Query\QueryInput;
 use ZeroForLaravel\Query\ZeroQuery;
 use ZeroForLaravel\Scopes\ScopeRegistry;
@@ -292,7 +293,7 @@ final class ControllerQueryCompiler
             return;
         }
 
-        $covered = $inherited || $this->declaresVisibility($expression);
+        $covered = $inherited || $this->declaresVisibility($expression) || $this->automaticVisibility($expression);
         for ($node = $expression; in_array($node->kind, ['method', 'scope', 'paginate', 'infinite', 'guarded'], true); $node = $node->children[0]) {
             foreach (array_slice($node->children, 1) as $child) {
                 $group = $node->kind === 'scope' || $node->kind === 'method' && in_array($node->value, ['where', 'orWhere'], true);
@@ -304,7 +305,7 @@ final class ControllerQueryCompiler
                 $name = $node->children[1]->value;
                 if ($node->model !== null && is_string($name)) {
                     $target = $this->models->get($this->models->relation($node->model, $name)['model']);
-                    if ($target->policyVisibility) {
+                    if ($target->policyVisibility && ! $this->automaticVisibility(new QueryExpression('query', model: $target, type: 'query'))) {
                         throw new LogicException('Protected related paths require an explicit visibleTo refinement.');
                     }
                 }
@@ -332,6 +333,18 @@ final class ControllerQueryCompiler
             'paginate', 'infinite' => $this->declaresVisibility($expression->children[0]),
             default => false,
         };
+    }
+
+    private function automaticVisibility(QueryExpression $expression): bool
+    {
+        if (! $expression->model instanceof ModelMetadata) {
+            return false;
+        }
+
+        $removed = ScopeCompiler::removals($expression);
+
+        return $removed !== null && ! in_array(VisibleToCurrentUser::class, $removed, true)
+            && isset(ScopeRegistry::globals($expression->model)[VisibleToCurrentUser::class]);
     }
 
     /** @return list<array<string, mixed>> */

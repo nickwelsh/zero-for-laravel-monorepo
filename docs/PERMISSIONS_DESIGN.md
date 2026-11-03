@@ -9,7 +9,14 @@ predictions and access-loss callbacks never authorize data delivery.
 
 The target API uses normal Laravel policies and Gates. Collection visibility is an
 explicit local `visibleTo($user)` scope, shared by Eloquent and `Model::zeroQuery()`.
-There is no authentication-dependent global scope or second policy registration map.
+There is no second policy registration map. Models may opt into current-user
+visibility with Laravel's `#[ScopedBy([VisibleToCurrentUser::class])]`; both builders
+recognize this scope, including string-only relationship selections. The actor is
+resolved at query execution, not boot. Missing actors fail closed. Explicit
+`visibleTo($user)` replaces the default actor for that query; trusted Eloquent code
+may remove the scope normally. Protected Zero paths still require a visibility
+decision after removal. Global scoping also affects route binding (hidden rows
+produce 404 before Gates) and bulk writes; it is not separate write authorization.
 
 Schema publication uses an explicit `zero.models` allowlist or `HasZeroQueries`
 discovery. Public models also require `zero.public_models`; a missing permission
@@ -61,8 +68,9 @@ Resource projections upsert only changed facts and remove deleted keys. This fav
 simple transactional correctness over large-graph throughput; applications must
 measure their own write/fan-out costs. Role inheritance is acyclic and limited to
 eight edges. All authority tables and source models must use one connection and
-unprefixed public-schema tables. Each source table has one binding; table aliases
-and using the same table for subjects and resources are currently rejected.
+unprefixed public-schema tables. Each source table has one binding; custom table
+aliases and using the same table for subjects and resources are currently rejected.
+Laravel's generated self-relationship aliases preserve scoped existence queries.
 
 Portable model equality is strictly typed, including scalar Gate evaluation through
 PHP-Casbin. Numeric-looking string identifiers `"00042"` and `"42"` are different.

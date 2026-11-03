@@ -2,6 +2,7 @@ includes:
     - vendor/larastan/larastan/extension.neon
     - vendor/nesbot/carbon/extension.neon
     - vendor/pestphp/pest/extension.neon
+    - phpstan-compat.php
 
 parameters:
     level: 10

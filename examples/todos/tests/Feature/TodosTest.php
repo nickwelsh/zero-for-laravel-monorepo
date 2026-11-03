@@ -109,14 +109,14 @@ test('authoritative sharing is idempotent and conceals private resources and acc
     $member = User::factory()->create();
     $list = createTodoList($owner);
     for ($i = 0; $i < 2; $i++) {
-        runTodoMutation($owner, ShareListController::class, '__invoke', ['email' => $member->email], ['list' => $list->id]);
+        runTodoMutation($owner, ShareListController::class, 'store', ['email' => $member->email], ['list' => $list->id]);
     }
     expect(DB::table('permission_rules')->where('ptype', 'g')->where('v0', 'user:'.$member->id)->count())->toBe(1);
     expect(Gate::forUser($member)->allows('view', $list))->toBeTrue();
     expect(Gate::forUser($member)->allows('update', $list))->toBeFalse();
-    expect(fn () => runTodoMutation($member, ShareListController::class, '__invoke', ['email' => $owner->email], ['list' => $list->id]))
+    expect(fn () => runTodoMutation($member, ShareListController::class, 'store', ['email' => $owner->email], ['list' => $list->id]))
         ->toThrow(OperationException::class, 'unavailable');
-    expect(fn () => runTodoMutation($owner, ShareListController::class, '__invoke', ['email' => 'missing@example.com'], ['list' => $list->id]))
+    expect(fn () => runTodoMutation($owner, ShareListController::class, 'store', ['email' => 'missing@example.com'], ['list' => $list->id]))
         ->toThrow(OperationException::class, 'unavailable');
 });
 

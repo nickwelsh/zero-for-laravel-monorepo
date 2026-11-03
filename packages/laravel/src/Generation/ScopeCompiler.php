@@ -11,6 +11,7 @@ use ReflectionMethod;
 use ZeroForLaravel\Context\ContextDefinition;
 use ZeroForLaravel\Context\ContextReference;
 use ZeroForLaravel\Metadata\ModelMetadata;
+use ZeroForLaravel\Permissions\VisibleToCurrentUser;
 use ZeroForLaravel\Scopes\ScopeRegistry;
 use ZeroForLaravel\Scopes\SoftDeletingScope;
 
@@ -30,6 +31,9 @@ final class ScopeCompiler
             if ($scope instanceof SoftDeletingScope) {
                 $local = new QueryExpression('local', 'zeroScope', model: $model, type: 'query');
                 $scopes[$name] = new QueryExpression('method', 'where', [$local, self::value($model->deletedAt), self::value('IS'), self::value(null)], $model, 'query');
+            } elseif ($scope instanceof VisibleToCurrentUser) {
+                $local = new QueryExpression('local', 'zeroScope', model: $model, type: 'query');
+                $scopes[$name] = new QueryExpression('method', 'visibleTo', [$local, new QueryExpression('actor', type: 'actor')], $model, 'query');
             } else {
                 $scopes[$name] = $compiler->scope($scope instanceof Closure ? $scope : new ReflectionMethod($scope, 'apply'), $model, instance: $scope instanceof Closure ? null : $scope);
             }

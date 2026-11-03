@@ -31,7 +31,11 @@ final class EloquentVisibility
 
         $projector->assertConnection($user);
 
-        if ($query->getQuery()->from !== $query->getModel()->getTable()) {
+        $table = $query->getModel()->getTable();
+        $source = (new ($query->getModel()::class))->getTable();
+        $selfRelation = preg_match('/^laravel_reserved_[0-9]+$/D', $table)
+            && $query->getQuery()->from === $source.' as '.$table;
+        if ($query->getQuery()->from !== $table && ! $selfRelation) {
             throw new LogicException('Portable visibility does not support custom FROM expressions or aliases.');
         }
 

@@ -33,9 +33,4 @@ class TodoListPolicy
     {
         return Casbin::inspect($user, 'share', $list)->asNotFound();
     }
-
-    public function createTodo(User $user, TodoList $list): Response
-    {
-        return Casbin::inspect($user, 'create-todo', $list)->asNotFound();
-    }
 }

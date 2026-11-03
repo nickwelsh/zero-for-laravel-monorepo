@@ -15,7 +15,7 @@ use ZeroForLaravel\Permissions\ProjectionManager;
 class ShareListController extends Controller
 {
     #[ZeroMutation(optimism: 'disabled', conceal: true)]
-    public function __invoke(ShareListRequest $request, TodoList $list): void
+    public function store(ShareListRequest $request, TodoList $list): void
     {
         DB::transaction(function () use ($request, $list): void {
             (new ProjectionManager)->lock();
