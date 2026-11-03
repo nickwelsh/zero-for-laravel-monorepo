@@ -113,11 +113,11 @@ after same-transaction replication barriers. Private tables never appeared as
 result rows or streamed row patches.
 
 These early runs supplied projections directly. They prove native predicate
-feasibility, independently of the subsequent Laravel compiler/projector and SSE
-implementation. The maintained integration test also exercises managed grants
-against unchanged native subscriptions; HTTP tests exercise actual access watches
-with fresh actors and resources. Neither measures production-scale performance or
-offline revocation, nor erases data a client already received legitimately.
+feasibility, independently of the subsequent Laravel compiler/projector and access
+implementation. The maintained integration test also exercises managed grants,
+native status queries and React disconnect/reconnect; HTTP tests exercise the
+production check handler with fresh actors and resources. These checks do not
+measure production-scale performance or erase data already received legitimately.
 
 Zero correlations are equality-only. Department equality uses a composite
 correlation; mutable cross-row inequalities must fail compilation. Authorization
@@ -130,21 +130,26 @@ and `ZERO_MUTATE_URL` to forward opaque credentials without a JWT verifier.
 Supported unconditional instance `Gate::authorize()` calls protect initial shows
 through normal Laravel exceptions. Generation captures the guard for server query
 transforms and native predicates without replaying controller side effects.
-Actor-owned watches use authenticated SSE, durable revision polling, and a fresh
-Gate snapshot on every connection. The browser blocks protected content until
-validated; confirmed loss unmounts it before `access.onRevoked`. Initial denial,
+Reserved native Zero queries carry revision invalidations and stored results of
+fresh Laravel middleware/binding/Gate checks. Safe results are physically separate
+from private ownership/check metadata and require the current permission revision.
+The browser blocks protected content until current status and business generations
+complete; confirmed loss unmounts it before `access.onRevoked`. Initial denial,
 transport failure, and empty collections are not revocation events. Default denial
 presentation is 403 or 404 according to configuration and policy overrides.
 
-SSE polls committed revisions every 250 ms by default. Deploy without buffering
-and with concurrent PHP workers; live means after commit and network/replication
-delivery, not zero latency. Reconnect never trusts an old allow snapshot. Permission
-row changes remain live; model/schema changes require rebuild, regeneration and
-draining incompatible old streams.
+There is no SSE connection, browser authorization fetch or PHP polling loop. Zero
+still invokes Laravel internally and each check writes safe result/private metadata
+rows. Batched checks renew after 15 seconds and approvals expire 20 seconds from
+monotonic request start, covering non-projected middleware dependencies. Reconnect
+never trusts an old allow snapshot. The opaque global revision retains unrelated
+change timing and fan-out; it does not claim per-user timing isolation. Live means
+after commit and replication delivery, not zero latency. Model/schema changes need
+rebuild, regeneration, publication sync and draining incompatible clients.
 
 The optional `/zero/permissions` endpoint is registered only when prediction
 abilities are configured. It returns applicable effective grants for the
 authenticated subject and explicitly allowlisted attributes, not raw role graphs.
 `predictPermission` additionally requires the independently current identity and
 returns unavailable for missing/private inputs. Predictions are advisory and must
-be refreshed; REST, mutations, watches and native queries retain server authority.
+be refreshed; REST, mutations, access checks and native queries retain server authority.

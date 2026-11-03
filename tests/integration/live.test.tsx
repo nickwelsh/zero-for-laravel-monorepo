@@ -1,10 +1,20 @@
 // @vitest-environment jsdom
 import { spawn, execFileSync, type ChildProcess } from 'node:child_process';
-import { mkdtempSync, mkdirSync, rmSync, readFileSync, existsSync, symlinkSync } from 'node:fs';
+import {
+    mkdtempSync,
+    mkdirSync,
+    rmSync,
+    readFileSync,
+    existsSync,
+    symlinkSync,
+    writeFileSync,
+    unlinkSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createServer } from 'node:net';
-import { randomBytes } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
+import * as native from '@rocicorp/zero';
 import { Zero, createBuilder, defineQueriesWithType, defineQueryWithType } from '@rocicorp/zero';
 import { runInNewContext } from 'node:vm';
 import { z } from 'zod';
@@ -13,12 +23,16 @@ import {
     type ControllerMutationContract,
 } from '../../packages/client/src/controller-mutation';
 import { ZeroProvider } from '@rocicorp/zero/react';
-import { render, waitFor } from '@testing-library/react';
+import { act, render, waitFor } from '@testing-library/react';
+import { useEffect } from 'react';
 import { useData, type Data } from '../../packages/client/src/react/data';
 import { liveQuery, withQueryInputs } from '../../packages/client/src/live-query';
-import type { index } from '../interop/controller-api/ZeroForLaravel/Tests/Fixtures/QueryController';
-import { expect, it } from 'vite-plus/test';
-import { schema, definitions, type Context } from '../interop/generated';
+import { createInertiaAdapter } from '../../packages/client/src/react/inertia';
+import type { index, show } from '../interop/controller-api/ZeroForLaravel/Tests/Fixtures/QueryController';
+import { expect, it, vi } from 'vite-plus/test';
+import { schema as fixtureSchema, definitions, type Context } from '../interop/generated';
+
+type LiveSchema = typeof fixtureSchema;
 
 const enabled = process.env.ZERO_LIVE_TESTS === '1';
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -110,9 +124,24 @@ it.skipIf(!enabled)(
             ).trim();
         let php: ChildProcess | undefined;
         let cache: ChildProcess | undefined;
-        let zero: Zero<typeof schema, undefined, Context> | undefined;
+        let zero: Zero<LiveSchema, undefined, Context> | undefined;
         let logs = '';
         let created = false;
+        const WebSocket = globalThis.WebSocket;
+        const sockets: WebSocket[] = [];
+        const frames: Buffer[] = [];
+        let auditWire: (() => void) | undefined;
+        // Observe actual inbound binary WebSocket messages, before Zero decodes
+        // or filters rows. No proxy, second cache, or mocked native client.
+        globalThis.WebSocket = class extends WebSocket {
+            constructor(url: string | URL, protocols?: string | string[]) {
+                super(url, protocols);
+                sockets.push(this);
+                this.addEventListener('message', ({ data }: MessageEvent<unknown>) => {
+                    if (data instanceof ArrayBuffer) frames.push(Buffer.from(new Uint8Array(data)));
+                });
+            }
+        };
         try {
             psql(`CREATE DATABASE "${database}"`, 'postgres');
             created = true;
@@ -124,6 +153,16 @@ it.skipIf(!enabled)(
             ])
                 mkdirSync(join(root, directory), { recursive: true });
             execFileSync('php', ['tests/integration/app.php'], { env, stdio: 'pipe' });
+            const generated = { exports: {} as { schema: LiveSchema } };
+            runInNewContext(
+                execFileSync('node_modules/.bin/esbuild', [join(root, 'generated.ts'), '--format=cjs'], {
+                    encoding: 'utf8',
+                }),
+                { require: () => native, module: generated },
+            );
+            const schema = generated.exports.schema;
+            expect(Object.keys(schema.tables)).toHaveLength(Object.keys(fixtureSchema.tables).length);
+            expect(Object.keys(schema.tables)).toEqual(expect.arrayContaining(Object.keys(fixtureSchema.tables)));
             const contracts = JSON.parse(readFileSync(join(root, 'controller-contracts.json'), 'utf8')) as Record<
                 string,
                 ControllerMutationContract
@@ -155,7 +194,7 @@ it.skipIf(!enabled)(
                 { encoding: 'utf8' },
             );
             const modules: Record<string, unknown> = {
-                '@rocicorp/zero': { createBuilder, defineQueriesWithType, defineQueryWithType },
+                '@rocicorp/zero': native,
                 '@nickwelsh/zero-for-laravel': { liveQuery, withQueryInputs },
                 zod: { z },
                 './generated': { schema, definitions },
@@ -166,18 +205,24 @@ it.skipIf(!enabled)(
                         string,
                         (input: { direction: 'asc' | 'desc' }) => ReturnType<typeof index.tasks.live>
                     >;
+                    bindings: Parameters<typeof createInertiaAdapter>[0];
                 },
             };
             runInNewContext(compiled, { require: (specifier: string) => modules[specifier], module });
             const tasks = module.exports.actions['ZeroForLaravel\\Tests\\Fixtures\\QueryController@sorted.tasks']!;
             const queryName = tasks({ direction: 'asc' }).request().query.queryName;
+            const showTask = module.exports.actions[
+                'ZeroForLaravel\\Tests\\Fixtures\\QueryController@show.task'
+            ] as unknown as typeof show.task.live;
+            const guardedName = showTask({ task: '019a0000-0000-7000-8000-000000000001' }).request().query.queryName;
             expect(
                 psql(
                     `SELECT attnames::text FROM pg_publication_tables WHERE pubname='${publication}' AND tablename='tasks'`,
                 ),
             ).not.toContain('secret');
-            // Five business/pivot tables plus subject/grant facts and four private resource projections.
-            expect(psql(`SELECT count(*) FROM pg_publication_tables WHERE pubname='${publication}'`)).toBe('11');
+            // Five business/pivot tables, six private permission projections,
+            // two safe access roots and one private access-check projection.
+            expect(psql(`SELECT count(*) FROM pg_publication_tables WHERE pubname='${publication}'`)).toBe('14');
             php = spawn(
                 'php',
                 [
@@ -270,8 +315,414 @@ it.skipIf(!enabled)(
                 result = rows;
                 complete = type === 'complete';
             });
+            const builder = createBuilder(schema);
+            const defineQueries = defineQueriesWithType<LiveSchema>();
+            const defineQuery = defineQueryWithType<LiveSchema, Context>();
+            const access = defineQueries({
+                __zero_access_revision: defineQuery((_options: { args: Record<string, never>; ctx: Context }) =>
+                    builder.permission_access_revision.where('id', 'global'),
+                ),
+                __zero_access_status: defineQuery(
+                    ({
+                        args,
+                    }: {
+                        args: {
+                            generation: string;
+                            bindings: { binding: string; query: string; args: { task: string } }[];
+                        };
+                        ctx: Context;
+                    }) => builder.permission_access_results.where('generation', args.generation),
+                ),
+            });
+            const watches: (() => void)[] = [];
+            const generation = randomUUID();
+            const binding = randomUUID();
+            let aliceStatusID: string | undefined;
+            function status(ids = [alice], current: string = randomUUID(), owner = zero!) {
+                const args = {
+                    generation: current,
+                    bindings: ids.map((task, i) => ({
+                        binding: i === 0 ? binding : randomUUID(),
+                        query: guardedName,
+                        args: { task },
+                    })),
+                };
+                const selected = owner.materialize(access['__zero_access_status'](args), { ttl: 0 });
+                const state = {
+                    args,
+                    complete: false,
+                    rows: [] as readonly {
+                        id: string;
+                        generation: string;
+                        binding: string;
+                        state: string;
+                        status: number | null;
+                    }[],
+                };
+                const removeStatus = selected.addListener((rows, type) => {
+                    state.rows = rows;
+                    state.complete = type === 'complete';
+                });
+                watches.push(() => {
+                    removeStatus();
+                    selected.destroy();
+                });
+                return state;
+            }
+            async function transform(registration: string, args: object, actor = 'alice') {
+                const response = await fetch(`${base}/callbacks/zero/query`, {
+                    method: 'POST',
+                    headers: { 'X-Api-Key': key, Authorization: `Bearer ${actor}`, 'Content-Type': 'application/json' },
+                    body: JSON.stringify(['transform', [{ id: randomUUID(), name: registration, args: [args] }]]),
+                });
+                expect(response.status).toBe(200);
+                const body = (await response.json()) as {
+                    queries: { ast?: unknown; error?: string; details?: { status: number } }[];
+                };
+                expect(body.queries).toHaveLength(1);
+                return body.queries[0]!;
+            }
             try {
                 await until(() => complete && result.length === 2, 'Authorized query never completed');
+                const revisionView = zero.materialize(access['__zero_access_revision']({}), { ttl: 0 });
+                let revision: string | undefined;
+                const removeRevision = revisionView.addListener((rows, type) => {
+                    if (type === 'complete') revision = rows[0]?.revision;
+                });
+                watches.push(() => {
+                    removeRevision();
+                    revisionView.destroy();
+                });
+                await until(() => revision !== undefined, 'Reserved revision query did not replicate');
+                const first = status([alice, bob, '019a0000-0000-7000-8000-000000000099'], generation);
+                await until(
+                    () => first.complete && first.rows.length === 3,
+                    'Reserved production status query did not complete',
+                );
+                expect(first.rows.find((row) => row.binding === binding)).toMatchObject({
+                    state: 'allowed',
+                    status: null,
+                });
+                aliceStatusID = first.rows.find((row) => row.binding === binding)!.id;
+                // The fixture's visibility scope conceals another owner's model
+                // at route binding, before its captured Gate can disclose it.
+                expect(first.rows.filter((row) => row.state === 'denied').map((row) => row.status)).toEqual([404, 404]);
+                for (const row of first.rows) {
+                    expect(Object.keys(row)).toHaveLength(5);
+                    expect(Object.keys(row)).toEqual(
+                        expect.arrayContaining(['binding', 'generation', 'id', 'state', 'status']),
+                    );
+                }
+                const serverAST = JSON.stringify((await transform('__zero_access_status', first.args)).ast);
+                expect(serverAST).toContain('"system":"permissions"');
+                expect(serverAST).toContain('permission_access_checks');
+                expect(serverAST).toContain('permission_access_revision');
+                const originalRevision = revision;
+                execFileSync('php', ['tests/integration/app.php', 'revoke-rollback'], { env, stdio: 'pipe' });
+                expect(psql("SELECT revision FROM permission_access_revision WHERE id='global'")).toBe(
+                    originalRevision,
+                );
+                await sleep(300);
+                expect(revision).toBe(originalRevision);
+                expect(first.rows).toHaveLength(3);
+                expect(result).toHaveLength(2);
+
+                // Invalidation is an authority-epoch join, not business emptiness:
+                // an unrelated tag grant edit leaves these business rows present.
+                execFileSync('php', ['tests/integration/app.php', 'revoke-related'], { env, stdio: 'pipe' });
+                await until(
+                    () => revision !== originalRevision && first.rows.length === 0,
+                    'Old allowed/denied status survived a committed revision',
+                );
+                expect(result).toHaveLength(2);
+                expect(await transform('__zero_access_status', first.args)).toHaveProperty('ast');
+                await sleep(200);
+                expect(first.rows).toEqual([]); // Retransforming cannot renew an old generation.
+                execFileSync('php', ['tests/integration/app.php', 'restore-related'], { env, stdio: 'pipe' });
+                const overlap = status();
+                await until(
+                    () => overlap.complete && overlap.rows[0]?.state === 'allowed',
+                    'New overlapping generation did not authorize',
+                );
+                expect(first.rows).toEqual([]);
+                const forged = { ...overlap.args, owner: 'alice' };
+                expect(await transform('__zero_access_status', forged, 'bob')).toHaveProperty('error', 'parse');
+                const bobAST = JSON.stringify((await transform('__zero_access_status', overlap.args, 'bob')).ast);
+                expect(bobAST).toContain('permission_access_results');
+                expect(bobAST).not.toContain(overlap.rows[0]!.id);
+                expect(
+                    psql(
+                        `SELECT count(DISTINCT owner) FROM permission_access_checks WHERE generation='${overlap.args.generation}'`,
+                    ),
+                ).toBe('2');
+                const changed = { ...overlap.args, bindings: [{ binding, query: guardedName, args: { task: bob } }] };
+                expect(await transform('__zero_access_status', changed)).toHaveProperty('error', 'parse');
+                expect(
+                    await transform('__zero_access_status', {
+                        ...overlap.args,
+                        bindings: [{ binding, query: queryName, args: {} }],
+                    }),
+                ).toHaveProperty('error', 'parse');
+                expect(await transform(guardedName, { task: alice, __generation: 'invalid' })).toHaveProperty(
+                    'error',
+                    'parse',
+                );
+
+                execFileSync('php', ['tests/integration/app.php', 'revoke'], { env, stdio: 'pipe' });
+                const denied = status();
+                await until(
+                    () => denied.complete && denied.rows[0]?.state === 'denied',
+                    'Initial denial never arrived',
+                );
+                expect(denied.rows[0]?.status).toBe(404);
+                execFileSync('php', ['tests/integration/app.php', 'restore'], { env, stdio: 'pipe' });
+                await until(
+                    () => denied.rows.length === 0 && result.length === 2,
+                    'Regrant did not invalidate old denial',
+                );
+                const regranted = status();
+                await until(
+                    () => regranted.complete && regranted.rows[0]?.state === 'allowed',
+                    'Fresh generation did not recover initial denial',
+                );
+
+                // Arbitrary route middleware does not necessarily write permission
+                // projections. Only a fresh generation may supersede that denial.
+                writeFileSync(join(root, 'access-denied'), 'deny');
+                const middlewareDenied = status();
+                await until(
+                    () => middlewareDenied.complete && middlewareDenied.rows[0]?.state === 'denied',
+                    'Backend middleware denial was ignored',
+                );
+                expect(middlewareDenied.rows[0]?.status).toBe(403);
+                expect(result).toHaveLength(2);
+                expect(await transform(guardedName, { task: alice, __generation: randomUUID() })).toMatchObject({
+                    error: 'app',
+                    details: { status: 403 },
+                });
+                unlinkSync(join(root, 'access-denied'));
+                const recoveredAccess = status();
+                await until(
+                    () => recoveredAccess.complete && recoveredAccess.rows[0]?.state === 'allowed',
+                    'Backend middleware recovery did not allow a fresh generation',
+                );
+                expect(middlewareDenied.rows[0]?.state).toBe('denied');
+                expect(await transform(guardedName, { task: alice, __generation: randomUUID() })).toHaveProperty('ast');
+
+                psql("UPDATE users SET access_blocked=true WHERE id='alice'");
+                const freshActor = status();
+                await until(
+                    () => freshActor.complete && freshActor.rows[0]?.state === 'denied',
+                    'Access check trusted stale request actor attributes',
+                );
+                const actorLog = readFileSync(join(root, 'access-actors.log'), 'utf8')
+                    .trim()
+                    .split('\n')
+                    .map((line) => JSON.parse(line));
+                expect(actorLog).toContainEqual({ request: true, auth: true, transaction: 1, locked: true });
+                psql("UPDATE users SET access_blocked=false WHERE id='alice'");
+
+                const idle = status();
+                await until(() => idle.complete && idle.rows[0]?.state === 'allowed', 'Idle status never completed');
+                await sleep(300);
+                const callbackCount = readFileSync(join(root, 'query-callbacks.log'), 'utf8');
+                const actorCount = readFileSync(join(root, 'access-actors.log'), 'utf8');
+                await sleep(1200);
+                expect(readFileSync(join(root, 'query-callbacks.log'), 'utf8')).toBe(callbackCount);
+                expect(readFileSync(join(root, 'access-actors.log'), 'utf8')).toBe(actorCount);
+
+                // Wire audit: Zero v53 sends UTF-8 row-patch chunks prefixed by
+                // binary type byte 0. Inspect captured bytes, NOT materialized rows.
+                const privateValues = psql(
+                    'SELECT owner FROM permission_access_checks UNION SELECT fingerprint FROM permission_access_checks UNION SELECT id FROM permission_subjects',
+                ).split('\n');
+                const privateTables = psql(
+                    `SELECT tablename FROM pg_publication_tables WHERE pubname='${publication}' AND tablename NOT IN ('tasks','lists','tags','comments','task_tag','permission_access_revision','permission_access_results')`,
+                ).split('\n');
+                const forbidden = [
+                    ...privateTables,
+                    '"owner"',
+                    '"fingerprint"',
+                    '"expires_at"',
+                    '"access_blocked"',
+                    '"subject_key"',
+                    '"global_key"',
+                    '"rule_id"',
+                    '"domain_key"',
+                    '"secret"',
+                    ...privateValues,
+                ];
+                const leaks = (captured: readonly Buffer[]) => {
+                    const wire = Buffer.concat(captured.map((frame) => frame.subarray(1))).toString('utf8');
+                    return forbidden.filter((value) => wire.includes(value));
+                };
+                expect(frames.length).toBeGreaterThan(0);
+                expect(frames.every((frame) => frame[0] === 0)).toBe(true);
+                expect(Buffer.concat(frames).toString('utf8')).toContain('permission_access_results');
+                expect(Buffer.concat(frames).toString('utf8')).toContain('permission_access_revision');
+                expect(Buffer.concat(frames).toString('utf8')).toContain('Initial'); // positive control
+                expect(leaks(frames)).toEqual([]);
+                // Deliberately put a real private fingerprint in a PUBLIC title.
+                // The same binary observer must flag it, or the audit is vacuous.
+                const negativeStart = frames.length;
+                const fingerprint = psql('SELECT fingerprint FROM permission_access_checks LIMIT 1');
+                expect(fingerprint).toMatch(/^[a-f0-9]{64}$/);
+                psql(`UPDATE tasks SET title='${fingerprint}' WHERE id='${alice}'`);
+                await until(
+                    () => result.some((row) => row.title === fingerprint),
+                    'Unsafe wire control did not replicate',
+                );
+                expect(leaks(frames.slice(negativeStart))).toContain(fingerprint);
+                psql(`UPDATE tasks SET title='Initial' WHERE id='${alice}'`);
+                await until(() => result[0]?.title === 'Initial', 'Unsafe control cleanup did not replicate');
+                const negativeEnd = frames.length;
+                auditWire = () => {
+                    const currentPrivateValues = psql(
+                        'SELECT owner FROM permission_access_checks UNION SELECT fingerprint FROM permission_access_checks',
+                    ).split('\n');
+                    const captured = [...frames.slice(0, negativeStart), ...frames.slice(negativeEnd)];
+                    expect(leaks(captured)).toEqual([]);
+                    const wire = Buffer.concat(captured.map((frame) => frame.subarray(1))).toString('utf8');
+                    expect(currentPrivateValues.filter((value) => wire.includes(value))).toEqual([]);
+                };
+
+                // The real Inertia adapter consumes real Laravel page metadata.
+                // Its private component must wait for BOTH status and business
+                // completion, unmount before revocation callbacks, and remount
+                // with a new business query identity after regrant/reconnect.
+                const pageResponse = await fetch(`${base}/fixture/tasks/${alice}`, {
+                    headers: { Authorization: 'Bearer alice', 'X-Inertia': 'true', Accept: 'text/html' },
+                });
+                expect(pageResponse.status).toBe(200);
+                const page = (await pageResponse.json()) as { component: string; props: Record<string, unknown> };
+                expect(page.props).not.toHaveProperty('task');
+                let mounts = 0;
+                let unmounts = 0;
+                const losses: { status: number; privateMounted: boolean }[] = [];
+                let protectedHost: ReturnType<typeof render> | undefined;
+                function PrivatePage(props: Record<string, unknown>) {
+                    const task = props.task as Data<{ id: string; title: string } | undefined>;
+                    expect(task.complete).toBe(true);
+                    expect(task.connection.name).toBe('connected');
+                    expect(task.data?.id).toBe(alice);
+                    useEffect(() => {
+                        mounts++;
+                        return () => {
+                            unmounts++;
+                        };
+                    }, []);
+                    return <div data-private>{task.data?.title}</div>;
+                }
+                const adapter = createInertiaAdapter(module.exports.bindings, {
+                    access: {
+                        onRevoked: ({ status: code }) =>
+                            losses.push({
+                                status: code,
+                                privateMounted: !!protectedHost?.container.querySelector('[data-private]'),
+                            }),
+                    },
+                });
+                const ProtectedPage = adapter.wrap(PrivatePage, page);
+                const uiLogStart = readFileSync(join(root, 'query-callbacks.log'), 'utf8').length;
+                const generations = () =>
+                    new Set(
+                        readFileSync(join(root, 'query-callbacks.log'), 'utf8')
+                            .slice(uiLogStart)
+                            .trim()
+                            .split('\n')
+                            .filter(Boolean)
+                            .flatMap(
+                                (line) =>
+                                    (
+                                        JSON.parse(line) as [
+                                            string,
+                                            { name: string; args: { __generation?: string }[] }[],
+                                        ]
+                                    )[1],
+                            )
+                            .filter((query) => query.name === guardedName)
+                            .map((query) => query.args[0]?.['__generation'])
+                            .filter((value) => value !== undefined),
+                    );
+                const browserFetch = vi.spyOn(globalThis, 'fetch');
+                protectedHost = render(
+                    <ZeroProvider zero={zero}>
+                        <ProtectedPage {...page.props} />
+                    </ZeroProvider>,
+                );
+                try {
+                    expect(protectedHost.container.querySelector('[data-private]')).toBeNull();
+                    await waitFor(() => expect(mounts).toBe(1), { timeout: 10000 });
+                    expect(generations().size).toBe(1);
+                    await sleep(300);
+                    const uiCallbacks = readFileSync(join(root, 'query-callbacks.log'), 'utf8');
+                    const uiChecks = readFileSync(join(root, 'access-actors.log'), 'utf8');
+                    await sleep(1200);
+                    expect(readFileSync(join(root, 'query-callbacks.log'), 'utf8')).toBe(uiCallbacks);
+                    expect(readFileSync(join(root, 'access-actors.log'), 'utf8')).toBe(uiChecks);
+                    // Exercise the actual 15-second renewal on the socket, not
+                    // just fake timers. Approval renewal must not remount private
+                    // content or churn its business query generation.
+                    await until(
+                        () =>
+                            readFileSync(join(root, 'query-callbacks.log'), 'utf8')
+                                .slice(uiCallbacks.length)
+                                .includes('"name":"__zero_access_status"'),
+                        'Scheduled native status renewal never reached Laravel',
+                    );
+                    await until(
+                        () => readFileSync(join(root, 'access-actors.log'), 'utf8').length > uiChecks.length,
+                        'Scheduled renewal did not replay the route guard',
+                    );
+                    await sleep(5500); // The initial 20-second lease has expired.
+                    expect(protectedHost.container.querySelector('[data-private]')).not.toBeNull();
+                    expect(mounts).toBe(1);
+                    expect(unmounts).toBe(0);
+                    expect(generations().size).toBe(1);
+                    execFileSync('php', ['tests/integration/app.php', 'revoke'], { env, stdio: 'pipe' });
+                    await waitFor(() => expect(losses).toEqual([{ status: 404, privateMounted: false }]), {
+                        timeout: 10000,
+                    });
+                    expect(unmounts).toBe(1);
+                    expect(protectedHost.container.querySelector('[data-private]')).toBeNull();
+                    execFileSync('php', ['tests/integration/app.php', 'restore'], { env, stdio: 'pipe' });
+                    await waitFor(() => expect(mounts).toBe(2), { timeout: 10000 });
+                    expect(generations().size).toBe(2);
+                    // Close the actual socket with a new arbitrary backend deny.
+                    // Retained complete rows must not remount during reconnect.
+                    writeFileSync(join(root, 'access-denied'), 'deny');
+                    await act(async () => {
+                        const socket = sockets.filter((candidate) => candidate.readyState === WebSocket.OPEN).at(-1)!;
+                        await new Promise<void>((resolve) => {
+                            socket.addEventListener('close', () => resolve(), { once: true });
+                            socket.close(4000, 'Fixture connection loss');
+                        });
+                    });
+                    await waitFor(() => expect(protectedHost.container.querySelector('[data-private]')).toBeNull(), {
+                        timeout: 10000,
+                    });
+                    await waitFor(
+                        () => expect(protectedHost.container.querySelector('[data-zero-access="403"]')).not.toBeNull(),
+                        { timeout: 10000 },
+                    );
+                    expect(mounts).toBe(2);
+                    expect(unmounts).toBe(2);
+                    unlinkSync(join(root, 'access-denied'));
+                    // Visibility renewal requests a fresh native status generation,
+                    // without an access fetch/EventSource or permission write.
+                    await act(async () => {
+                        document.dispatchEvent(new Event('visibilitychange'));
+                    });
+                    await waitFor(() => expect(mounts).toBe(3), { timeout: 10000 });
+                    expect(generations().size).toBe(3);
+                    expect(browserFetch).not.toHaveBeenCalled();
+                } finally {
+                    protectedHost.unmount();
+                    adapter.dispose();
+                    browserFetch.mockRestore();
+                }
+                auditWire();
+
                 let activeReset = '';
                 try {
                     execFileSync('php', ['tests/integration/app.php', 'reset'], { env, encoding: 'utf8' });
@@ -353,6 +804,7 @@ it.skipIf(!enabled)(
                     'Restored managed grant did not restore the unchanged subscription',
                 );
             } finally {
+                watches.forEach((destroy) => destroy());
                 unsubscribe();
                 view.destroy();
             }
@@ -372,10 +824,27 @@ it.skipIf(!enabled)(
             const removeBob = bobView.addListener((rows) => {
                 bobIDs = rows.map((row) => row.id);
             });
+            // Guessing Alice's exact generation and binding is not ownership.
+            const bobAccess = zero.materialize(
+                access['__zero_access_status']({
+                    generation,
+                    bindings: [{ binding, query: guardedName, args: { task: alice } }],
+                }),
+                { ttl: 0 },
+            );
+            let bobStatus: { id: string; state: string; status: number | null } | undefined;
+            const removeBobAccess = bobAccess.addListener((rows, type) => {
+                if (type === 'complete') bobStatus = rows[0];
+            });
             try {
                 await until(() => bobIDs.length === 1, 'New identity did not synchronize');
                 expect(bobIDs).toEqual([bob]);
+                await until(() => bobStatus !== undefined, 'Other actor reserved status did not synchronize');
+                expect(bobStatus).toMatchObject({ state: 'denied', status: 404 });
+                expect(bobStatus?.id).not.toBe(aliceStatusID);
             } finally {
+                removeBobAccess();
+                bobAccess.destroy();
                 removeBob();
                 bobView.destroy();
             }
@@ -398,6 +867,7 @@ it.skipIf(!enabled)(
             ).toMatchObject({ title: 'Trusted owner', user_id: 'alice' });
             expect((await authoritative.server).type).toBe('success');
             expect(psql(`SELECT user_id FROM tasks WHERE id='${forgedContext.args.prepared.ids.s0}'`)).toBe('bob');
+            auditWire();
             await zero.close();
             zero = undefined;
             await stop(cache);
@@ -437,6 +907,7 @@ it.skipIf(!enabled)(
         } finally {
             await zero?.close();
             zero = undefined;
+            globalThis.WebSocket = WebSocket;
             await stop(cache);
             await stop(php);
             if (created) {
@@ -458,5 +929,5 @@ it.skipIf(!enabled)(
             rmSync(root, { recursive: true, force: true });
         }
     },
-    90000,
+    120000,
 );

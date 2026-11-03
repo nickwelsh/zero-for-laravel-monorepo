@@ -155,7 +155,7 @@ final class ModelRegistry
         foreach ($this->models as $model) {
             if ($model->policyVisibility) {
                 resolve(ProjectionManager::class)->assertReady();
-                $tables = array_unique([...$tables, 'permission_subjects', 'permission_index', Binding::resource($model->class)->projectionTable()]);
+                $tables = array_unique([...$tables, 'permission_subjects', 'permission_index', 'permission_access_checks', Binding::resource($model->class)->projectionTable()]);
             }
         }
 
@@ -165,6 +165,27 @@ final class ModelRegistry
         }
 
         return $columns;
+    }
+
+    /** Infrastructure roots are read-only and are never application model definitions.
+     * @return array<string, array{columns: array<string, array{type: 'string'|'number', nullable: bool}>, key: list<string>}>
+     */
+    public function accessTables(): array
+    {
+        if (array_filter($this->models, fn (ModelMetadata $model): bool => $model->policyVisibility) === []) {
+            return [];
+        }
+
+        return [
+            'permission_access_revision' => ['columns' => [
+                'id' => ['type' => 'string', 'nullable' => false], 'revision' => ['type' => 'string', 'nullable' => false],
+            ], 'key' => ['id']],
+            'permission_access_results' => ['columns' => [
+                'id' => ['type' => 'string', 'nullable' => false], 'generation' => ['type' => 'string', 'nullable' => false],
+                'binding' => ['type' => 'string', 'nullable' => false], 'state' => ['type' => 'string', 'nullable' => false],
+                'status' => ['type' => 'number', 'nullable' => true],
+            ], 'key' => ['id']],
+        ];
     }
 
     /**
@@ -230,6 +251,10 @@ final class ModelRegistry
 
         $model = new $class;
         $name = (new ReflectionClass($class))->getShortName();
+        if (in_array($model->getTable(), ['permission_access_checks', 'permission_access_revision', 'permission_access_results'], true)) {
+            throw new LogicException('Access infrastructure tables cannot be registered as application models.');
+        }
+
         if (! preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/D', $model->getTable())) {
             throw new LogicException("{$name}: Zero tables must use unqualified identifiers.");
         }

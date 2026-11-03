@@ -21,6 +21,10 @@ final readonly class ZodSchemaDriver implements SchemaDriver
             '__routeArgs: z.record(z.string(), z.union([z.string(), z.number().int()])).optional()',
             '__window: z.number().int().min(1).max(2147483647).optional()',
         ];
+        if (! $public) {
+            $fields[] = '__generation: z.uuid().optional()';
+        }
+
         foreach ($parameters as $name => $type) {
             $fields[] = json_encode($name, JSON_THROW_ON_ERROR).': '.$this->schema($type, $public);
         }

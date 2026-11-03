@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 // Isolated fixture server. Its test-only bearer identities are never application middleware.
 require __DIR__.'/../../packages/laravel/vendor/autoload.php';
 // QueryDirection is declared alongside this test controller, not in its own PSR-4 file.
@@ -12,13 +14,16 @@ use Illuminate\Foundation\Bootstrap\LoadConfiguration;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Middleware\SubstituteBindings;
 use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Route;
+use Illuminate\Support\Facades\Schema;
 use Inertia\Inertia;
 use Inertia\Response;
 use Symfony\Component\Console\Output\ConsoleOutput;
 use ZeroForLaravel\Attributes\ZeroMutation;
 use ZeroForLaravel\Generation\Mutations\ControllerMutationCompiler;
+use ZeroForLaravel\Inertia\ZeroInertiaServiceProvider;
 use ZeroForLaravel\Permissions\Casbin;
 use ZeroForLaravel\Permissions\VisibleToCurrentUser;
 use ZeroForLaravel\Tests\Fixtures\Comment;
@@ -32,18 +37,51 @@ use ZeroForLaravel\Tests\Fixtures\TaskList;
 use ZeroForLaravel\Tests\Fixtures\ZeroContext;
 use ZeroForLaravel\ZeroServiceProvider;
 
+// Access checks reload this configured model rather than trusting the request's
+// deliberately incomplete identity. Eloquent must not coerce alice/bob to ints.
+class FixtureUser extends User
+{
+    public $incrementing = false;
+
+    protected $table = 'users';
+
+    protected $keyType = 'string';
+}
+
 class FixtureIdentity
 {
     public function handle(Request $request, Closure $next)
     {
         $identity = $request->bearerToken();
         abort_unless(in_array($identity, ['alice', 'bob'], true), 401);
-        $user = (new User)->setKeyType('string')->forceFill(['id' => $identity]);
-        auth()->setUser($user);
-        $request->setUserResolver(fn () => $user);
+        if (! $request->attributes->get('zero.controller.dispatch')) {
+            $user = (new FixtureUser)->forceFill(['id' => $identity, 'access_blocked' => false]);
+            $user->exists = true; // These fixture identities have persisted users; Gates may call fresh().
+            auth()->setUser($user);
+            $request->setUserResolver(fn () => $user);
+        }
+        if ($request->is('callbacks/zero/query')) {
+            file_put_contents(getenv('ZERO_INTEGRATION_ROOT').'/query-callbacks.log', $request->getContent()."\n", FILE_APPEND);
+        }
         if ($request->is('callbacks/zero/query') && str_contains($request->getContent(), '"desc"')) {
             usleep(1200000);
         }
+
+        return $next($request);
+    }
+}
+
+class FixtureAccessMiddleware
+{
+    public function handle(Request $request, Closure $next)
+    {
+        file_put_contents(getenv('ZERO_INTEGRATION_ROOT').'/access-actors.log', json_encode([
+            'request' => $request->user()?->access_blocked,
+            'auth' => auth()->user()?->access_blocked,
+            'transaction' => DB::transactionLevel(),
+            'locked' => DB::scalar("SELECT EXISTS (SELECT 1 FROM pg_locks WHERE pid = pg_backend_pid() AND locktype = 'advisory' AND granted)"),
+        ], JSON_THROW_ON_ERROR)."\n", FILE_APPEND);
+        abort_if(is_file(getenv('ZERO_INTEGRATION_ROOT').'/access-denied') || $request->user()?->access_blocked, 403);
 
         return $next($request);
     }
@@ -82,7 +120,7 @@ $root = getenv('ZERO_INTEGRATION_ROOT');
 if (! is_string($root) || ! is_dir($root) || ! str_starts_with(basename($root), 'zero-live-')) {
     throw new RuntimeException('Missing isolated fixture root.');
 }
-$app = Application::configure(basePath: $root)->withProviders([ZeroServiceProvider::class])->withExceptions()->create();
+$app = Application::configure(basePath: $root)->withProviders([ZeroServiceProvider::class, ZeroInertiaServiceProvider::class])->withExceptions()->create();
 $app->afterBootstrapping(LoadConfiguration::class, function ($app) use ($root) {
     $app['config']->set([
         'logging.default' => 'single', 'logging.channels.single' => ['driver' => 'single', 'path' => $root.'/laravel.log'],
@@ -108,24 +146,31 @@ ini_set('error_log', $root.'/php.log');
 $kernel = $app->make(PHP_SAPI === 'cli' ? Illuminate\Contracts\Console\Kernel::class : Kernel::class);
 $kernel->bootstrap();
 OwnerPermissions::configure();
+config(['permissions.subject.class' => FixtureUser::class]);
 Task::addGlobalScope(new VisibleToCurrentUser);
 Tag::addGlobalScope(new VisibleToCurrentUser);
 Route::post('/fixture/tasks', [FixtureMutations::class, 'store'])->middleware(FixtureIdentity::class);
 Route::put('/fixture/tasks/{task}', [FixtureMutations::class, 'update'])->middleware([FixtureIdentity::class, SubstituteBindings::class]);
 Route::get('/fixture/tasks/sorted/{direction}', [QueryController::class, 'sorted'])->middleware([FixtureIdentity::class, SubstituteBindings::class]);
-Route::get('/fixture/tasks/{task}', [QueryController::class, 'show'])->middleware([FixtureIdentity::class, SubstituteBindings::class]);
+Route::get('/fixture/tasks/{task}', [QueryController::class, 'show'])->middleware([FixtureIdentity::class, FixtureAccessMiddleware::class, SubstituteBindings::class]);
 Route::get('/fixture/related', [FixtureReads::class, 'index'])->middleware(FixtureIdentity::class);
 foreach (['create', 'update', 'delete', 'restore', 'forceDelete'] as $ability) {
     Gate::define($ability, fn ($user, $model) => $ability === 'create' || ($model->user_id === $user->getAuthIdentifier() && $model->title !== 'Locked'));
 }
 if (PHP_SAPI === 'cli') {
-    if (in_array($argv[1] ?? null, ['revoke', 'restore'], true)) {
+    if (in_array($argv[1] ?? null, ['revoke', 'restore', 'revoke-rollback', 'revoke-related', 'restore-related'], true)) {
+        if ($argv[1] === 'revoke-rollback') {
+            DB::beginTransaction();
+        }
         $permissions = Casbin::model('owner');
-        $fields = ['owner:alice', 'tasks', 'view', 'owner', 'allow'];
-        if ($argv[1] === 'revoke') {
+        $fields = ['owner:alice', str_ends_with($argv[1], '-related') ? 'tags' : 'tasks', 'view', 'owner', 'allow'];
+        if (! str_starts_with($argv[1], 'restore')) {
             $permissions->removePolicy(...$fields);
         } else {
             $permissions->addPolicy(...$fields);
+        }
+        if ($argv[1] === 'revoke-rollback') {
+            DB::rollBack();
         }
         exit(0);
     }
@@ -138,6 +183,9 @@ if (PHP_SAPI === 'cli') {
     if (Artisan::call('migrate', ['--path' => __DIR__.'/migrations', '--realpath' => true, '--force' => true]) !== 0 || Artisan::call('zero:generate') !== 0 || Artisan::call('zero:generate', ['--check' => true]) !== 0) {
         throw new RuntimeException('Fixture setup failed.');
     }
+    Schema::table('users', function (Illuminate\Database\Schema\Blueprint $table): void {
+        $table->boolean('access_blocked')->default(false);
+    });
     $contracts = [];
     foreach (['store', 'update'] as $method) {
         $program = app(ControllerMutationCompiler::class)->compile(FixtureMutations::class, $method);

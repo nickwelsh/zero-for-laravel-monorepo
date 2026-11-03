@@ -15,6 +15,7 @@ return new class extends Migration
 
     public function down(): void
     {
+        PermissionSchema::dropAccess(resolve(PermissionManager::class)->connection());
         $schema = resolve(PermissionManager::class)->connection()->getSchemaBuilder();
         $schema->dropIfExists('permission_access_watches');
         $schema->dropIfExists('permission_events');

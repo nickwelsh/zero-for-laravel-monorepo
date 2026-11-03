@@ -7,8 +7,8 @@ const zql = createBuilder(schema);
 const defineQueries = defineQueriesWithType<typeof schema>();
 const defineQuery = defineQueryWithType<typeof schema, Context>();
 export const inputs = {
-  "q_73de62459046dd5e84fc92d45084a0e4d5b66114f2ff5b884e3cc36b529c6bc4": z.strictObject({__route: z.string().optional(), __routeArgs: z.record(z.string(), z.union([z.string(), z.number().int()])).optional(), __window: z.number().int().min(1).max(2147483647).optional(), "input": z.strictObject({"status": z.string().and(z.union([z.literal("all"), z.literal("active"), z.literal("completed")])).optional()})}),
-  "q_95e097c03a3cc356fa33ca7de72d998ed3fc4a83cb9ed5b747a43b4ccd34361b": z.strictObject({__route: z.string().optional(), __routeArgs: z.record(z.string(), z.union([z.string(), z.number().int()])).optional(), __window: z.number().int().min(1).max(2147483647).optional(), "list": z.string()}),
+  "q_73de62459046dd5e84fc92d45084a0e4d5b66114f2ff5b884e3cc36b529c6bc4": z.strictObject({__route: z.string().optional(), __routeArgs: z.record(z.string(), z.union([z.string(), z.number().int()])).optional(), __window: z.number().int().min(1).max(2147483647).optional(), __generation: z.uuid().optional(), "input": z.strictObject({"status": z.string().and(z.union([z.literal("all"), z.literal("active"), z.literal("completed")])).optional()})}),
+  "q_95e097c03a3cc356fa33ca7de72d998ed3fc4a83cb9ed5b747a43b4ccd34361b": z.strictObject({__route: z.string().optional(), __routeArgs: z.record(z.string(), z.union([z.string(), z.number().int()])).optional(), __window: z.number().int().min(1).max(2147483647).optional(), __generation: z.uuid().optional(), "list": z.string()}),
 };
 export const publicInputs = {
   "q_73de62459046dd5e84fc92d45084a0e4d5b66114f2ff5b884e3cc36b529c6bc4": z.strictObject({__route: z.string().optional(), __routeArgs: z.record(z.string(), z.union([z.string(), z.number().int()])).optional(), __window: z.number().int().min(1).max(2147483647).optional(), "input": z.strictObject({"status": z.string().and(z.union([z.literal("all"), z.literal("active"), z.literal("completed")])).optional()})}),

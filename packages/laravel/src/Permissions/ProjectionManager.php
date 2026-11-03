@@ -74,6 +74,7 @@ final class ProjectionManager
                 'subject_key' => 'text NOT NULL', 'effect' => 'text NOT NULL', 'global_key' => "text NOT NULL DEFAULT 'global'",
                 'v0' => 'text', 'v1' => 'text', 'v2' => 'text', 'v3' => 'text', 'v4' => 'text', 'v5' => 'text', ...$this->types($attributes, 's_')]);
             $this->table('permission_installation', ['id' => 'boolean PRIMARY KEY DEFAULT true CHECK (id)', 'fingerprint' => 'text NOT NULL']);
+            PermissionSchema::createAccess($db);
             $db->statement('CREATE INDEX IF NOT EXISTS permission_lookup ON permission_index (subject_key, model, effect, v1, v2, v3)');
             $db->statement('CREATE INDEX IF NOT EXISTS permission_provenance ON permission_index (rule_id)');
             $this->function('zero_permissions_subjects', '', 'void', $this->replaceRows('permission_subjects', ['id' => $subjectKey, 'global_key' => "'global'", ...$subjectValues], $subject));

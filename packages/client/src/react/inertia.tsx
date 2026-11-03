@@ -96,12 +96,27 @@ function normalizePage(page: TransportPage, previous?: TransportPage): void {
 
 function Subscription({
     selection,
+    access,
     children,
 }: {
     selection: ReadSelection;
+    access?: AccessOptions | undefined;
     children: (data: Data<unknown>) => ReactNode;
 }) {
-    return children(useData(selection));
+    const data = useData(selection);
+    if (access) {
+        if (data.error instanceof QueryAccessError)
+            return (
+                access.onError?.(data.error.status) ?? (
+                    <div role="alert" data-zero-access={data.error.status}>
+                        {data.error.message}
+                    </div>
+                )
+            );
+        if (!data.complete || data.error || (selection.one && data.data === undefined))
+            return access.onPending?.() ?? <output data-zero-access="unknown">Checking access…</output>;
+    }
+    return children(data);
 }
 
 function InputSubscription({
@@ -109,12 +124,16 @@ function InputSubscription({
     factory,
     starting,
     synchronize,
+    prop,
+    access,
     children,
 }: {
     binding: Binding;
     factory: (args: unknown) => ReadSelection;
     starting: boolean;
     synchronize: (args: Record<string, unknown>, values: object) => boolean;
+    prop: string;
+    access: AccessOptions;
     children: (data: Data<unknown> & { inputs: QueryInputs<Record<string, unknown>, object> }) => ReactNode;
 }) {
     const source = selectionKey(binding);
@@ -169,7 +188,18 @@ function InputSubscription({
     };
     // oxlint-disable-next-line react/refs -- Only input event handlers access the ref; rendering reads immutable values.
     if (starting) return children({ ...loading(selection), inputs });
-    return <Subscription selection={selection}>{(data) => children({ ...data, inputs })}</Subscription>;
+    const subscription = (
+        <Subscription selection={selection} access={binding.access ? access : undefined}>
+            {(data) => children({ ...data, inputs })}
+        </Subscription>
+    );
+    return binding.access ? (
+        <AccessBoundary binding={{ ...binding, args: state.args }} prop={prop} options={access}>
+            {subscription}
+        </AccessBoundary>
+    ) : (
+        subscription
+    );
 }
 
 const noop = () => {};
@@ -306,24 +336,10 @@ export function createInertiaAdapter(factories: BindingFactories, options: Inert
                             factory={factory}
                             starting={starting}
                             synchronize={synchronize}
+                            prop={prop}
+                            access={options.access ?? defaultAccess}
                         >
-                            {(data) =>
-                                binding.access && !starting ? (
-                                    <AccessBoundary
-                                        binding={binding}
-                                        prop={prop}
-                                        options={options.access ?? defaultAccess}
-                                        unavailable={factory(binding.args).one && data.data === undefined}
-                                        deniedStatus={
-                                            data.error instanceof QueryAccessError ? data.error.status : undefined
-                                        }
-                                    >
-                                        {render(index + 1, { ...effective, [prop]: data })}
-                                    </AccessBoundary>
-                                ) : (
-                                    render(index + 1, { ...effective, [prop]: data })
-                                )
-                            }
+                            {(data) => render(index + 1, { ...effective, [prop]: data })}
                         </InputSubscription>
                     );
                 }

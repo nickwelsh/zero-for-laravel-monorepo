@@ -15,16 +15,27 @@ const table1 = table("lists").columns({
   "user_id": string(),
   "name": string(),
 } ).primaryKey("id");
-const table2 = table("tags").columns({
+const table2 = table("permission_access_results").columns({
+  "id": string(),
+  "generation": string(),
+  "binding": string(),
+  "state": string(),
+  "status": number().optional(),
+} ).primaryKey("id");
+const table3 = table("permission_access_revision").columns({
+  "id": string(),
+  "revision": string(),
+} ).primaryKey("id");
+const table4 = table("tags").columns({
   "id": string(),
   "user_id": string(),
   "name": string(),
 } ).primaryKey("id");
-const table3 = table("task_tag").columns({
+const table5 = table("task_tag").columns({
   "task_id": string(),
   "tag_id": string(),
 } ).primaryKey("task_id", "tag_id");
-const table4 = table("tasks").columns({
+const table6 = table("tasks").columns({
   "id": string(),
   "user_id": string(),
   "list_id": string().optional(),
@@ -35,15 +46,15 @@ const table4 = table("tasks").columns({
   "updated_at": number().optional(),
   "deleted_at": number().optional(),
 } ).primaryKey("id");
-const table4Relations = relationships(table4, ({one, many}) => ({
+const table6Relations = relationships(table6, ({one, many}) => ({
   "list": one({sourceField: ["list_id"], destField: ["id"], destSchema: table1}),
-  "tags": many({sourceField: ["id"], destField: ["task_id"], destSchema: table3}, {sourceField: ["tag_id"], destField: ["id"], destSchema: table2}),
+  "tags": many({sourceField: ["id"], destField: ["task_id"], destSchema: table5}, {sourceField: ["tag_id"], destField: ["id"], destSchema: table4}),
   "comments": many({sourceField: ["id"], destField: ["task_id"], destSchema: table0}),
 }));
 const table1Relations = relationships(table1, ({many}) => ({
-  "tasks": many({sourceField: ["id"], destField: ["list_id"], destSchema: table4}),
+  "tasks": many({sourceField: ["id"], destField: ["list_id"], destSchema: table6}),
 }));
-export const schema = createSchema({tables: [table0, table1, table2, table3, table4], relationships: [table4Relations, table1Relations], enableLegacyQueries: false, enableLegacyMutators: false});
+export const schema = createSchema({tables: [table0, table1, table2, table3, table4, table5, table6], relationships: [table6Relations, table1Relations], enableLegacyQueries: false, enableLegacyMutators: false});
 export const definitions = {
     "Comment": {
         "name": "Comment",

@@ -5,9 +5,11 @@ declare(strict_types=1);
 namespace ZeroForLaravel\Query;
 
 use Illuminate\Auth\Access\AuthorizationException;
+use Illuminate\Auth\AuthenticationException;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Validation\ValidationException;
 use Symfony\Component\HttpKernel\Exception\HttpExceptionInterface;
+use ZeroForLaravel\Access\AccessQueries;
 use ZeroForLaravel\ResolvedContext;
 use ZeroForLaravel\Support\Input;
 
@@ -55,6 +57,13 @@ final readonly class QueryProcessor
                     Input::fail('args', 'Expected one argument object.');
                 }
 
+                if (in_array($request['name'], [AccessQueries::REVISION, AccessQueries::STATUS], true)) {
+                    $result['ast'] = resolve(AccessQueries::class)->transform($request['name'], $request['args'][0], $context);
+                    $queries[] = $result;
+
+                    continue;
+                }
+
                 if (! str_starts_with($request['name'], 'q_')) {
                     Input::fail('name', 'Unknown controller query. Reload the application.');
                 }
@@ -67,8 +76,9 @@ final readonly class QueryProcessor
                 $result['ast'] = $registered->invoke($request['args'][0], $context, $this->compiler);
             } catch (ValidationException $error) {
                 $result += ['error' => 'parse', 'message' => 'Invalid query arguments.', 'details' => ['fields' => $error->errors()]];
-            } catch (AuthorizationException|ModelNotFoundException|HttpExceptionInterface $error) {
+            } catch (AuthenticationException|AuthorizationException|ModelNotFoundException|HttpExceptionInterface $error) {
                 $status = match (true) {
+                    $error instanceof AuthenticationException => 401,
                     $error instanceof AuthorizationException => $error->status() ?? config()->integer('permissions.denied_status'),
                     $error instanceof ModelNotFoundException => 404,
                     default => $error->getStatusCode(),

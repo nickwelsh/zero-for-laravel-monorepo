@@ -10,6 +10,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Route;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Str;
 use LogicException;
 use PhpParser\ParserFactory;
 use ZeroForLaravel\Context\ContextDefinition;
@@ -69,7 +70,11 @@ final readonly class RegisteredQuery
         $args = Input::object($arguments, 'args');
         $window = $args['__window'] ?? null;
         $cursor = $args['__cursor'] ?? null;
-        unset($args['__route'], $args['__routeArgs'], $args['__window'], $args['__cursor']);
+        if (isset($args['__generation']) && (! is_string($args['__generation']) || ! Str::isUuid($args['__generation']))) {
+            Input::fail('generation', 'Query generations must be UUIDs.');
+        }
+
+        unset($args['__route'], $args['__routeArgs'], $args['__window'], $args['__cursor'], $args['__generation']);
         Input::keys($args, array_keys($this->parameters), 'args');
         foreach ($this->parameters as $name => $type) {
             QueryInput::validate($type, $args[$name] ?? null, $name);
@@ -105,7 +110,7 @@ final readonly class RegisteredQuery
     {
         $wire = Input::object($arguments, 'args');
         $args = $wire;
-        unset($args['__route'], $args['__routeArgs'], $args['__window'], $args['__cursor']);
+        unset($args['__route'], $args['__routeArgs'], $args['__window'], $args['__cursor'], $args['__generation']);
         $input = [];
         $routeParameters = $args;
         foreach ($this->parameters as $name => $type) {

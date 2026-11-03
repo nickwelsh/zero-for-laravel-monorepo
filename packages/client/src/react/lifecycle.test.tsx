@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, render, renderHook, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, renderHook, screen } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vite-plus/test';
 import { createBuilder, defineQueries, defineQuery } from '@rocicorp/zero';
 import { schema, definitions } from '../../../../tests/interop/generated';
@@ -9,6 +9,8 @@ import { z } from 'zod';
 import { router } from '@inertiajs/react';
 import { useData, QueryAccessError, type Data, type QueryInputs } from './data';
 import { createInertiaAdapter, useLiveProps } from './inertia';
+import { AccessBoundary, AccessGeneration } from './access';
+import { StrictMode, useContext } from 'react';
 
 const native = vi.hoisted(() => ({
     results: new Map<
@@ -18,20 +20,100 @@ const native = vi.hoisted(() => ({
             { type: string; error?: { message: string; details?: { status: number } }; retry?: () => void },
         ]
     >(),
-    zero: { context: { user_id: 'alice' } },
+    zero: undefined as unknown as ReturnType<typeof mockZero>,
+    requests: [] as { args: Record<string, unknown> }[],
+    views: [] as NativeView[],
+    retainedRevision: false,
     retry: vi.fn(),
 }));
 vi.mock('@rocicorp/zero/react', () => ({
-    useQuery: (request: { args: unknown } | undefined, options: { enabled?: boolean }) =>
-        !request || options.enabled === false
+    useQuery: (request: { args: Record<string, unknown> } | undefined, options: { enabled?: boolean }) => {
+        if (request) native.requests.push(request);
+        return !request || options.enabled === false
             ? [undefined, { type: 'unknown' }]
-            : (native.results.get(JSON.stringify(request.args)) ?? [[], { type: 'unknown' }]),
+            : (native.results.get(JSON.stringify(request.args)) ?? [[], { type: 'unknown' }]);
+    },
     useZero: () => native.zero,
-    useConnectionState: () => ({ name: 'connected' }),
+    useConnectionState: () => native.zero.connection.state.current,
 }));
-afterEach(cleanup);
+interface NativeRequest {
+    query: { queryName: string };
+    args: { generation?: string; bindings?: { binding: string; query: string; args: object }[] };
+}
+class NativeView {
+    listener?: (data: unknown, type: 'unknown' | 'cached' | 'complete' | 'error') => void;
+    destroy = vi.fn();
+    unsubscribe = vi.fn();
+    constructor(
+        readonly request: NativeRequest,
+        readonly options: { ttl: number },
+    ) {}
+    addListener(listener: NonNullable<NativeView['listener']>) {
+        this.listener = listener;
+        listener([{ id: 'global', revision: 'one' }], native.retainedRevision ? 'complete' : 'unknown');
+        return this.unsubscribe;
+    }
+    send(data: unknown, type: Parameters<NonNullable<NativeView['listener']>>[1] = 'complete') {
+        // Deliberately deliver even after cleanup, to exercise stale callbacks.
+        this.listener?.(data, type);
+    }
+    rows(state = 'allowed', status?: number) {
+        return this.request.args.bindings!.map(({ binding }) => ({
+            id: `${this.request.args.generation}:${binding}`,
+            generation: this.request.args.generation,
+            binding,
+            state,
+            status: status ?? null,
+        }));
+    }
+}
+function mockZero(user = 'alice') {
+    const listeners = new Set<() => void>();
+    const state = {
+        current: { name: 'connected' },
+        subscribe(listener: () => void) {
+            listeners.add(listener);
+            return () => listeners.delete(listener);
+        },
+    };
+    return {
+        context: { user_id: user },
+        schema,
+        connection: { state },
+        connect(name: string) {
+            state.current = { name };
+            listeners.forEach((listener) => listener());
+        },
+        materialize(request: NativeRequest, options: { ttl: number }) {
+            const view = new NativeView(request, options);
+            native.views.push(view);
+            return view;
+        },
+    };
+}
+const revisions = () => native.views.filter((view) => view.request.query.queryName === '__zero_access_revision');
+const checks = () => native.views.filter((view) => view.request.query.queryName === '__zero_access_status');
+async function revision(value = 'one') {
+    await act(async () =>
+        revisions()
+            .at(-1)!
+            .send([{ id: 'global', revision: value }]),
+    );
+}
+async function answer(state = 'allowed', status?: number, view = checks().at(-1)!) {
+    await act(async () => view.send(view.rows(state, status)));
+}
+afterEach(() => {
+    cleanup();
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+});
 beforeEach(() => {
+    native.zero = mockZero();
     native.results.clear();
+    native.views.length = 0;
+    native.requests.length = 0;
+    native.retainedRevision = false;
     native.retry.mockReset();
 });
 const rows = [
@@ -75,102 +157,478 @@ it.each([403, 404] as const)('discards previously decoded rows on an authoritati
 });
 
 it.each([403, 404] as const)(
-    'blocks a protected page before its %s callback and ignores duplicate or obsolete events',
+    'uses native status data, unmounts before %s callbacks, and restores a new business identity',
     async (status) => {
-        const streams: FakeStream[] = [];
-        let generation = '';
-        class FakeStream extends EventTarget {
-            onerror: (() => void) | null = null;
-            close = vi.fn();
-            constructor() {
-                super();
-                streams.push(this);
-            }
-            send(state: string, revision: string, selectedGeneration = generation) {
-                this.dispatchEvent(
-                    new MessageEvent('access', {
-                        data: JSON.stringify({ id: 'watch', generation: selectedGeneration, state, revision, status }),
-                    }),
-                );
-            }
-        }
-        vi.stubGlobal('EventSource', FakeStream);
-        vi.stubGlobal(
-            'fetch',
-            vi.fn(async (_url: string, init: RequestInit) => {
-                if (init.method === 'POST' && typeof init.body === 'string')
-                    generation = JSON.parse(init.body).generation;
-                return { ok: true, status: 201, json: async () => ({ id: 'watch' }) };
-            }),
-        );
+        const fetch = vi.fn();
+        const eventSource = vi.fn();
+        vi.stubGlobal('fetch', fetch);
+        vi.stubGlobal('EventSource', eventSource);
         const revoked = vi.fn(() => expect(screen.queryByText('Private contents')).toBeNull());
         const adapter = createInertiaAdapter(
             { tasks: (args: { title: string }) => index.tasks.live(args) },
             { access: { onRevoked: revoked } },
         );
         const page = {
-            component: 'tasks/index',
+            component: 'tasks',
             props: {
                 __zero: {
                     version: 1,
                     mode: 'replace',
-                    bindings: { tasks: { query: 'tasks', args: { title: '' }, access: { status } } },
+                    bindings: {
+                        tasks: { query: 'tasks', args: { title: '' }, access: { status } },
+                    },
                 },
             },
         };
         const Wrapped = adapter.wrap(() => <p>Private contents</p>, page);
-        put({ title: '' }, rows);
+        put({ title: '' }, rows); // Persisted rows under the old identity are not sufficient.
         const view = render(<Wrapped {...page.props} />);
         try {
-            expect(screen.queryByText('Private contents')).toBeNull();
-            await waitFor(() => expect(streams).toHaveLength(1));
-            act(() => streams[0]!.send('denied', 'initial-denial'));
+            expect(native.requests).toHaveLength(0);
+            await revision();
+            await answer('denied', status);
             expect(screen.getByRole('alert').getAttribute('data-zero-access')).toBe(String(status));
             expect(revoked).not.toHaveBeenCalled();
-            act(() => streams[0]!.send('allowed', 'opaque-revision'));
-            expect(screen.getByText('Private contents')).toBeTruthy();
-            act(() => {
-                streams[0]!.dispatchEvent(new Event('error'));
-            });
+            await answer();
             expect(screen.queryByText('Private contents')).toBeNull();
-            expect(revoked).not.toHaveBeenCalled();
-            await waitFor(() => expect(streams).toHaveLength(2), { timeout: 3000 });
-            act(() => streams[0]!.send('allowed', 'late-old-connection'));
+            const first = native.requests.at(-1)!.args;
+            expect(first['__generation']).toMatch(/^[\da-f-]{36}$/);
+            put(first, rows, 'cached');
+            view.rerender(<Wrapped {...page.props} />);
             expect(screen.queryByText('Private contents')).toBeNull();
-            const stream = streams[1]!;
-            // Even an unchanged revision must authorize afresh on reconnect.
-            act(() => stream.send('allowed', 'opaque-revision'));
-            expect(screen.getByText('Private contents')).toBeTruthy();
-            // An empty collection is successful, not a revoked singleton.
-            put({ title: '' }, []);
+            put(first, rows);
             view.rerender(<Wrapped {...page.props} />);
             expect(screen.getByText('Private contents')).toBeTruthy();
-            // An unavailable server recheck can retain the last opaque revision.
-            act(() => stream.send('unknown', 'opaque-revision'));
+            put(first, rows, 'error');
+            view.rerender(<Wrapped {...page.props} />);
             expect(screen.queryByText('Private contents')).toBeNull();
             expect(revoked).not.toHaveBeenCalled();
-            act(() => stream.send('allowed', 'opaque-revision'));
-            expect(screen.getByText('Private contents')).toBeTruthy();
-            act(() => stream.send('denied', '5', 'old-route'));
-            expect(screen.getByText('Private contents')).toBeTruthy();
-            act(() => stream.send('denied', '5'));
-            expect(screen.getByRole('alert').getAttribute('data-zero-access')).toBe(String(status));
+            await answer('denied', status);
             expect(revoked).toHaveBeenCalledOnce();
-            act(() => stream.send('denied', '5'));
-            act(() => stream.send('allowed', '6', 'old-route'));
+            await answer('denied', status);
             expect(revoked).toHaveBeenCalledOnce();
+            await answer();
+            const second = native.requests.at(-1)!.args;
+            expect(second['__generation']).not.toBe(first['__generation']);
             expect(screen.queryByText('Private contents')).toBeNull();
-            view.unmount();
-            expect(stream.close).toHaveBeenCalled();
-            act(() => stream.send('allowed', '6'));
+            put(second, []); // A completed empty collection is not a denial.
+            view.rerender(<Wrapped {...page.props} />);
+            expect(screen.getByText('Private contents')).toBeTruthy();
+            expect(fetch).not.toHaveBeenCalled();
+            expect(eventSource).not.toHaveBeenCalled();
+            await act(async () => view.unmount());
+            expect(native.views.every((resource) => resource.destroy.mock.calls.length === 1)).toBe(true);
+            expect(native.views.every((resource) => resource.unsubscribe.mock.calls.length === 1)).toBe(true);
+            await answer();
             expect(screen.queryByText('Private contents')).toBeNull();
         } finally {
             view.unmount();
             adapter.dispose();
-            vi.unstubAllGlobals();
         }
     },
 );
+
+const protectedBinding = { query: 'tasks', args: { title: '' }, access: { status: 403 as const } };
+function BusinessIdentity() {
+    return <p>Private {useContext(AccessGeneration)}</p>;
+}
+
+it('rejects retained revision completion, cached-only status, malformed/missing/duplicate rows and transport errors', async () => {
+    native.retainedRevision = true;
+    const revoked = vi.fn();
+    render(
+        <AccessBoundary binding={protectedBinding} prop="tasks" options={{ onRevoked: revoked }}>
+            <BusinessIdentity />
+        </AccessBoundary>,
+    );
+    await act(async () => {});
+    expect(checks()).toHaveLength(0);
+    await act(async () => revisions()[0]!.send([{ id: 'global', revision: 'one' }], 'cached'));
+    expect(checks()).toHaveLength(0);
+    for (const data of [
+        [],
+        [{ id: 'other', revision: 'one' }],
+        [{ id: 'global', revision: null }],
+        [{ id: 'global', revision: '' }],
+        [
+            { id: 'global', revision: 'one' },
+            { id: 'global', revision: 'two' },
+        ],
+    ]) {
+        act(() => revisions()[0]!.send(data));
+        expect(checks()).toHaveLength(0);
+    }
+    await revision();
+    const check = checks()[0]!;
+    const row = check.rows()[0]!;
+    for (const type of ['cached', 'unknown', 'error'] as const) {
+        act(() => check.send([row], type));
+        expect(screen.queryByText(/^Private/)).toBeNull();
+        expect(screen.queryByRole('alert')).toBeNull();
+    }
+    for (const data of [
+        [],
+        null,
+        [null],
+        [{ ...row, generation: 'obsolete' }],
+        [{ ...row, binding: 'other' }],
+        [{ ...row, id: '' }],
+        [{ ...row, state: 'unknown' }],
+        [{ ...row, status: '403' }],
+        [{ ...row, state: 'denied', status: 500 }],
+        [row, row],
+    ]) {
+        act(() => check.send(data));
+        expect(screen.queryByText(/^Private/)).toBeNull();
+    }
+    expect(checks()).toHaveLength(1); // Empty complete must not cause a render/recheck loop.
+    await answer();
+    expect(screen.getByText(/^Private/)).toBeTruthy();
+    act(() => check.send([])); // Removal of a previously confirmed row fails closed.
+    expect(screen.queryByText(/^Private/)).toBeNull();
+    expect(revoked).not.toHaveBeenCalled();
+});
+
+it('renews with fresh UUIDs without changing business identity, and expires from request start, not response time', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date', 'performance'] });
+    const view = render(
+        <AccessBoundary binding={protectedBinding} prop="tasks" options={{}}>
+            <BusinessIdentity />
+        </AccessBoundary>,
+    );
+    await revision();
+    await act(() => vi.advanceTimersByTime(10_000));
+    await answer();
+    const identity = screen.getByText(/^Private/).textContent;
+    await act(() => vi.advanceTimersByTime(5_000));
+    expect(checks()).toHaveLength(2);
+    expect(checks()[1]!.request.args.generation).not.toBe(checks()[0]!.request.args.generation);
+    expect(screen.getByText(/^Private/).textContent).toBe(identity);
+    act(() => checks()[1]!.send([], 'error'));
+    expect(screen.getByText(/^Private/).textContent).toBe(identity);
+    await answer();
+    expect(screen.getByText(/^Private/).textContent).toBe(identity);
+    vi.setSystemTime(Date.now() - 3_600_000); // Wall-clock rollback must not extend the lease.
+    await act(() => vi.advanceTimersByTime(15_000)); // Third request never completes.
+    await act(() => vi.advanceTimersByTime(4_999));
+    expect(screen.getByText(/^Private/)).toBeTruthy();
+    await act(() => vi.advanceTimersByTime(1)); // Second request began at 15s: lease ends at 35s.
+    expect(screen.queryByText(/^Private/)).toBeNull();
+    await answer('allowed', undefined, checks()[1]); // Expired/superseded generation cannot extend authority.
+    expect(screen.queryByText(/^Private/)).toBeNull();
+    await act(async () => view.unmount());
+    expect(vi.getTimerCount()).toBe(0);
+});
+
+it('rejects an expired current-generation response even when renewal and expiry timers have been suspended', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date', 'performance'] });
+    const view = render(
+        <AccessBoundary binding={protectedBinding} prop="tasks" options={{}}>
+            <BusinessIdentity />
+        </AccessBoundary>,
+    );
+    await revision();
+    const clock = vi.spyOn(performance, 'now').mockReturnValue(20_001);
+    try {
+        // Simulate a suspended event loop delivering the network callback before
+        // its overdue timers. The UUID is still current, but its authority is not.
+        await answer();
+        expect(checks()).toHaveLength(1);
+        expect(screen.queryByText(/^Private/)).toBeNull();
+        await act(async () => view.unmount());
+        expect(vi.getTimerCount()).toBe(0);
+    } finally {
+        view.unmount();
+        clock.mockRestore();
+    }
+});
+
+it('backs off empty checks and retains denied subscriptions for eventual regrant', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date', 'performance'] });
+    render(
+        <AccessBoundary binding={protectedBinding} prop="tasks" options={{}}>
+            <BusinessIdentity />
+        </AccessBoundary>,
+    );
+    await revision();
+    act(() => checks()[0]!.send([]));
+    await act(() => vi.advanceTimersByTime(999));
+    expect(checks()).toHaveLength(1);
+    await act(() => vi.advanceTimersByTime(1));
+    expect(checks()).toHaveLength(2);
+    act(() => checks()[1]!.send([]));
+    await act(() => vi.advanceTimersByTime(1999));
+    expect(checks()).toHaveLength(2);
+    await act(() => vi.advanceTimersByTime(1));
+    await answer('denied', 404);
+    expect(screen.getByRole('alert').textContent).toBe('Not found');
+    await act(() => vi.advanceTimersByTime(15_000));
+    await answer();
+    expect(screen.getByText(/^Private/)).toBeTruthy();
+});
+
+it('retries revision materialization failures at a bounded rate and cancels pending retry timers', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date', 'performance'] });
+    const materialize = vi.spyOn(native.zero, 'materialize').mockImplementationOnce(() => {
+        throw new Error('transport');
+    });
+    const view = render(
+        <AccessBoundary binding={protectedBinding} prop="tasks" options={{}}>
+            <BusinessIdentity />
+        </AccessBoundary>,
+    );
+    expect(screen.queryByText(/^Private/)).toBeNull();
+    expect(materialize).toHaveBeenCalledOnce();
+    await act(() => vi.advanceTimersByTime(999));
+    expect(materialize).toHaveBeenCalledOnce();
+    await act(() => vi.advanceTimersByTime(1));
+    expect(revisions()).toHaveLength(1);
+    act(() => revisions()[0]!.send([], 'error'));
+    expect(screen.queryByRole('alert')).toBeNull();
+    await act(async () => view.unmount());
+    expect(vi.getTimerCount()).toBe(0);
+    materialize.mockRestore();
+});
+
+it('observes synchronous disconnect/reconnect epochs and requires a fresh revision and status even when the revision is unchanged', async () => {
+    render(
+        <AccessBoundary binding={protectedBinding} prop="tasks" options={{}}>
+            <BusinessIdentity />
+        </AccessBoundary>,
+    );
+    await revision();
+    await answer();
+    const identity = screen.getByText(/^Private/).textContent;
+    const oldRevision = revisions()[0]!;
+    const oldCheck = checks()[0]!;
+    native.retainedRevision = true;
+    act(() => {
+        native.zero.connect('disconnected');
+        native.zero.connect('connected');
+    });
+    expect(screen.queryByText(/^Private/)).toBeNull();
+    expect(revisions()).toHaveLength(2);
+    expect(revisions()[1]!.request.args.generation).toMatch(/^[a-f0-9-]{36}$/);
+    expect(revisions()[1]!.request.args.generation).not.toBe(oldRevision.request.args.generation);
+    expect(oldRevision.destroy).toHaveBeenCalledOnce();
+    expect(oldCheck.destroy).toHaveBeenCalledOnce();
+    act(() => oldRevision.send([{ id: 'global', revision: 'one' }]));
+    await answer('allowed', undefined, oldCheck);
+    expect(checks()).toHaveLength(1);
+    expect(screen.queryByText(/^Private/)).toBeNull();
+    await revision();
+    expect(checks()).toHaveLength(2);
+    await answer();
+    expect(screen.getByText(/^Private/).textContent).not.toBe(identity);
+    expect(native.views.every((view) => view.options.ttl === 0)).toBe(true);
+});
+
+it('coalesces revisions, invalidates visibility restoration, and never shares approval across contexts or Zero instances', async () => {
+    const boundary = (
+        <AccessBoundary binding={protectedBinding} prop="tasks" options={{}}>
+            <BusinessIdentity />
+        </AccessBoundary>
+    );
+    const view = render(boundary);
+    await revision();
+    await answer();
+    const old = checks()[0]!;
+    await act(async () => {
+        revisions()[0]!.send([{ id: 'global', revision: 'two' }]);
+        revisions()[0]!.send([{ id: 'global', revision: 'three' }]);
+    });
+    expect(screen.queryByText(/^Private/)).toBeNull();
+    expect(checks()).toHaveLength(2);
+    await answer('allowed', undefined, old);
+    expect(screen.queryByText(/^Private/)).toBeNull();
+    await answer();
+    await act(async () => document.dispatchEvent(new Event('visibilitychange')));
+    expect(screen.queryByText(/^Private/)).toBeNull();
+    expect(checks()).toHaveLength(3);
+    await answer();
+    native.zero.context = { user_id: 'bob' };
+    view.rerender(
+        <AccessBoundary binding={protectedBinding} prop="tasks" options={{}}>
+            <BusinessIdentity />
+        </AccessBoundary>,
+    );
+    expect(screen.queryByText(/^Private/)).toBeNull();
+    await revision();
+    await answer();
+    native.zero = mockZero('bob');
+    view.rerender(
+        <AccessBoundary binding={protectedBinding} prop="tasks" options={{}}>
+            <BusinessIdentity />
+        </AccessBoundary>,
+    );
+    expect(screen.queryByText(/^Private/)).toBeNull();
+    await revision();
+    await answer();
+    expect(screen.getByText(/^Private/)).toBeTruthy();
+});
+
+it('shares identical bindings and splits native batches at 32 without invalidating sibling approvals', async () => {
+    const boundaries = Array.from({ length: 65 }, (_, position) => (
+        <AccessBoundary
+            key={position}
+            binding={{ ...protectedBinding, args: { title: String(position) } }}
+            prop={String(position)}
+            options={{}}
+        >
+            <p>Private {position}</p>
+        </AccessBoundary>
+    ));
+    render(
+        <>
+            {boundaries}
+            <AccessBoundary binding={{ ...protectedBinding, args: { title: '0' } }} prop="duplicate" options={{}}>
+                <p>Duplicate</p>
+            </AccessBoundary>
+        </>,
+    );
+    await revision();
+    expect(revisions()).toHaveLength(1);
+    expect(checks().map((view) => view.request.args.bindings!.length)).toEqual([32, 32, 1]);
+    for (const check of checks()) await answer('allowed', undefined, check);
+    expect(screen.getAllByText(/^Private/)).toHaveLength(65);
+    expect(screen.getByText('Duplicate')).toBeTruthy();
+});
+
+it('keeps one revision view through StrictMode subscription handoffs and cleans up all resources', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date', 'performance'] });
+    const view = render(
+        <StrictMode>
+            <AccessBoundary binding={protectedBinding} prop="tasks" options={{}}>
+                <BusinessIdentity />
+            </AccessBoundary>
+        </StrictMode>,
+    );
+    expect(revisions()).toHaveLength(1);
+    expect(screen.queryByText(/^Private/)).toBeNull();
+    await revision();
+    await answer();
+    expect(screen.getByText(/^Private/)).toBeTruthy();
+    await act(async () => view.unmount());
+    expect(native.views.every((resource) => resource.destroy.mock.calls.length === 1)).toBe(true);
+    expect(vi.getTimerCount()).toBe(0);
+});
+
+it('authorizes nested Inertia bindings independently without unmount loops or renewing business identities', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date', 'performance'] });
+    const adapter = createInertiaAdapter({ tasks: (args: { title: string }) => index.tasks.live(args) });
+    const page = {
+        component: 'tasks',
+        props: {
+            __zero: {
+                version: 1,
+                mode: 'replace',
+                bindings: {
+                    first: { ...protectedBinding, args: { title: 'first' } },
+                    second: { ...protectedBinding, args: { title: 'second' } },
+                },
+            },
+        },
+    };
+    const Wrapped = adapter.wrap(() => <p>Nested private page</p>, page);
+    const view = render(<Wrapped {...page.props} />);
+    try {
+        await revision();
+        await answer();
+        const first = native.requests.at(-1)!.args;
+        put(first, []);
+        view.rerender(<Wrapped {...page.props} />);
+        await act(async () => {});
+        expect(checks()).toHaveLength(2);
+        expect(checks()[1]!.request.args.bindings!.map((binding) => binding.args)).toEqual([{ title: 'second' }]);
+        expect(native.requests.at(-1)!.args).toEqual(first);
+        await answer();
+        const second = native.requests.at(-1)!.args;
+        expect(second.title).toBe('second');
+        put(second, []);
+        view.rerender(<Wrapped {...page.props} />);
+        expect(screen.getByText('Nested private page')).toBeTruthy();
+        await act(() => vi.advanceTimersByTime(15_000));
+        expect(checks()).toHaveLength(3);
+        expect(checks()[2]!.request.args.bindings).toHaveLength(2);
+        await answer();
+        expect(screen.getByText('Nested private page')).toBeTruthy();
+        expect(
+            native.requests
+                .filter((request) => request.args.title === 'first')
+                .every((request) => request.args['__generation'] === first['__generation']),
+        ).toBe(true);
+        expect(
+            native.requests
+                .filter((request) => request.args.title === 'second')
+                .every((request) => request.args['__generation'] === second['__generation']),
+        ).toBe(true);
+    } finally {
+        view.unmount();
+        adapter.dispose();
+    }
+});
+
+it('checks the actual edited Inertia inputs before mounting the corresponding business query', async () => {
+    const parse = z.strictObject({ input: z.strictObject({ title: z.string() }) });
+    const queries = defineQueries({
+        tasks: defineQuery(({ args }: { args: z.infer<typeof parse> }) =>
+            createBuilder(schema).tasks.where('title', args.input.title),
+        ),
+    });
+    const factory = (args: z.infer<typeof parse>) =>
+        withQueryInputs(liveQuery(queries.tasks, args, definitions, 'Task', false), args, 'input', {}, (value) =>
+            parse.parse(value),
+        );
+    const Page = ({
+        tasks,
+    }: {
+        tasks: Data<readonly { title: string }[]> & { inputs: QueryInputs<{ title: string }, object> };
+    }) => (
+        <>
+            <p>{tasks.data.map((row) => row.title).join(',')}</p>
+            <button onClick={() => tasks.inputs.set({ title: 'Changed' })}>Edit</button>
+        </>
+    );
+    const adapter = createInertiaAdapter({ tasks: factory });
+    const page = {
+        component: 'tasks',
+        props: {
+            __zero: {
+                version: 1,
+                mode: 'replace',
+                bindings: {
+                    tasks: { query: 'tasks', args: { input: { title: 'Seed' } }, access: { status: 403 } },
+                },
+            },
+        },
+    };
+    const Wrapped = adapter.wrap(Page, page);
+    const props = page.props as unknown as Parameters<typeof Page>[0];
+    const view = render(<Wrapped {...props} />);
+    try {
+        await revision();
+        await answer();
+        put(native.requests.at(-1)!.args, [{ id: 'a', title: 'Seed' }]);
+        view.rerender(<Wrapped {...props} />);
+        expect(screen.getByText('Seed')).toBeTruthy();
+        await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Edit' })));
+        expect(screen.queryByText('Seed')).toBeNull();
+        expect(checks().at(-1)!.request.args.bindings![0]!.args).toEqual({ input: { title: 'Changed' } });
+        expect(native.requests.at(-1)!.args.input).toEqual({ title: 'Seed' });
+        await answer('allowed', undefined, checks()[0]);
+        expect(screen.queryByRole('button')).toBeNull();
+        await answer();
+        const request = native.requests.at(-1)!.args;
+        expect(request.input).toEqual({ title: 'Changed' });
+        expect(screen.queryByRole('button')).toBeNull();
+        put(request, [{ id: 'b', title: 'Changed' }]);
+        view.rerender(<Wrapped {...props} />);
+        expect(screen.getByText('Changed')).toBeTruthy();
+    } finally {
+        view.unmount();
+        adapter.dispose();
+    }
+});
 
 it('does not retain data across controller arguments or authorization identities', () => {
     put({ title: '' }, rows);
@@ -182,7 +640,7 @@ it('does not retain data across controller arguments or authorization identities
     expect(result.current.data).toEqual([]);
     rerender({ selection: index.tasks.live({ title: '' }) });
     native.results.clear();
-    native.zero = { context: { user_id: 'bob' } };
+    native.zero = mockZero('bob');
     rerender({ selection: index.tasks.live({ title: '' }) });
     expect(result.current.status).toBe('loading');
     expect(result.current.data).toEqual([]);

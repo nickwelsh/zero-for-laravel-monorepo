@@ -16,6 +16,7 @@ return new class extends Migration
 
     public function down(): void
     {
+        PermissionSchema::dropAccess(DB::connection());
         Schema::dropIfExists('permission_access_watches');
         Schema::dropIfExists('permission_events');
         Schema::dropIfExists('permission_rules');

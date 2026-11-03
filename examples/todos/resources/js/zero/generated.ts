@@ -4,14 +4,25 @@ import type {ContractMap, ModelRow} from '@nickwelsh/zero-for-laravel';
 
 export type Context = {readonly "user_id": number;};
 export const contextContract = {"user_id":{"type":"int","nullable":false}} as const;
-const table0 = table("todo_lists").columns({
+const table0 = table("permission_access_results").columns({
+  "id": string(),
+  "generation": string(),
+  "binding": string(),
+  "state": string(),
+  "status": number().optional(),
+} ).primaryKey("id");
+const table1 = table("permission_access_revision").columns({
+  "id": string(),
+  "revision": string(),
+} ).primaryKey("id");
+const table2 = table("todo_lists").columns({
   "id": string(),
   "user_id": number(),
   "name": string(),
   "created_at": number().optional(),
   "updated_at": number().optional(),
 } ).primaryKey("id");
-const table1 = table("todos").columns({
+const table3 = table("todos").columns({
   "id": string(),
   "list_id": string(),
   "title": string(),
@@ -19,10 +30,10 @@ const table1 = table("todos").columns({
   "created_at": number().optional(),
   "updated_at": number().optional(),
 } ).primaryKey("id");
-const table0Relations = relationships(table0, ({many}) => ({
-  "todos": many({sourceField: ["id"], destField: ["list_id"], destSchema: table1}),
+const table2Relations = relationships(table2, ({many}) => ({
+  "todos": many({sourceField: ["id"], destField: ["list_id"], destSchema: table3}),
 }));
-export const schema = createSchema({tables: [table0, table1], relationships: [table0Relations], enableLegacyQueries: false, enableLegacyMutators: false});
+export const schema = createSchema({tables: [table0, table1, table2, table3], relationships: [table2Relations], enableLegacyQueries: false, enableLegacyMutators: false});
 export const definitions = {
     "Todo": {
         "name": "Todo",

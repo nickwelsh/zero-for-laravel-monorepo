@@ -6,16 +6,13 @@ use App\Models\User;
 return [
     'connection' => null,
     'denied_status' => 403,
-    // Server-only UX control watches; these never authorize native table reads.
+    // Native status checks never authorize business-table reads.
     'access' => [
-        'max_watches' => 32,
-        'ttl_seconds' => 300,
-        'stream_seconds' => 20,
-        'poll_milliseconds' => 250,
-        'heartbeat_seconds' => 5,
+        'max_bindings' => 32,
     ],
     // Advisory browser checks are opt-in; authority attributes stay private by default.
     'predictions' => [
+        'middleware' => ['web', 'auth'],
         'abilities' => [],
         'subject_attributes' => [],
         'resource_attributes' => [],

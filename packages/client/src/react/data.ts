@@ -1,8 +1,9 @@
 import { useQuery, useZero, useConnectionState, type UseQueryOptions } from '@rocicorp/zero/react';
 import type { Schema, QueryResultDetails, ConnectionState, QueryRequest, ReadonlyJSONValue } from '@rocicorp/zero';
-import { useMemo, useState } from 'react';
+import { useContext, useMemo, useState } from 'react';
 import type { ClientContext } from '../contract';
 import { selectionKey } from '../validation';
+import { AccessGeneration } from './access';
 
 type SelectionData<Q> = Q extends { decode(raw: unknown): infer Result } ? Result : never;
 
@@ -109,12 +110,13 @@ export function useData<Q extends ReadSelection>(input: Q, options: UseQueryOpti
     type Result = SelectionData<Q>;
     const zero = useZero<Schema, undefined, ClientContext>();
     const connection = useConnectionState();
+    const generation = useContext(AccessGeneration);
     const context = selectionKey(zero.context);
     const selection = useSelection(input, zero, context);
     const max = 2147483647;
     const initial = Math.min(selection.pageSize ?? max, max);
     // All arguments belong to the controller query identity, including sort input.
-    const window = useMemo(() => ({ selection, zero, context }), [selection, zero, context]);
+    const window = useMemo(() => ({ selection, zero, context, generation }), [selection, zero, context, generation]);
     const [page, setPage] = useState({
         window,
         limit: initial,
@@ -137,7 +139,17 @@ export function useData<Q extends ReadSelection>(input: Q, options: UseQueryOpti
         // oxlint-disable-next-line react-hooks-plugin/exhaustive-deps
         [selection.key, window, requested, cursor],
     );
-    const [raw, details] = useQuery(request, options);
+    const authorizedRequest = useMemo(
+        () =>
+            generation === undefined
+                ? request
+                : {
+                      ...request,
+                      args: { ...(request.args as Record<string, ReadonlyJSONValue>), __generation: generation },
+                  },
+        [request, generation],
+    );
+    const [raw, details] = useQuery(authorizedRequest, generation === undefined ? options : { ...options, ttl: 0 });
     const enabled = options.enabled ?? true;
     const [committed, setCommitted] = useState({ scope, complete: false });
     if (committed.scope !== scope || (enabled && details.type === 'complete' && !committed.complete)) {
@@ -154,6 +166,11 @@ export function useData<Q extends ReadSelection>(input: Q, options: UseQueryOpti
             : undefined;
     const decodedResult = useMemo(() => {
         if (accessStatus) return { value: selection.one ? undefined : [], error: new QueryAccessError(accessStatus) };
+        // Protected hooks never decode persisted/partial rows, including rows
+        // retained alongside a business-query error. A fresh generation must
+        // complete on this connection before any private consumer mounts.
+        if (generation !== undefined && details.type !== 'complete')
+            return { value: selection.one ? undefined : [], error: undefined };
         try {
             return { value: selection.decode(raw), error: undefined };
         } catch (error) {
@@ -162,7 +179,7 @@ export function useData<Q extends ReadSelection>(input: Q, options: UseQueryOpti
                 error: error instanceof Error ? error : new Error(String(error)),
             };
         }
-    }, [raw, selection, accessStatus]);
+    }, [raw, selection, accessStatus, generation, details.type]);
     const decoded = decodedResult.value;
     const data = useMemo(
         () =>
@@ -172,6 +189,7 @@ export function useData<Q extends ReadSelection>(input: Q, options: UseQueryOpti
     const complete = details.type === 'complete';
     const hasData =
         !decodedResult.error &&
+        (generation === undefined || complete) &&
         ((committed.scope === scope && committed.complete) ||
             complete ||
             (Array.isArray(data) ? data.length > 0 : data !== undefined));

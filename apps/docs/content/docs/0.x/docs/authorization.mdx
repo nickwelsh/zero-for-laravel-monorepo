@@ -227,12 +227,19 @@ use normal Laravel/Inertia exception handling. Named query transforms replay bin
 middleware and the real Gate without rerunning controller effects. Their native
 Zero predicates also include the live guard, including descendant queries.
 
-The Inertia adapter registers bounded actor-owned watches and opens an authenticated
-SSE channel independent of resource access. It waits for an authoritative snapshot
-before displaying cached protected content. Durable permission revisions trigger
-fresh actor/resource/Gate checks; reconnect always resnapshots instead of replaying
-historical allow decisions. Streams poll revisions (250 ms by default), so connected
-revocation follows commit and normal network/replication delivery, not zero latency.
+The Inertia adapter subscribes to reserved access queries on Zero's existing
+WebSocket. Laravel reloads the actor and replays the route middleware, binding and
+Gate under the permission transaction lock, then stores a safe status row. Private
+revision predicates remove obsolete allowed and denied results; the adapter batches
+fresh checks when the replicated revision changes. No SSE connection, browser
+authorization fetch or polling PHP worker is required.
+
+Protected content waits for a complete current-generation status and business
+query. Disconnect, identity/input changes and visibility restoration invalidate old
+approvals. Checks renew after 15 seconds and expire 20 seconds from their monotonic
+request start, so delayed responses cannot extend stale approval. These renewals
+cover middleware dependencies that do not produce database invalidations. Database
+revocation follows commit and normal replication/network delivery, not zero latency.
 
 ```tsx
 const livePages = createInertiaAdapter(bindings, {
@@ -241,7 +248,7 @@ const livePages = createInertiaAdapter(bindings, {
             router.visit('/lists');
             toast.error('This list is no longer available.');
         },
-        // Optional: endpoint, onError(status), onPending().
+        // Optional: onError(status), onPending().
     },
 });
 ```
@@ -254,11 +261,20 @@ A disconnected control channel is unknown and blocks protected rendering until
 fresh validation. Previously downloaded/offline data cannot be erased; native data
 predicates, not callbacks, prevent future unauthorized streaming.
 
-Deploy SSE without proxy buffering and with enough concurrent PHP workers; a single
-`artisan serve` worker cannot also handle mutations while streaming. Watches expire,
-renew while connected and release on unmount. Browser endpoints retain session
-authentication and CSRF protection; do not put the private cache API key in the
-browser. Set `access.endpoint` when `zero.route_prefix` differs from `/zero`.
+Run the permission migrations, rebuild the projections, regenerate the client and
+synchronize the Zero publication when upgrading. The native transport uses two
+physically safe root tables and one private check table; old ephemeral SSE watches
+are removed by the upgrade migration. Check generations are owner/session/context
+scoped, quota-limited and cleaned up with bounded work. Subscriptions release on
+unmount; periodic renewal does not remount healthy business queries.
+
+The revision is deliberately global, matching the previous notification scope:
+unrelated permission changes can trigger rechecks and reveal change timing, but
+never expose policy contents or another subject's status. This is not strict
+per-user timing isolation. Zero-cache still makes brief internal Laravel callbacks
+and each fresh check writes status/metadata rows. The private cache API key never
+belongs in the browser. `access.endpoint` and SSE polling/heartbeat settings no
+longer exist.
 
 ## Optional current-user UI predictions
 

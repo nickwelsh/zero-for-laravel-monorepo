@@ -24,12 +24,23 @@ const table2 = table("mutation_preferences").columns({
   "created_at": number().optional(),
   "updated_at": number().optional(),
 } ).primaryKey("id");
-const table3 = table("tags").columns({
+const table3 = table("permission_access_results").columns({
+  "id": string(),
+  "generation": string(),
+  "binding": string(),
+  "state": string(),
+  "status": number().optional(),
+} ).primaryKey("id");
+const table4 = table("permission_access_revision").columns({
+  "id": string(),
+  "revision": string(),
+} ).primaryKey("id");
+const table5 = table("tags").columns({
   "id": string(),
   "user_id": string(),
   "name": string(),
 } ).primaryKey("id");
-const table4 = table("tasks").columns({
+const table6 = table("tasks").columns({
   "id": string(),
   "user_id": string(),
   "list_id": string().optional(),
@@ -40,7 +51,7 @@ const table4 = table("tasks").columns({
   "updated_at": number().optional(),
   "deleted_at": number().optional(),
 } ).primaryKey("id");
-export const schema = createSchema({tables: [table0, table1, table2, table3, table4], relationships: [], enableLegacyQueries: false, enableLegacyMutators: false});
+export const schema = createSchema({tables: [table0, table1, table2, table3, table4, table5, table6], relationships: [], enableLegacyQueries: false, enableLegacyMutators: false});
 export const definitions = {
     "Comment": {
         "name": "Comment",

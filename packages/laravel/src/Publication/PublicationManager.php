@@ -84,6 +84,14 @@ final readonly class PublicationManager
             $tables[$table] = $columns;
         }
 
+        foreach ($this->registry->accessTables() as $table => $definition) {
+            if (isset($tables[$table])) {
+                throw new LogicException('Access infrastructure tables cannot be registered as application tables.');
+            }
+
+            $tables[$table] = array_keys($definition['columns']);
+        }
+
         foreach ($this->registry->privateTables() as $table => $columns) {
             if (isset($tables[$table])) {
                 throw new LogicException('Private permission tables cannot be registered as public Zero models or pivots.');

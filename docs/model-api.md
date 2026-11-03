@@ -62,9 +62,11 @@ identity changes. They do not promise total counts or snapshot pagination.
 Directly returned bound models become live singular queries after Laravel binding.
 Initial missing rows remain normal binding failures. Later unauthorized, deleted,
 or missing singular rows block protected rendering while fresh access is checked.
-Captured instance guards are rechecked through an authenticated SSE channel; denied
-states preserve the configured 403/404 and unmount the page before `onRevoked`.
-Disconnects are unknown, not revocation. Reconnects require a fresh snapshot.
+Captured instance guards are rechecked through reserved native Zero status queries;
+denied states preserve the configured 403/404 and unmount the page before
+`onRevoked`. Disconnects are unknown, not revocation. Reconnects require fresh
+status and business-query generations. Checks renew after 15 seconds and expire
+after 20; permission revisions invalidate them immediately through replication.
 
 ## Inputs, casts, and results
 

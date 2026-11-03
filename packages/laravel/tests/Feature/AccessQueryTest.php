@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace ZeroForLaravel\Tests\Feature;
 
-use Carbon\CarbonImmutable;
 use Closure;
 use Illuminate\Contracts\Http\Kernel;
 use Illuminate\Database\Schema\Blueprint;
@@ -26,7 +25,6 @@ use RuntimeException;
 use stdClass;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\Process\Process;
-use ZeroForLaravel\Access\AccessController;
 use ZeroForLaravel\Generation\ControllerQueryCompiler;
 use ZeroForLaravel\Generation\ControllerQueryGenerator;
 use ZeroForLaravel\Generation\ZodSchemaDriver;
@@ -122,46 +120,6 @@ function accessWatchInput(int $list = 7, string $generation = 'page-1'): array
     return ['query' => $name, 'args' => ['list' => $list], 'generation' => $generation];
 }
 
-/** @param TestResponse<Response> $response */
-function accessWatchId(TestResponse $response): string
-{
-    $id = $response->assertCreated()->json('id');
-    if (! is_string($id)) {
-        throw new LogicException('Expected a watch ID.');
-    }
-
-    return $id;
-}
-
-/** @param TestResponse<Response> $response
- * @return list<array{id: string, generation: string, revision: string, state: string, status?: int}>
- */
-function accessWatchStates(TestResponse $response): array
-{
-    $response->assertOk()->assertHeader('Content-Type', 'text/event-stream; charset=utf-8')->assertHeader('X-Accel-Buffering', 'no');
-    $states = [];
-    foreach (explode("\n", $response->streamedContent()) as $line) {
-        if (str_starts_with($line, 'data: ')) {
-            $state = json_decode(substr($line, 6), true, flags: JSON_THROW_ON_ERROR);
-            if (! is_array($state) || ! is_string($state['id'] ?? null) || ! is_string($state['generation'] ?? null)
-                || ! is_string($state['revision'] ?? null) || ! is_string($state['state'] ?? null)
-                || (isset($state['status']) && ! is_int($state['status']))) {
-                throw new LogicException('Invalid SSE access state.');
-            }
-
-            $normalized = ['id' => $state['id'], 'generation' => $state['generation'],
-                'revision' => $state['revision'], 'state' => $state['state']];
-            if (isset($state['status'])) {
-                $normalized['status'] = $state['status'];
-            }
-
-            $states[] = $normalized;
-        }
-    }
-
-    return $states;
-}
-
 beforeEach(function (): void {
     app()->register(PermissionServiceProvider::class);
     PermissionSchema::create(DB::connection());
@@ -191,7 +149,6 @@ beforeEach(function (): void {
             ],
         ]],
         'zero.context_resolver' => ContextResolver::class,
-        'permissions.access.stream_seconds' => 0,
     ]);
     (new ProjectionManager)->rebuild();
     PermissionUser::create(['id' => 42, 'department_id' => 'engineering']);
@@ -203,9 +160,7 @@ beforeEach(function (): void {
     AccessWatchMiddleware::$observations = [];
     Route::get('/access-lists/{list}', [PermissionQueryController::class, 'show'])
         ->middleware([SubstituteBindings::class, AccessWatchMiddleware::class]);
-    Route::post('/zero/access', [AccessController::class, 'store']);
-    Route::get('/zero/access/events', [AccessController::class, 'events']);
-    Route::delete('/zero/access/{id}', [AccessController::class, 'destroy']);
+    Route::post('/native-query', [\ZeroForLaravel\Http\ZeroController::class, 'query']);
     accessWatchRegistrations();
     \Pest\Laravel\actingAs(PermissionUser::findOrFail(42));
 });
@@ -230,7 +185,7 @@ afterEach(function (): void {
     }
 });
 
-test('access registration runs under the projection transaction lock and never runs the controller', function (): void {
+test('native access checks run under the projection transaction lock and never run the controller', function (): void {
     $generated = array_values(resolve(RegisteredQueries::class)->all())[0];
     Route::get('/access-trap/{list}', [AccessWatchNeverController::class, 'show'])
         ->middleware([SubstituteBindings::class, AccessWatchMiddleware::class]);
@@ -238,17 +193,16 @@ test('access registration runs under the projection transaction lock and never r
         'trap' => new RegisteredQuery(AccessWatchNeverController::class.'@show', $generated->component, $generated->prop,
             $generated->parameters, $generated->declaration(...), guards: $generated->guards),
     ]));
-    $state = \Pest\Laravel\postJson('/zero/access', accessWatchInput())->assertCreated()->assertJsonPath('state', 'allowed')
-        ->assertJsonPath('generation', 'page-1')->assertJsonMissingPath('status')->json();
-    expect($state)->toHaveKeys(['id', 'generation', 'revision', 'state']);
+    accessNativeQuery(accessNativeInput())->assertOk()->assertJsonMissingPath('queries.0.error');
+    expect(DB::table('permission_access_results')->value('state'))->toBe('allowed');
     expect(AccessWatchMiddleware::$observations)->toHaveCount(1)
         ->and(AccessWatchMiddleware::$observations[0])->toMatchArray(['transaction' => 1, 'locked' => true]);
-    expect(DB::table('permission_access_watches')->count())->toBe(1);
+    expect(DB::table('permission_access_checks')->count())->toBe(1);
     $plan = implode("\n", (new PublicationManager(resolve(ModelRegistry::class)))->plan('access_watch_publication'));
     expect($plan)->not->toContain('permission_access_watches', 'permission_events');
 });
 
-test('browser session cookies survive access registration and the replayed web middleware', function (): void {
+test('browser session cookies survive native access checks and replayed web middleware', function (): void {
     /** @var PostgresTestCase $this */
     $sessions = sys_get_temp_dir().'/zero-access-sessions-'.bin2hex(random_bytes(8));
     File::ensureDirectoryExists($sessions);
@@ -258,6 +212,7 @@ test('browser session cookies survive access registration and the replayed web m
         'session.driver' => 'file',
         'session.files' => $sessions,
         'session.lottery' => [1, 1],
+        'zero.api_key' => 'native-access-test',
     ]);
     Auth::forgetGuards();
     $kernel = resolve(Kernel::class);
@@ -273,8 +228,8 @@ test('browser session cookies survive access registration and the replayed web m
     })->middleware('web');
     Route::get('/access-lists/{list}', [PermissionQueryController::class, 'show'])
         ->middleware(['web', 'auth', SubstituteBindings::class]);
-    Route::post('/session-access', [AccessController::class, 'store'])
-        ->middleware([CaptureTransportCookies::class, 'web', 'auth']);
+    Route::post('/native-query', [\ZeroForLaravel\Http\ZeroController::class, 'query'])
+        ->middleware([\ZeroForLaravel\Http\AuthenticateZeroCache::class, 'web', 'auth']);
     try {
         $login = $this->postJson('/access-session-login')->assertOk();
         $session = $login->json('session');
@@ -289,39 +244,47 @@ test('browser session cookies survive access registration and the replayed web m
         }
 
         Auth::forgetGuards();
-        $this->withUnencryptedCookie($cookie->getName(), $value)
-            ->postJson('/session-access', accessWatchInput())->assertCreated()->assertJsonPath('state', 'allowed');
+        $input = accessNativeInput();
+        $this->withUnencryptedCookie($cookie->getName(), $value)->withHeader('X-Api-Key', 'native-access-test');
+        accessNativeQuery($input)->assertOk()->assertJsonMissingPath('queries.0.error');
+        expect(DB::table('permission_access_results')->value('state'))->toBe('allowed');
+        $first = DB::table('permission_access_checks')->value('owner');
+        // A second browser session for the same user must not reuse its predecessor's approval.
+        $this->withUnencryptedCookie($cookie->getName(), '');
+        Auth::forgetGuards();
+        $again = $this->postJson('/access-session-login')->assertOk();
+        $nextCookie = $again->getCookie(config()->string('session.cookie'), false);
+        if ($nextCookie === null || $nextCookie->getValue() === null) {
+            throw new LogicException('Expected a second browser session cookie.');
+        }
+
+        Auth::forgetGuards();
+        $this->withUnencryptedCookie($nextCookie->getName(), $nextCookie->getValue());
+        accessNativeQuery($input)->assertOk()->assertJsonMissingPath('queries.0.error');
+        expect(DB::table('permission_access_checks')->where('owner', '!=', $first)->count())->toBe(1);
     } finally {
         File::deleteDirectory($sessions);
     }
 });
 
-test('access registration rejects untrusted actors unknown queries unguarded queries and protected fields', function (): void {
-    \Pest\Laravel\postJson('/zero/access', [...accessWatchInput(), 'user_id' => 84])->assertUnprocessable();
-    \Pest\Laravel\postJson('/zero/access', [...accessWatchInput(), 'query' => 'client-supplied'])->assertUnprocessable();
-    \Pest\Laravel\postJson('/zero/access', [...accessWatchInput(), 'args' => ['list' => 7, 'user_id' => 84]])->assertUnprocessable();
+test('native access rejects untrusted actors unknown queries unguarded queries and protected fields', function (): void {
+    accessNativeQuery([...accessNativeInput(), 'user_id' => 84])->assertOk()->assertJsonPath('queries.0.error', 'parse');
+    $input = accessNativeInput();
+    $input['bindings'][0]['query'] = 'client-supplied';
+    accessNativeQuery($input)->assertOk()->assertJsonPath('queries.0.error', 'parse');
+    $input = accessNativeInput();
+    $input['bindings'][0]['args']['user_id'] = 84;
+    accessNativeQuery($input)->assertOk()->assertJsonPath('queries.0.error', 'parse');
 
     $registered = array_values(resolve(RegisteredQueries::class)->all())[0];
     app()->instance(RegisteredQueries::class, new RegisteredQueries([
         'unguarded' => new RegisteredQuery($registered->action, $registered->component, $registered->prop,
             $registered->parameters, $registered->declaration(...)),
     ]));
-    \Pest\Laravel\postJson('/zero/access', accessWatchInput())->assertUnprocessable();
+    accessNativeQuery(accessNativeInput())->assertOk()->assertJsonPath('queries.0.error', 'parse');
     Auth::forgetGuards();
-    \Pest\Laravel\postJson('/zero/access', [])->assertUnauthorized();
-    \Pest\Laravel\getJson('/zero/access/events?watches=invalid')->assertUnauthorized();
-    \Pest\Laravel\deleteJson('/zero/access/invalid')->assertUnauthorized();
-    expect(DB::table('permission_access_watches')->count())->toBe(0);
-});
-
-test('access registration replays route middleware bindings and initial Gate and only saves allowed watches', function (): void {
-    AccessWatchMiddleware::$allow = false;
-    \Pest\Laravel\postJson('/zero/access', accessWatchInput())->assertForbidden();
-    AccessWatchMiddleware::$allow = true;
-    \Pest\Laravel\postJson('/zero/access', accessWatchInput(999))->assertNotFound();
-    Casbin::removePolicy('user:42', 'list:7', 'todo-list', 'view', 'department', 'allow');
-    \Pest\Laravel\postJson('/zero/access', accessWatchInput())->assertForbidden();
-    expect(DB::table('permission_access_watches')->count())->toBe(0);
+    accessNativeQuery([])->assertOk()->assertJsonPath('queries.0.details.status', 401);
+    expect(DB::table('permission_access_checks')->count())->toBe(0);
 });
 
 test('a concurrent source revocation cannot commit between the initial Gate and durable registration', function (): void {
@@ -345,7 +308,7 @@ test('a concurrent source revocation cannot commit between the initial Gate and 
     ]);
     AccessWatchMiddleware::$after = function () use ($writer): void {
         // The real binding and Gate have succeeded; store has not inserted yet.
-        expect(DB::table('permission_access_watches')->count())->toBe(0);
+        expect(DB::table('permission_access_checks')->count())->toBe(0);
         $writer->start();
         expect($writer->waitUntil(fn (string $type, string $output): bool => str_contains($output, 'connected')))->toBeTrue();
         $blocked = false;
@@ -360,155 +323,162 @@ test('a concurrent source revocation cannot commit between the initial Gate and 
 
         expect($blocked)->toBeTrue();
     };
-    $id = accessWatchId(\Pest\Laravel\postJson('/zero/access', accessWatchInput()));
+    $before = DB::table('permission_access_revision')->value('revision');
+    accessNativeQuery(accessNativeInput())->assertOk()->assertJsonMissingPath('queries.0.error');
     expect($writer->wait())->toBe(0)->and($writer->getOutput())->toContain('committed');
-    expect(DB::table('permission_access_watches')->count())->toBe(1);
-    expect(accessWatchStates(\Pest\Laravel\getJson('/zero/access/events?watches='.$id))[0]['state'])->toBe('denied');
+    expect(DB::table('permission_access_checks')->count())->toBe(1);
+    expect(DB::table('permission_access_checks')->value('revision'))->toBe($before);
+    expect(DB::table('permission_access_revision')->value('revision'))->not->toBe($before);
+
+    $next = accessNativeInput();
+    accessNativeQuery($next)->assertOk()->assertJsonMissingPath('queries.0.error');
+    expect(DB::table('permission_access_results')->where('generation', $next['generation'])->value('state'))->toBe('denied');
 });
 
-test('SSE snapshots every connection and reconnect and follows durable revocation and regrant', function (): void {
-    $id = accessWatchId(\Pest\Laravel\postJson('/zero/access', accessWatchInput()));
-    $url = '/zero/access/events?watches='.$id;
-    $first = accessWatchStates(\Pest\Laravel\getJson($url))[0];
-    expect($first['state'])->toBe('allowed');
-    $again = accessWatchStates(\Pest\Laravel\withHeader('Last-Event-ID', $first['revision'])->getJson($url));
-    expect($again)->toBe([$first]);
-    Casbin::removePolicy('user:42', 'list:7', 'todo-list', 'view', 'department', 'allow');
-    $revoked = accessWatchStates(\Pest\Laravel\getJson($url))[0];
-    expect($revoked)->toMatchArray(['id' => $id, 'state' => 'denied', 'status' => 403, 'generation' => 'page-1'])
-        ->and($revoked['revision'])->not->toBe($first['revision']);
-    DB::table('permission_events')->delete();
-    expect(accessWatchStates(\Pest\Laravel\getJson($url))[0]['state'])->toBe('denied');
-    Casbin::addPolicy('user:42', 'list:7', 'todo-list', 'view', 'department', 'allow');
-    expect(accessWatchStates(\Pest\Laravel\getJson($url))[0]['state'])->toBe('allowed');
-});
-
-test('SSE uses fresh actor attributes for request Auth middleware and admin Gates and restores original auth', function (): void {
+test('native checks reload admin attributes for request Auth middleware and Gates and restore original auth', function (): void {
     Gate::policy(PermissionList::class, PermissionAdminPolicy::class);
     DB::table('permission_test_users')->where('id', 42)->update(['is_admin' => true]);
     $captured = PermissionUser::findOrFail(42);
     \Pest\Laravel\actingAs($captured);
     accessWatchRegistrations();
-    $id = accessWatchId(\Pest\Laravel\postJson('/zero/access', accessWatchInput()));
+    accessNativeQuery(accessNativeInput())->assertOk();
     DB::table('permission_test_users')->where('id', 42)->update(['is_admin' => false, 'department_id' => 'support']);
-    $state = accessWatchStates(\Pest\Laravel\getJson('/zero/access/events?watches='.$id))[0];
-    expect($state)->toMatchArray(['state' => 'denied', 'status' => 403]);
+    $next = accessNativeInput();
+    accessNativeQuery($next)->assertOk()->assertJsonMissingPath('queries.0.error');
+    expect(DB::table('permission_access_results')->where('generation', $next['generation'])->first())->toMatchObject(['state' => 'denied', 'status' => 403]);
     $observation = array_pop(AccessWatchMiddleware::$observations);
     expect($observation)->toMatchArray(['admin' => false, 'facade' => false]);
     expect(Auth::user())->toBe($captured)->and($captured->is_admin)->toBeTrue();
-    \Pest\Laravel\postJson('/zero/access', accessWatchInput())->assertForbidden();
 });
 
-test('concealed denial and deleted resources have identical access states except revision', function (): void {
+test('concealed denial and deleted resources have identical native outcomes', function (): void {
     config(['permissions.denied_status' => 404]);
     accessWatchRegistrations();
-    $id = accessWatchId(\Pest\Laravel\postJson('/zero/access', accessWatchInput()));
     DB::table('permission_test_users')->where('id', 42)->update(['department_id' => 'support']);
-    $denied = accessWatchStates(\Pest\Laravel\getJson('/zero/access/events?watches='.$id))[0];
+    accessNativeQuery(accessNativeInput())->assertOk();
     DB::table('permission_test_lists')->where('id', 7)->delete();
-    $deleted = accessWatchStates(\Pest\Laravel\getJson('/zero/access/events?watches='.$id))[0];
-    unset($denied['revision'], $deleted['revision']);
-    expect($denied)->toBe($deleted)->toMatchArray(['state' => 'denied', 'status' => 404]);
+    accessNativeQuery(accessNativeInput())->assertOk();
+    $outcomes = DB::table('permission_access_results')->get(['state', 'status']);
+    expect($outcomes)->toHaveCount(2);
+    expect($outcomes[0])->toEqual($outcomes[1])->toMatchObject(['state' => 'denied', 'status' => 404]);
 });
 
-test('unknown configuration and database failures never become revoked access', function (): void {
-    $id = accessWatchId(\Pest\Laravel\postJson('/zero/access', accessWatchInput()));
+test('unknown configuration failures never become confirmed native denial', function (): void {
+    accessNativeQuery(accessNativeInput())->assertOk();
     config(['permissions.subject.prefix' => 'stale:']);
-    \Pest\Laravel\postJson('/zero/access', accessWatchInput())->assertStatus(503)->assertExactJson(['state' => 'unknown']);
-    expect(DB::table('permission_access_watches')->count())->toBe(1);
-    $unknown = accessWatchStates(\Pest\Laravel\getJson('/zero/access/events?watches='.$id))[0];
-    expect($unknown)->toMatchArray(['state' => 'unknown']);
-    expect($unknown)->not->toHaveKey('status');
-    config(['permissions.subject.prefix' => 'user:']);
-    $stream = \Pest\Laravel\getJson('/zero/access/events?watches='.$id)->assertOk();
-    Schema::drop('permission_events');
-    $unknown = accessWatchStates($stream)[0];
-    expect($unknown)->toMatchArray(['state' => 'unknown']);
-    expect($unknown)->not->toHaveKey('status');
+    $input = accessNativeInput();
+    accessNativeQuery($input)->assertOk()->assertJsonMissingPath('queries.0.error');
+    expect(DB::table('permission_access_results')->where('generation', $input['generation'])->first())
+        ->toMatchObject(['state' => 'unknown', 'status' => null]);
 });
 
-test('watches are actor owned and foreign mixed missing and expired selections are concealed', function (): void {
-    $id = accessWatchId(\Pest\Laravel\postJson('/zero/access', accessWatchInput()));
+/** @return array{generation: string, bindings: list<array{binding: string, query: string, args: array{list: int}}> } */
+function accessNativeInput(int $list = 7): array
+{
+    $input = accessWatchInput($list);
+
+    return ['generation' => (string) \Illuminate\Support\Str::uuid(), 'bindings' => [[
+        'binding' => (string) \Illuminate\Support\Str::uuid(), 'query' => $input['query'], 'args' => $input['args'],
+    ]]];
+}
+
+/** @param array<string, mixed> $input
+ * @return TestResponse<Response>
+ */
+function accessNativeQuery(array $input, string $name = '__zero_access_status'): TestResponse
+{
+    return \Pest\Laravel\postJson('/native-query', ['transform', [['id' => 'check', 'name' => $name, 'args' => [$input]]]]);
+}
+
+test('native access checks stream safe typed decisions and recover from initially denied routes', function (): void {
+    $input = accessNativeInput();
+    Casbin::removePolicy('user:42', 'list:7', 'todo-list', 'view', 'department', 'allow');
+    accessNativeQuery($input)->assertOk()->assertJsonPath('queries.0.ast.table', 'permission_access_results')->assertJsonMissingPath('queries.0.error');
+    expect(DB::table('permission_access_results')->where('generation', $input['generation'])->first())
+        ->toMatchObject(['state' => 'denied', 'status' => 403]);
+    Casbin::addPolicy('user:42', 'list:7', 'todo-list', 'view', 'department', 'allow');
+    $next = accessNativeInput();
+    accessNativeQuery($next)->assertOk()->assertJsonMissingPath('queries.0.error');
+    expect(DB::table('permission_access_results')->where('generation', $next['generation'])->first())
+        ->toMatchObject(['state' => 'allowed', 'status' => null]);
+    expect(array_keys((array) DB::table('permission_access_results')->first()))->toBe(['id', 'generation', 'binding', 'state', 'status']);
+    expect(AccessWatchMiddleware::$observations)->toHaveCount(2);
+});
+
+test('native access generations are idempotent scoped and never renew from background retransforms', function (): void {
+    $input = accessNativeInput();
+    $first = accessNativeQuery($input)->assertOk()->json('queries.0.ast');
+    $expiry = DB::table('permission_access_checks')->value('expires_at');
+    $observations = count(AccessWatchMiddleware::$observations);
+    expect(accessNativeQuery($input)->assertOk()->json('queries.0.ast'))->toBe($first);
+    expect(DB::table('permission_access_checks')->value('expires_at'))->toBe($expiry);
+    expect(count(AccessWatchMiddleware::$observations))->toBe($observations);
+
+    $changed = $input;
+    $changed['bindings'][0]['args']['list'] = 8;
+    accessNativeQuery($changed)->assertOk()->assertJsonPath('queries.0.error', 'parse');
     \Pest\Laravel\actingAs(PermissionUser::findOrFail(84));
-    \Pest\Laravel\getJson('/zero/access/events?watches='.$id)->assertNotFound();
-    \Pest\Laravel\deleteJson('/zero/access/'.$id)->assertNotFound();
-    \Pest\Laravel\actingAs(PermissionUser::findOrFail(42));
-    $other = '00000000-0000-4000-8000-000000000000';
-    \Pest\Laravel\getJson('/zero/access/events?watches='.$id.','.$other)->assertNotFound();
-    DB::table('permission_access_watches')->where('id', $id)->update(['expires_at' => now()->subSecond()]);
-    \Pest\Laravel\getJson('/zero/access/events?watches='.$id)->assertNotFound();
-    \Pest\Laravel\deleteJson('/zero/access/'.$id)->assertNotFound();
+    expect(accessNativeQuery($input)->assertOk()->json('queries.0.ast'))->not->toBe($first);
+    expect(DB::table('permission_access_results')->where('generation', $input['generation'])->count())->toBe(2);
 });
 
-test('quota expiry and release bound durable watches without losing generation identity', function (): void {
-    config(['permissions.access.max_watches' => 2]);
-    $first = accessWatchId(\Pest\Laravel\postJson('/zero/access', accessWatchInput(generation: 'old')));
-    $second = accessWatchId(\Pest\Laravel\postJson('/zero/access', accessWatchInput(generation: 'new')));
-    \Pest\Laravel\postJson('/zero/access', accessWatchInput())->assertStatus(429);
-    $states = accessWatchStates(\Pest\Laravel\getJson('/zero/access/events?watches='.$first.','.$second));
-    expect(array_column($states, 'generation'))->toContain('old', 'new');
-    \Pest\Laravel\deleteJson('/zero/access/'.$first)->assertNoContent();
-    \Pest\Laravel\deleteJson('/zero/access/'.$first)->assertNotFound();
-
-    \Pest\Laravel\postJson('/zero/access', accessWatchInput())->assertCreated();
-    DB::table('permission_access_watches')->update(['expires_at' => now()->subSecond()]);
-    \Pest\Laravel\postJson('/zero/access', accessWatchInput())->assertCreated();
-    expect(DB::table('permission_access_watches')->count())->toBe(1);
-});
-
-test('reconnect renews selected active owned watches but never abandoned foreign or expired leases', function (): void {
-    config(['permissions.access.ttl_seconds' => 10]);
-    $start = CarbonImmutable::now()->startOfSecond();
-    Date::setTestNow($start);
-    $active = accessWatchId(\Pest\Laravel\postJson('/zero/access', accessWatchInput(generation: 'active')));
-    $abandoned = accessWatchId(\Pest\Laravel\postJson('/zero/access', accessWatchInput(generation: 'abandoned')));
-    Date::setTestNow($start->addSeconds(8));
-    expect(accessWatchStates(\Pest\Laravel\getJson('/zero/access/events?watches='.$active))[0]['state'])->toBe('allowed');
-    expect(DB::table('permission_access_watches')->where('id', $active)->value('expires_at'))->toBe($start->addSeconds(18)->format('Y-m-d H:i:s'));
-    \Pest\Laravel\actingAs(PermissionUser::findOrFail(84));
-    \Pest\Laravel\getJson('/zero/access/events?watches='.$active)->assertNotFound();
-    expect(DB::table('permission_access_watches')->where('id', $active)->value('expires_at'))->toBe($start->addSeconds(18)->format('Y-m-d H:i:s'));
-    \Pest\Laravel\actingAs(PermissionUser::findOrFail(42));
-    Date::setTestNow($start->addSeconds(12));
-    expect(accessWatchStates(\Pest\Laravel\getJson('/zero/access/events?watches='.$active))[0]['state'])->toBe('allowed');
-    \Pest\Laravel\getJson('/zero/access/events?watches='.$abandoned)->assertNotFound();
-    expect(DB::table('permission_access_watches')->where('id', $abandoned)->value('expires_at'))->toBe($start->addSeconds(10)->format('Y-m-d H:i:s'));
-});
-
-test('rolled back authorization writes do not emit a changed decision or revision', function (): void {
-    $id = accessWatchId(\Pest\Laravel\postJson('/zero/access', accessWatchInput()));
-    $initial = accessWatchStates(\Pest\Laravel\getJson('/zero/access/events?watches='.$id));
+test('native access revision changes are transactional and checks do not invalidate themselves', function (): void {
+    $revision = DB::table('permission_access_revision')->value('revision');
+    accessNativeQuery(accessNativeInput())->assertOk();
+    expect(DB::table('permission_access_revision')->value('revision'))->toBe($revision);
     try {
         DB::transaction(function (): void {
             Casbin::removePolicy('user:42', 'list:7', 'todo-list', 'view', 'department', 'allow');
-            throw new RuntimeException('Rollback authorization');
+            throw new RuntimeException('rollback');
         });
-    } catch (RuntimeException $runtimeException) {
-        expect($runtimeException->getMessage())->toBe('Rollback authorization');
+    } catch (RuntimeException) {
+        expect(DB::table('permission_access_revision')->value('revision'))->toBe($revision);
     }
 
-    expect(accessWatchStates(\Pest\Laravel\getJson('/zero/access/events?watches='.$id)))->toBe($initial);
+    PermissionUser::whereKey(42)->update(['department_id' => 'support']);
+    expect(DB::table('permission_access_revision')->value('revision'))->not->toBe($revision);
+    $revision = DB::table('permission_access_revision')->value('revision');
+    (new ProjectionManager)->rebuild();
+    expect(DB::table('permission_access_revision')->value('revision'))->not->toBe($revision);
 });
 
-test('an open SSE connection wakes on committed revisions emits heartbeat and stops when released', function (): void {
-    $id = accessWatchId(\Pest\Laravel\postJson('/zero/access', accessWatchInput()));
-    config(['permissions.access.stream_seconds' => 3, 'permissions.access.poll_milliseconds' => 20, 'permissions.access.heartbeat_seconds' => 1]);
-    $polls = 0;
-    Sleep::fake();
-    Sleep::whenFakingSleep(function () use (&$polls, $id): void {
-        $polls++;
-        if ($polls === 1) {
-            Casbin::removePolicy('user:42', 'list:7', 'todo-list', 'view', 'department', 'allow');
-            time_nanosleep(1, 100000000);
-        } elseif ($polls === 2) {
-            Casbin::addPolicy('user:42', 'list:7', 'todo-list', 'view', 'department', 'allow');
-        } else {
-            DB::table('permission_access_watches')->where('id', $id)->delete();
-        }
-    });
-    $response = \Pest\Laravel\getJson('/zero/access/events?watches='.$id);
-    $states = accessWatchStates($response);
-    expect(array_column($states, 'state'))->toBe(['allowed', 'denied', 'allowed']);
-    expect($response->streamedContent())->toContain(": heartbeat\n\n", 'event: access', 'id: '.$states[0]['revision']);
-    expect($polls)->toBe(3);
+test('native access checks retain route middleware binding and fresh actor semantics', function (): void {
+    $input = accessNativeInput();
+    AccessWatchMiddleware::$allow = false;
+    accessNativeQuery($input)->assertOk();
+    expect(DB::table('permission_access_results')->where('generation', $input['generation'])->first())->toMatchObject(['state' => 'denied', 'status' => 403]);
+    AccessWatchMiddleware::$allow = true;
+    $missing = accessNativeInput(8);
+    accessNativeQuery($missing)->assertOk();
+    expect(DB::table('permission_access_results')->where('generation', $missing['generation'])->first())->toMatchObject(['state' => 'denied', 'status' => 404]);
+    $stale = PermissionUser::findOrFail(42);
+    PermissionUser::whereKey(42)->update(['is_admin' => true]);
+    \Pest\Laravel\actingAs($stale);
+    accessNativeQuery(accessNativeInput())->assertOk();
+    expect(AccessWatchMiddleware::$observations[count(AccessWatchMiddleware::$observations) - 1] ?? null)
+        ->toMatchArray(['admin' => true, 'facade' => true, 'transaction' => 1, 'locked' => true]);
+    expect(Auth::user()?->getAttribute('is_admin'))->toBeFalse();
+});
+
+test('native access bounds generations batches and cleanup without publishing authority metadata', function (): void {
+    config(['permissions.access.max_bindings' => 1]);
+    for ($i = 0; $i < 4; $i++) {
+        accessNativeQuery(accessNativeInput())->assertOk()->assertJsonMissingPath('queries.0.error');
+    }
+
+    accessNativeQuery(accessNativeInput())->assertOk()->assertJsonPath('queries.0.details.status', 429);
+    DB::table('permission_access_checks')->update(['expires_at' => now()->subSecond()]);
+    accessNativeQuery(accessNativeInput())->assertOk()->assertJsonMissingPath('queries.0.error');
+    expect(DB::table('permission_access_results')->count())->toBe(1);
+    $input = accessNativeInput();
+    $input['bindings'][] = $input['bindings'][0];
+    accessNativeQuery($input)->assertOk()->assertJsonPath('queries.0.error', 'parse');
+    $input = accessNativeInput();
+    $input['owner'] = 'foreign';
+    accessNativeQuery($input)->assertOk()->assertJsonPath('queries.0.error', 'parse');
+    $plan = implode("\n", (new PublicationManager(resolve(ModelRegistry::class)))->plan('access_native_publication'));
+    expect($plan)->toContain('permission_access_results', 'permission_access_revision', 'permission_access_checks');
+    $generated = (new \ZeroForLaravel\Generation\TypeScriptGenerator)->generate(resolve(ModelRegistry::class));
+    expect($generated)->toContain('permission_access_results', 'permission_access_revision');
+    expect($generated)->not->toContain('permission_access_checks', 'fingerprint', 'expires_at');
 });

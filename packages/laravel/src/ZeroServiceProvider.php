@@ -136,15 +136,11 @@ final class ZeroServiceProvider extends ServiceProvider
                 Route::post('query', [ZeroController::class, 'query'])->name('zero.query');
                 Route::post('mutate', [ZeroController::class, 'mutate'])->name('zero.mutate');
             });
-            // Browser control channel, authenticated independently of zero-cache.
-            Route::prefix(config()->string('zero.route_prefix'))->middleware([Http\CaptureTransportCookies::class, ...config()->array('permissions.access.middleware', ['web', 'auth'])])->group(function (): void {
-                Route::post('access', [Access\AccessController::class, 'store'])->name('zero.access.store');
-                Route::get('access/events', [Access\AccessController::class, 'events'])->name('zero.access.events');
-                Route::delete('access/{id}', [Access\AccessController::class, 'destroy'])->name('zero.access.destroy');
-                if (config()->array('permissions.predictions.abilities') !== []) {
+            if (config()->array('permissions.predictions.abilities') !== []) {
+                Route::prefix(config()->string('zero.route_prefix'))->middleware([Http\CaptureTransportCookies::class, ...config()->array('permissions.predictions.middleware', ['web', 'auth'])])->group(function (): void {
                     Route::get('permissions', Permissions\PredictionController::class)->name('zero.permissions');
-                }
-            });
+                });
+            }
         }
     }
 }

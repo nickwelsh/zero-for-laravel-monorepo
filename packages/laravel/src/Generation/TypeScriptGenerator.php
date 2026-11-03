@@ -51,6 +51,7 @@ final class TypeScriptGenerator
             $tables[$table] = ['columns' => $columns, 'key' => $registry->pivotKeys()[$table]];
         }
 
+        $tables += $registry->accessTables();
         ksort($tables);
         $names = [];
         foreach (array_keys($tables) as $i => $table) {
