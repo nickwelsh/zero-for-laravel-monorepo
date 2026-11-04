@@ -1,0 +1,313 @@
+/* oxlint-disable unicorn/no-array-sort -- ES2022 support; only newly allocated arrays are sorted. */
+import { encodeDate, type Column } from '@nickwelsh/zero-for-laravel';
+
+export type Scalar = string | number | boolean | null;
+export type GroupPath = readonly { readonly field: string; readonly value: Scalar }[];
+export interface Capabilities {
+    readonly version: 1;
+    readonly name: string;
+    readonly contract: string;
+    readonly model: string;
+    readonly key: readonly string[];
+    readonly columns: Readonly<Record<string, Column>>;
+    readonly filters: Readonly<
+        Record<
+            string,
+            {
+                readonly field: string;
+                readonly kind: string;
+                readonly operators: readonly string[];
+                readonly column: Column;
+            }
+        >
+    >;
+    readonly sorts: readonly string[];
+    readonly groups: Readonly<
+        Record<
+            string,
+            {
+                readonly field: string;
+                readonly relation: string | null;
+                readonly label: string | null;
+                readonly model: string | null;
+            }
+        >
+    >;
+    readonly pageSize: number;
+    readonly maxGroupDepth: number;
+    readonly defaults: { readonly sort: readonly Sort[]; readonly groupBy: readonly string[] };
+    readonly metadataURL: string;
+}
+type Value<C extends Column> = C['date'] extends true
+    ? string
+    : C['enum'] extends readonly (string | number)[]
+      ? C['enum'][number]
+      : { string: string; number: number; boolean: boolean; json: never }[C['type']];
+type Condition<C extends Capabilities> = {
+    [K in keyof C['filters'] & string]: {
+        kind: 'condition';
+        field: K;
+    } & (
+        | { operator: Extract<'isNull' | 'isNotNull', C['filters'][K]['operators'][number]>; value?: never }
+        | {
+              operator: Extract<'in', C['filters'][K]['operators'][number]>;
+              value: readonly Value<C['filters'][K]['column']>[];
+          }
+        | {
+              operator: Exclude<C['filters'][K]['operators'][number], 'in' | 'isNull' | 'isNotNull'>;
+              value: Value<C['filters'][K]['column']>;
+          }
+    );
+}[keyof C['filters'] & string];
+export type FilterNode<C extends Capabilities = Capabilities> =
+    | Condition<C>
+    | { kind: 'and' | 'or'; children: readonly FilterNode<C>[] };
+export interface Sort {
+    readonly field: string;
+    readonly direction: 'asc' | 'desc';
+}
+export interface TableState<C extends Capabilities = Capabilities> {
+    readonly filter: FilterNode<C> | null;
+    readonly sort: readonly { readonly field: C['sorts'][number]; readonly direction: 'asc' | 'desc' }[];
+    readonly groupBy: readonly (keyof C['groups'] & string)[];
+    readonly expanded: readonly string[];
+}
+export type TableQueryInput<C extends Capabilities = Capabilities> = Omit<TableState<C>, 'expanded'> & {
+    readonly path: GroupPath;
+    readonly __window?: number;
+    readonly __generation?: string;
+};
+export interface Selection<Row> {
+    readonly key: string;
+    readonly one: boolean;
+    readonly definitions?: unknown;
+    readonly queries?: unknown;
+    request(): unknown;
+    decode(raw: unknown): readonly Row[];
+}
+export interface TableDescriptor<Row, C extends Capabilities = Capabilities> {
+    readonly capabilities: C;
+    rows(input: TableQueryInput<C>): Selection<Row>;
+    rowId(row: Row): string;
+}
+export function createTable<C extends Capabilities, S extends Selection<unknown>>(
+    capabilities: C,
+    rows: (input: TableQueryInput<C>) => S,
+): TableDescriptor<ReturnType<S['decode']>[number], C> {
+    type Row = ReturnType<S['decode']>[number];
+    return Object.freeze({
+        capabilities,
+        rows: (input: TableQueryInput<C>) => ({ ...rows(input), pageSize: undefined }),
+        rowId: (row: Row) =>
+            'r:' + JSON.stringify(capabilities.key.map((field) => (row as Record<string, unknown>)[field])),
+    });
+}
+export function groupId(path: GroupPath): string {
+    return 'g:' + JSON.stringify(path);
+}
+export function queryKey(input: unknown): string {
+    return JSON.stringify(input, (_key, value: unknown) =>
+        value && typeof value === 'object' && !Array.isArray(value)
+            ? Object.fromEntries(Object.entries(value).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
+            : value,
+    );
+}
+function invalid(message: string): never {
+    throw new Error('Invalid table state: ' + message);
+}
+function scalar(value: unknown, column: Column): void {
+    if (
+        value === null
+            ? !column.nullable
+            : typeof value !== column.type || (typeof value === 'number' && !Number.isFinite(value))
+    )
+        invalid('field value');
+    if (value !== null && column.enum && !column.enum.includes(value as string | number)) invalid('enum value');
+}
+export function validateState<C extends Capabilities>(capabilities: C, state: TableState<C>): void {
+    if (
+        state.groupBy.length > capabilities.maxGroupDepth ||
+        new Set(state.groupBy).size !== state.groupBy.length ||
+        state.groupBy.some((field) => !Object.hasOwn(capabilities.groups, field))
+    )
+        invalid('grouping');
+    if (
+        new Set(state.sort.map((sort) => sort.field)).size !== state.sort.length ||
+        state.sort.some((sort) => !capabilities.sorts.includes(sort.field) || !['asc', 'desc'].includes(sort.direction))
+    )
+        invalid('sort');
+    let terms = 0;
+    function visit(node: FilterNode<C>, depth: number): void {
+        if (++terms > 100 || depth > 8) invalid('filter complexity');
+        if (node.kind !== 'condition') {
+            if (!['and', 'or'].includes(node.kind) || !Array.isArray(node.children) || !node.children.length)
+                invalid('filter group');
+            node.children.forEach((child) => visit(child, depth + 1));
+            return;
+        }
+        const filter = capabilities.filters[node.field];
+        if (!filter || !filter.operators.includes(node.operator)) invalid('filter capability');
+        if (node.operator === 'isNull' || node.operator === 'isNotNull') {
+            if ('value' in node) invalid('null operation');
+            return;
+        }
+        const values = node.operator === 'in' ? node.value : [node.value];
+        if (!Array.isArray(values) || !values.length || values.length > 100) invalid('membership');
+        for (const value of values) {
+            if (value === null) invalid('explicit null operation required');
+            if (filter.kind === 'date') {
+                if (
+                    typeof value !== 'string' ||
+                    !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?(?:Z|[+-]\d{2}:\d{2})$/.test(value) ||
+                    !Number.isFinite(Date.parse(value))
+                )
+                    invalid('date offset');
+            } else scalar(value, filter.column);
+            if (
+                typeof value === 'string' &&
+                (Array.from(value).length > 1000 ||
+                    (['contains', 'startsWith', 'endsWith'].includes(node.operator) && !value.length))
+            )
+                invalid('text operand');
+        }
+    }
+    if (state.filter !== null) visit(state.filter, 1);
+}
+// One structural bridge for generated native queries; server capabilities remain authoritative.
+interface Expressions {
+    cmp(field: string, op: string, value: unknown): unknown;
+    and(...conditions: unknown[]): unknown;
+    or(...conditions: unknown[]): unknown;
+}
+interface NativeQuery {
+    where(field: string, op: string, value: unknown): NativeQuery;
+    where(expression: (builder: Expressions) => unknown): NativeQuery;
+    orderBy(field: string, direction: 'asc' | 'desc'): NativeQuery;
+    limit(window: number): NativeQuery;
+}
+export function applyTableQuery<Q, C extends Capabilities>(base: Q, input: TableQueryInput<C>, capabilities: C): Q {
+    validateState(capabilities, { ...input, expanded: [] });
+    if (input.path.length !== input.groupBy.length) invalid('complete leaf path required');
+    let query = base as unknown as NativeQuery;
+    if (input.filter)
+        query = query.where((builder) => {
+            function expression(node: FilterNode<C>): unknown {
+                if (node.kind !== 'condition') return builder[node.kind](...node.children.map(expression));
+                const filter = capabilities.filters[node.field]!;
+                const operations: Record<string, string> = {
+                    equals: '=',
+                    notEquals: '!=',
+                    in: 'IN',
+                    gt: '>',
+                    gte: '>=',
+                    lt: '<',
+                    lte: '<=',
+                    isNull: 'IS',
+                    isNotNull: 'IS NOT',
+                };
+                let value: unknown = node.value ?? null;
+                if (filter.kind === 'date' && value !== null) {
+                    const date = (item: unknown) => encodeDate(new Date(item as string), filter.column.dateFormat);
+                    value = Array.isArray(value) ? value.map(date) : date(value);
+                }
+                const operation = operations[node.operator] ?? 'LIKE';
+                if (operation === 'LIKE') {
+                    const escaped = String(value).replace(/[\\%_]/g, '\\$&');
+                    value =
+                        (node.operator === 'startsWith' ? '' : '%') +
+                        escaped +
+                        (node.operator === 'endsWith' ? '' : '%');
+                }
+                return builder.cmp(filter.field, operation, value);
+            }
+            return expression(input.filter!);
+        });
+    input.path.forEach((part, index) => {
+        if (part.field !== input.groupBy[index]) invalid('group path');
+        const field = capabilities.groups[part.field]!.field;
+        scalar(part.value, capabilities.columns[field]!);
+        query = query.where(field, part.value === null ? 'IS' : '=', part.value);
+    });
+    const sorts = [
+        ...input.sort,
+        ...capabilities.key
+            .filter((field) => !input.sort.some((sort) => sort.field === field))
+            .map((field) => ({ field, direction: 'asc' as const })),
+    ];
+    for (const sort of sorts) query = query.orderBy(sort.field, sort.direction);
+    const window = input['__window'] ?? capabilities.pageSize + 1;
+    if (!Number.isInteger(window) || window < 1 || window > 2147483647) invalid('window');
+    return query.limit(window) as unknown as Q;
+}
+
+export interface CountState {
+    readonly value: number | undefined;
+    readonly observedAt: string | undefined;
+    readonly pending: boolean;
+    readonly stale: boolean;
+    readonly error: Error | undefined;
+}
+export type TableItem<Row> =
+    | { kind: 'group'; id: string; path: GroupPath; depth: number; label: string; expanded: boolean; count: CountState }
+    | { kind: 'row'; id: string; groupId: string | null; row: Row }
+    | { kind: 'loading' | 'load-more' | 'empty'; id: string; groupId: string | null }
+    | { kind: 'error'; id: string; groupId: string | null; error: Error };
+export interface MetadataResponse {
+    version: 1;
+    requestKey: string;
+    observedAt: string;
+    totalCount: number;
+    directories: readonly {
+        path: GroupPath;
+        groups: readonly { id: string; value: Scalar; label: string; count: number }[];
+        nextCursor: string | null;
+    }[];
+}
+export class TableTransportError extends Error {
+    constructor(public readonly status: number) {
+        super(
+            status === 409
+                ? 'Table contract changed. Reload the application.'
+                : `Table metadata request failed (${status}).`,
+        );
+    }
+}
+export async function readMetadata<C extends Capabilities>(
+    capabilities: C,
+    state: TableState<C>,
+    directories: readonly { path: GroupPath; after: string | null }[],
+    signal: AbortSignal,
+): Promise<MetadataResponse> {
+    const csrf =
+        typeof document === 'undefined'
+            ? undefined
+            : document.querySelector<HTMLMetaElement>('meta[name="csrf-token"]')?.content;
+    const xsrf =
+        typeof document === 'undefined'
+            ? undefined
+            : document.cookie
+                  .split('; ')
+                  .find((value) => value.startsWith('XSRF-TOKEN='))
+                  ?.slice(11);
+    const response = await fetch(capabilities.metadataURL, {
+        method: 'POST',
+        credentials: 'same-origin',
+        cache: 'no-store',
+        signal,
+        headers: {
+            'Content-Type': 'application/json',
+            Accept: 'application/json',
+            ...(csrf ? { 'X-CSRF-TOKEN': csrf } : {}),
+            ...(xsrf ? { 'X-XSRF-TOKEN': decodeURIComponent(xsrf) } : {}),
+        },
+        body: JSON.stringify({
+            version: 1,
+            contract: capabilities.contract,
+            filter: state.filter,
+            groupBy: state.groupBy,
+            directories,
+        }),
+    });
+    if (!response.ok) throw new TableTransportError(response.status);
+    return (await response.json()) as MetadataResponse;
+}

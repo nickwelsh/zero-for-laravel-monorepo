@@ -13,6 +13,8 @@ use ZeroForLaravel\Generation\Mutations\ControllerMutationGenerator;
 use ZeroForLaravel\Generation\Mutations\MutationProgram;
 use ZeroForLaravel\Generation\OptionQueryCompiler;
 use ZeroForLaravel\Generation\PublicApiGenerator;
+use ZeroForLaravel\Generation\TableCompiler;
+use ZeroForLaravel\Generation\TableGenerator;
 use ZeroForLaravel\Generation\TypeScriptGenerator;
 use ZeroForLaravel\Generation\ZodSchemaDriver;
 use ZeroForLaravel\Metadata\ModelRegistry;
@@ -20,6 +22,7 @@ use ZeroForLaravel\Tests\Fixtures\ControllerMutationController;
 use ZeroForLaravel\Tests\Fixtures\MutationPreference;
 use ZeroForLaravel\Tests\Fixtures\PreferenceMutationController;
 use ZeroForLaravel\Tests\Fixtures\QueryController;
+use ZeroForLaravel\Tests\Fixtures\TasksTable;
 use ZeroForLaravel\Tests\OwnerTestCase as TestCase;
 
 require __DIR__.'/../../vendor/autoload.php';
@@ -32,6 +35,15 @@ $fixture = new class('export') extends TestCase
     {
         $this->setUp();
         app()->register(SurveyorServiceProvider::class);
+        if ($mode === 'table') {
+            config(['zero.route_prefix' => 'zero']);
+            $models = new ModelRegistry($this->models());
+            app()->instance(ModelRegistry::class, $models);
+            $table = (new TableCompiler($models))->compile('tasks', TasksTable::class);
+
+            return (new TableGenerator)->typescript([$table], './generated')['tables/tasks.ts'];
+        }
+
         if ($mode === 'react') {
             return (new TypeScriptGenerator)->generateReact('./generated', './assignment-options.generated', '../../packages/client/src/controller-mutation.fixture', true);
         }

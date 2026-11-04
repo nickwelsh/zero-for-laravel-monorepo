@@ -24,9 +24,20 @@ registerHooks({
 const core = await import(new URL('dist/index.js', root).href);
 if (typeof core.createControllerMutations !== 'function' || typeof core.liveQuery !== 'function')
     throw new Error('Missing controller runtime exports.');
+const tableRoot = new URL('../packages/table/', import.meta.url);
+const tableManifest = JSON.parse(await readFile(new URL('package.json', tableRoot), 'utf8'));
+for (const entry of Object.values(tableManifest.exports)) {
+    await access(new URL(entry.types, tableRoot));
+    await access(new URL(entry.import, tableRoot));
+}
+await access(new URL('LICENSE', tableRoot));
+await access(new URL('README.md', tableRoot));
+const table = await import(new URL('dist/index.js', tableRoot).href);
+if (typeof table.createTable !== 'function') throw new Error('Missing React-free table descriptor producer.');
 const forms = await import(new URL('dist/formbraid.js', root).href);
 if (typeof forms.createControllerForm !== 'function') throw new Error('Missing Formbraid descriptor producer.');
 allowReact = true;
+await import(new URL('dist/react/index.js', tableRoot).href);
 await import(new URL('dist/react/index.js', root).href);
 const optionSources = await import(new URL('dist/react/formbraid.js', root).href);
 if (typeof optionSources.createZeroOptionSource !== 'function') throw new Error('Missing Zero option source producer.');

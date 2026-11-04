@@ -160,6 +160,10 @@ export default defineConfig({
     },
     resolve: {
         alias: {
+            '@nickwelsh/zero-table/react': fileURLToPath(
+                new URL('./packages/table/src/react/index.tsx', import.meta.url),
+            ),
+            '@nickwelsh/zero-table': fileURLToPath(new URL('./packages/table/src/index.ts', import.meta.url)),
             '@nickwelsh/zero-for-laravel/react/formbraid': fileURLToPath(
                 new URL('./packages/client/src/react/formbraid.tsx', import.meta.url),
             ),

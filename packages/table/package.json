@@ -1,0 +1,42 @@
+{
+    "name": "@nickwelsh/zero-table",
+    "version": "0.1.0",
+    "description": "Headless live Zero tables with snapshot groups and Laravel capabilities.",
+    "license": "MIT",
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/nickwelsh/zero-for-laravel-monorepo.git",
+        "directory": "packages/table"
+    },
+    "files": [
+        "dist",
+        "LICENSE"
+    ],
+    "type": "module",
+    "exports": {
+        ".": {
+            "types": "./dist/index.d.ts",
+            "import": "./dist/index.js"
+        },
+        "./react": {
+            "types": "./dist/react/index.d.ts",
+            "import": "./dist/react/index.js"
+        }
+    },
+    "scripts": {
+        "build": "vp pack"
+    },
+    "devDependencies": {
+        "@nickwelsh/zero-for-laravel": "workspace:*"
+    },
+    "peerDependencies": {
+        "@nickwelsh/zero-for-laravel": "^0.6.0",
+        "@rocicorp/zero": "1.11.3",
+        "react": "^18.0.0 || ^19.0.0"
+    },
+    "peerDependenciesMeta": {
+        "react": {
+            "optional": true
+        }
+    }
+}

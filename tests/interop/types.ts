@@ -13,6 +13,8 @@ import type { ClientContext } from '@nickwelsh/zero-for-laravel';
 import type { choices } from './controller-api/ZeroForLaravel/Tests/Fixtures/QueryController';
 import { index, show, dated } from './controller-api/ZeroForLaravel/Tests/Fixtures/QueryController';
 import { store } from './controller-api/ZeroForLaravel/Tests/Fixtures/ControllerMutationController';
+import tasks from './table.generated';
+import { useDataTable } from '@nickwelsh/zero-table/react';
 
 // Compiled by typecheck; these exercise only public generated controller contracts.
 function useContracts() {
@@ -86,4 +88,27 @@ function generatedPageTypes(page: { heading: string; tasks: QueryData<typeof ind
     // @ts-expect-error consumer-owned props remain typed without a global namespace
     const missing = page.unknown;
     return { title, heading };
+}
+
+function useTableContracts() {
+    const table = useDataTable(tasks);
+    table.setFilter({ kind: 'condition', field: 'title', operator: 'contains', value: 'alpha' });
+    table.setFilter({ kind: 'condition', field: 'completed', operator: 'equals', value: true });
+    // @ts-expect-error generated aliases, not database column names
+    table.setFilter({ kind: 'condition', field: 'done', operator: 'equals', value: true });
+    // @ts-expect-error booleans are not strings
+    table.setFilter({ kind: 'condition', field: 'completed', operator: 'equals', value: 'true' });
+    // @ts-expect-error text operators are capabilities, not arbitrary strings
+    table.setFilter({ kind: 'condition', field: 'title', operator: 'endsWith', value: 'x' });
+    // @ts-expect-error only admitted sorts
+    table.setSort([{ field: 'done', direction: 'asc' }]);
+    // @ts-expect-error only admitted group dimensions
+    table.setGroupBy(['user_id']);
+    const item = table.items[0];
+    if (item?.kind === 'row') {
+        const title: string = item.row.title;
+        const completed: boolean = item.row.done;
+        return { title, completed };
+    }
+    return undefined;
 }

@@ -16,6 +16,7 @@ for (const [mode, path] of [
     ['assignment', 'tests/interop/assignment.generated.ts'],
     ['react', 'tests/interop/controller-react.generated.ts'],
     ['options', 'tests/interop/options.generated.ts'],
+    ['table', 'tests/interop/table.generated.ts'],
 ]) {
     const generated = execFileSync('php', ['packages/laravel/tests/Fixtures/export-controller-mutations.php', mode], {
         encoding: 'utf8',
