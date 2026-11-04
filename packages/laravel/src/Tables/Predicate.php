@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace ZeroForLaravel\Tables;
 
 use Carbon\CarbonImmutable;
+use Illuminate\Contracts\Database\Query\Expression;
+use Illuminate\Database\Grammar;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Database\Query\Grammars\PostgresGrammar;
 use LogicException;
@@ -89,6 +91,19 @@ final readonly class Predicate
         }
 
         $qualified = $model->table.'.'.$field;
+        if ($column['type'] === 'string' && ! $column['date'] && $query->getGrammar() instanceof PostgresGrammar) {
+            // Compare replicated text, not PostgreSQL UUID coercion or locale collation.
+            $qualified = new readonly class($qualified) implements Expression
+            {
+                public function __construct(private string $column) {}
+
+                public function getValue(Grammar $grammar): string
+                {
+                    return 'CAST('.$grammar->wrap($this->column).' AS TEXT) COLLATE "C"';
+                }
+            };
+        }
+
         if ($op === 'IS' || $op === 'IS NOT') {
             if ($value !== null) {
                 throw new LogicException('Portable table IS only supports null.');

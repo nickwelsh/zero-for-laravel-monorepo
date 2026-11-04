@@ -131,3 +131,14 @@ test('nullable filter operations do not depend on declaration order and unsuppor
 
     expect(fn (): Builder => $unsupported->sql($context))->toThrow(LogicException::class, 'portable SQL lowering');
 });
+
+test('table SQL compares UUID fields as replicated strings instead of coercing input', function (): void {
+    $id = '00000000-0000-4000-8000-00000000abcd';
+    DB::table('tasks')->insert(['id' => $id, 'user_id' => 'alice', 'title' => 'UUID row', 'done' => false]);
+    $alice = (new User)->setKeyType('string')->forceFill(['id' => 'alice']);
+    $table = Table::for(Task::class)->visibleTo($alice)->allowedFilters([AllowedFilter::exact('id')]);
+    $context = new ResolvedContext(['user_id' => 'alice'], 'alice');
+    foreach ([[$id, 1], [strtoupper($id), 0], ['not-a-uuid', 0]] as [$value, $expected]) {
+        expect($table->sql($context, ['kind' => 'condition', 'field' => 'id', 'operator' => 'equals', 'value' => $value])->count())->toBe($expected);
+    }
+});

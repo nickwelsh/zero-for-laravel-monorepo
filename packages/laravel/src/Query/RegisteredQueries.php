@@ -5,11 +5,12 @@ declare(strict_types=1);
 namespace ZeroForLaravel\Query;
 
 use LogicException;
+use ZeroForLaravel\Tables\RegisteredTableQuery;
 
 /** Loads only the application's generated PHP artifact, never request data. */
 final readonly class RegisteredQueries
 {
-    /** @param array<string, RegisteredQuery|RegisteredOptionQuery> $queries */
+    /** @param array<string, RegisteredQuery|RegisteredOptionQuery|RegisteredTableQuery> $queries */
     public function __construct(private array $queries) {}
 
     public static function load(string $path): self
@@ -25,7 +26,7 @@ final readonly class RegisteredQueries
 
         $registrations = [];
         foreach ($queries as $name => $query) {
-            if (! is_string($name) || (! $query instanceof RegisteredQuery && ! $query instanceof RegisteredOptionQuery)) {
+            if (! is_string($name) || (! $query instanceof RegisteredQuery && ! $query instanceof RegisteredOptionQuery && ! $query instanceof RegisteredTableQuery)) {
                 throw new LogicException('Invalid controller query registration. Run zero:generate.');
             }
 
@@ -35,7 +36,7 @@ final readonly class RegisteredQueries
         return new self($registrations);
     }
 
-    /** @return array<string, RegisteredQuery|RegisteredOptionQuery> */
+    /** @return array<string, RegisteredQuery|RegisteredOptionQuery|RegisteredTableQuery> */
     public function all(): array
     {
         return $this->queries;
@@ -44,6 +45,6 @@ final readonly class RegisteredQueries
     /** @return array<string, RegisteredQuery> */
     public function forAction(string $action): array
     {
-        return array_filter($this->queries, fn (RegisteredQuery|RegisteredOptionQuery $query): bool => $query instanceof RegisteredQuery && $query->action === ltrim($action, '\\'));
+        return array_filter($this->queries, fn (RegisteredQuery|RegisteredOptionQuery|RegisteredTableQuery $query): bool => $query instanceof RegisteredQuery && $query->action === ltrim($action, '\\'));
     }
 }

@@ -137,6 +137,12 @@ final class ZeroServiceProvider extends ServiceProvider
                 Route::post('query', [ZeroController::class, 'query'])->name('zero.query');
                 Route::post('mutate', [ZeroController::class, 'mutate'])->name('zero.mutate');
             });
+            if (config()->array('zero.tables') !== []) {
+                Route::prefix(config()->string('zero.route_prefix'))->middleware(['web', 'auth'])->group(function (): void {
+                    Route::post('tables/{table}/metadata', Http\TableMetadataController::class)->name('zero.tables.metadata');
+                });
+            }
+
             if (config()->array('permissions.predictions.abilities') !== []) {
                 Route::prefix(config()->string('zero.route_prefix'))->middleware([Http\CaptureTransportCookies::class, ...config()->array('permissions.predictions.middleware', ['web', 'auth'])])->group(function (): void {
                     Route::get('permissions', Permissions\PredictionController::class)->name('zero.permissions');

@@ -21,6 +21,7 @@ use ZeroForLaravel\Tests\Fixtures\ControllerMutationController;
 use ZeroForLaravel\Tests\Fixtures\Module\OutsideTask;
 use ZeroForLaravel\Tests\Fixtures\QueryController;
 use ZeroForLaravel\Tests\Fixtures\Task;
+use ZeroForLaravel\Tests\Fixtures\TasksTable;
 use ZeroForLaravel\Tests\HttpTestCase;
 
 uses(HttpTestCase::class);
@@ -93,7 +94,7 @@ test('configured models must be Eloquent model classes', function (): void {
 
 test('generation owns named controller modules and removes only stale generated files', function (): void {
     $directory = sys_get_temp_dir().'/zero-public-'.uniqid();
-    config(['zero.controller_output' => $directory.'/queries.php', 'zero.mutation_output' => $directory.'/mutations.php']);
+    config(['zero.controller_output' => $directory.'/queries.php', 'zero.mutation_output' => $directory.'/mutations.php', 'zero.tables.tasks' => TasksTable::class]);
     Route::post('/write', [ControllerMutationController::class, 'store']);
     Route::get('/tasks/{title}', [QueryController::class, 'index']);
     $options = ['--output' => $directory.'/generated.ts'];
@@ -102,14 +103,17 @@ test('generation owns named controller modules and removes only stale generated 
         $controller = $directory.'/ZeroForLaravel/Tests/Fixtures/ControllerMutationController.ts';
         expect(File::get($controller))->toContain(' as store}', ' as StoreInput', '../../../generated.mutations');
         expect(File::get($directory.'/ZeroForLaravel/Tests/Fixtures/QueryController.ts'))->toContain(' as index}', '.request()', 'live: liveQueries');
+        expect(File::get($directory.'/tables/tasks.ts'))->toContain('applyTableQuery', '../generated');
         expect(File::exists($directory.'/pages.d.ts'))->toBeFalse();
-        expect(Artisan::call('zero:generate', [...$options, '--check' => true]))->toBe(0);
+        expect(Artisan::call('zero:generate', [...$options, '--check' => true]))->toBe(0, Artisan::output());
         File::put($directory.'/handwritten.ts', 'export const keep = true;');
         Route::setRoutes(new RouteCollection);
+        config(['zero.tables' => []]);
         expect(Artisan::call('zero:generate', [...$options, '--check' => true]))->toBe(1);
         expect(File::exists($controller))->toBeTrue();
         expect(Artisan::call('zero:generate', $options))->toBe(0);
         expect(File::exists($controller))->toBeFalse();
+        expect(File::exists($directory.'/tables/tasks.ts'))->toBeFalse();
         expect(File::get($directory.'/handwritten.ts'))->toBe('export const keep = true;');
         expect(Artisan::call('zero:generate', [...$options, '--check' => true]))->toBe(0);
     } finally {

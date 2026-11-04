@@ -12,8 +12,10 @@ use ZeroForLaravel\Generation\ControllerQueryGenerator;
 use ZeroForLaravel\Generation\Mutations\ControllerMutationGenerator;
 use ZeroForLaravel\Generation\Mutations\MutationProgram;
 use ZeroForLaravel\Generation\PublicApiGenerator;
+use ZeroForLaravel\Generation\TableGenerator;
 use ZeroForLaravel\Generation\TypeScriptGenerator;
 use ZeroForLaravel\Metadata\ModelRegistry;
+use ZeroForLaravel\Tables\TableRegistry;
 
 final class GenerateCommand extends Command
 {
@@ -30,6 +32,8 @@ final class GenerateCommand extends Command
             return self::FAILURE;
         }
 
+        // Resolve table relationships before controller fingerprints capture model metadata.
+        $tables = resolve(TableRegistry::class)->all();
         $definitions = [...array_values(array_column($controllers->queries(), 'query')), ...$controllers->optionQueries()];
         $mutations = $controllers->mutations();
         $source = $generator->generate($registry);
@@ -38,11 +42,12 @@ final class GenerateCommand extends Command
         $outputs = [
             $path => $source,
             dirname($path).'/'.$base.'.queries.ts' => $queries->typescript($definitions, './'.$base),
-            config()->string('zero.controller_output') => $queries->php($definitions),
+            config()->string('zero.controller_output') => $queries->php($definitions, $tables),
             dirname($path).'/'.$base.'.mutations.ts' => $mutationGenerator->typescript($mutations),
             config()->string('zero.mutation_output') => $mutationGenerator->php($mutations),
         ];
-        $public = (new PublicApiGenerator)->generate($mutations, $definitions, $base);
+        $public = (new PublicApiGenerator)->generate($mutations, $definitions, $base)
+            + (new TableGenerator)->typescript($tables, '../'.$base);
         $manifest = dirname($path).'/'.$base.'.files.json';
         $previous = $files->exists($manifest) ? json_decode($files->get($manifest), true, flags: JSON_THROW_ON_ERROR) : [];
         if (! is_array($previous)) {
@@ -89,7 +94,7 @@ final class GenerateCommand extends Command
                     continue;
                 }
 
-                $this->error('Zero contracts are out of date. Run zero:generate.');
+                $this->error('Zero contracts are out of date: '.$output.'. Run zero:generate.');
 
                 return self::FAILURE;
             }
