@@ -54,7 +54,10 @@ final class AllowedFilter
             throw new InvalidArgumentException('Unsupported operators for filter '.$this->name.'.');
         }
 
-        $this->operations = array_values(array_unique($operators));
+        $this->operations = array_values(array_unique([
+            ...$operators,
+            ...array_intersect($this->operations, ['isNull', 'isNotNull']),
+        ]));
 
         return $this;
     }

@@ -12,6 +12,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Validation\ValidationException;
 use InvalidArgumentException;
+use LogicException;
 use ZeroForLaravel\Metadata\ModelRegistry;
 use ZeroForLaravel\Query\QueryCompiler;
 use ZeroForLaravel\Query\ZeroQuery;
@@ -114,4 +115,17 @@ test('table capabilities reject malformed or broadened query input', function ()
     expect(fn (): Table => Table::for(Task::class)->allowedFilters([AllowedFilter::number('title')]))->toThrow(InvalidArgumentException::class);
     expect(fn (): Table => Table::for(Task::class)->allowedFilters([AllowedFilter::exact('done')->nullable()]))->toThrow(InvalidArgumentException::class);
     expect(fn (): Table => Table::for(Task::class)->allowedGroups([AllowedGroup::belongsTo('tags')->label('name')]))->toThrow(InvalidArgumentException::class);
+});
+
+test('nullable filter operations do not depend on declaration order and unsupported scopes fail explicitly', function (): void {
+    $alice = (new User)->setKeyType('string')->forceFill(['id' => 'alice']);
+    $table = Table::for(Task::class)->visibleTo($alice)->allowedFilters([
+        AllowedFilter::number('rating')->nullable()->operators(['gt'])->operators(['lt']),
+    ]);
+    $context = new ResolvedContext(['user_id' => 'alice'], 'alice');
+    expect($table->sql($context, ['kind' => 'condition', 'field' => 'rating', 'operator' => 'isNull'])->pluck('title')->all())->toBe(['éclair']);
+    expect(fn (): ZeroQuery => $table->rows(['kind' => 'condition', 'field' => 'rating', 'operator' => 'gt', 'value' => 1]))->toThrow(ValidationException::class);
+    $unsupported = Table::for(Task::class)->visibleTo($alice);
+    $unsupported->base->whereExists('tags');
+    expect(fn (): Builder => $unsupported->sql($context))->toThrow(LogicException::class, 'portable SQL lowering');
 });

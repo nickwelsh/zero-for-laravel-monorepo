@@ -67,11 +67,15 @@ final readonly class Predicate
             return;
         }
 
+        if ($kind !== 'simple') {
+            throw new LogicException('Table scope has no portable SQL lowering.');
+        }
+
         $left = Input::object($condition['left'] ?? null, 'condition');
         $right = Input::object($condition['right'] ?? null, 'condition');
         $field = $left['name'] ?? null;
         $op = $condition['op'] ?? null;
-        if ($kind !== 'simple' || ($left['type'] ?? null) !== 'column' || ($right['type'] ?? null) !== 'literal' || ! is_string($field) || ! isset($model->columns[$field]) || ! in_array($op, ['=', '!=', '>', '>=', '<', '<=', 'IN', 'IS', 'IS NOT', 'LIKE'], true)) {
+        if (($left['type'] ?? null) !== 'column' || ($right['type'] ?? null) !== 'literal' || ! is_string($field) || ! isset($model->columns[$field]) || ! in_array($op, ['=', '!=', '>', '>=', '<', '<=', 'IN', 'IS', 'IS NOT', 'LIKE'], true)) {
             throw new LogicException('Table scope has no portable SQL lowering.');
         }
 
