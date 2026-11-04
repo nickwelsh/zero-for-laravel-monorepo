@@ -8,5 +8,7 @@ import {options} from "./assignment-options.generated";
 export function useZero() { return useNativeZero<typeof schema, undefined, Context>(); }
 export function createZeroBindings(projections: Parameters<typeof createControllerMutationBindings<typeof schema, Context>>[2], preparation: MutationPreparation = {}) {
   const {mutators, actions} = createControllerMutationBindings<typeof schema, Context>(schema, definitions, projections);
-  return {mutators, actions, ZeroProvider: createZeroProvider<Context>(schema, mutators, options, true, {actions, preparation}, contextContract)};
+  const ZeroProvider = createZeroProvider<Context>(schema, mutators, options, true, {actions, preparation}, contextContract);
+  const controllerRuntime = () => ({client: ZeroProvider.getClient(), actions, preparation});
+  return {mutators, actions, ZeroProvider, controllerRuntime};
 }

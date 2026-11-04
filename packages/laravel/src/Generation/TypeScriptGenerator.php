@@ -24,16 +24,20 @@ final class TypeScriptGenerator
             return $imports
                 ."export function createZeroBindings(projections: Parameters<typeof createControllerMutationBindings<typeof schema, Context>>[2], preparation: MutationPreparation = {}) {\n"
                 ."  const {mutators, actions} = createControllerMutationBindings<typeof schema, Context>(schema, definitions, projections);\n"
-                ."  return {mutators, actions, ZeroProvider: createZeroProvider<Context>(schema, mutators, options, true, {actions, preparation}, contextContract)};\n"
+                ."  const ZeroProvider = createZeroProvider<Context>(schema, mutators, options, true, {actions, preparation}, contextContract);\n"
+                ."  const controllerRuntime = () => ({client: ZeroProvider.getClient(), actions, preparation});\n"
+                ."  return {mutators, actions, ZeroProvider, controllerRuntime};\n"
                 ."}\n";
         }
 
         return $imports
             ."export function createZeroBindings(preparation: MutationPreparation = {}) {\n"
             ."  const {mutators, actions} = createControllerMutationBindings<typeof schema, Context>(schema, definitions);\n"
-            ."  return {mutators, actions, ZeroProvider: createZeroProvider<Context>(schema, mutators, options, true, {actions, preparation}, contextContract)};\n"
+            ."  const ZeroProvider = createZeroProvider<Context>(schema, mutators, options, true, {actions, preparation}, contextContract);\n"
+            ."  const controllerRuntime = () => ({client: ZeroProvider.getClient(), actions, preparation});\n"
+            ."  return {mutators, actions, ZeroProvider, controllerRuntime};\n"
             ."}\n"
-            ."export const {mutators, actions, ZeroProvider} = createZeroBindings();\n";
+            ."export const {mutators, actions, ZeroProvider, controllerRuntime} = createZeroBindings();\n";
     }
 
     public function generate(ModelRegistry $registry): string

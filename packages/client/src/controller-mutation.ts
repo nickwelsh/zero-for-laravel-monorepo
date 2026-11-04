@@ -7,6 +7,7 @@ import {
     type ReadonlyJSONValue,
     type Mutator,
     type MutatorDefinition,
+    type MutateRequest,
 } from '@rocicorp/zero';
 import { ulid } from 'ulid';
 import { v4 as uuid, v5 as keyedUUID } from 'uuid';
@@ -110,6 +111,14 @@ export interface ControllerMutationAction<Input, Result> {
     readonly action: string;
     readonly inputSchema: MutationCodec<Input>;
     readonly serverResultSchema: MutationCodec<Result>;
+}
+export interface ControllerMutationBinding<Input, Result, S extends Schema, C extends ClientContext> {
+    prepare(
+        input: Input,
+        route?: ControllerMutationWire['route'],
+        preparation?: MutationPreparation,
+    ): MutateRequest<ControllerMutationWire, S, C>;
+    serverResultSchema: MutationCodec<Result>;
 }
 export type InferMutationInput<M extends { inputSchema: MutationCodec<unknown> }> = ReturnType<
     M['inputSchema']['parse']

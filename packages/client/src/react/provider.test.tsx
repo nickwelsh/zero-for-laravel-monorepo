@@ -7,12 +7,21 @@ import { InputError, type ContextContract } from '../index';
 import { createZeroProvider, type ProviderProps } from './index';
 
 const native = vi.hoisted(() => ({ provider: vi.fn() }));
-vi.mock('@rocicorp/zero/react', () => ({
-    ZeroProvider: (props: { children: ReactNode }) => {
-        native.provider(props);
-        return props.children;
-    },
-}));
+vi.mock('@rocicorp/zero/react', async () => {
+    const { createContext, createElement, useMemo } = await import('react');
+    const ZeroContext = createContext({});
+    return {
+        ZeroContext,
+        ZeroProvider: (props: { children: ReactNode; userID: string | null; context: unknown }) => {
+            const zero = useMemo(
+                () => ({ userID: props.userID, context: props.context }),
+                [props.userID, props.context],
+            );
+            native.provider(props);
+            return createElement(ZeroContext.Provider, { value: zero }, props.children);
+        },
+    };
+});
 afterEach(() => {
     cleanup();
     native.provider.mockClear();
@@ -86,4 +95,24 @@ it('does not let invalid scalars silently change JSON context identity without a
         ),
     ).toThrow(InputError);
     expect(native.provider).not.toHaveBeenCalled();
+});
+
+it('resolves only its active session and refuses ambiguous clients instead of crossing users', () => {
+    expect(() => Provider.getClient()).toThrow('initializing');
+    const first = render(
+        <Provider userID="alice" context={{ tenant: 'a', actor: 1 }}>
+            ready
+        </Provider>,
+    );
+    expect(Provider.getClient().context).toEqual({ tenant: 'a', actor: 1 });
+    const second = render(
+        <Provider userID="bob" context={{ tenant: 'b', actor: 2 }}>
+            ready
+        </Provider>,
+    );
+    expect(() => Provider.getClient()).toThrow('one active Zero session');
+    first.unmount();
+    expect(Provider.getClient().context).toEqual({ tenant: 'b', actor: 2 });
+    second.unmount();
+    expect(() => Provider.getClient()).toThrow('initializing');
 });

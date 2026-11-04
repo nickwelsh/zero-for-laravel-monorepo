@@ -216,6 +216,13 @@ Outside React, construct Zero with the `mutators` returned by
 whereas native results retain wire values. A committed result decode failure is
 not a rolled-back write and must not trigger resubmission.
 
+React 19 apps can use Formbraid **0.2** with generated controller descriptors:
+import `store` from `@/formbraid/zero/App/Http/Controllers/TodoListController`
+and render `<Form form={store} />`. `zero:formbraid` reuses Formbraid's component
+metadata and request generator, attaching native Zero submission callbacks.
+Formbraid owns draft state; success waits for authoritative acceptance. See the
+[form guide](apps/docs/content/docs/0.x/docs/mutations.mdx#formbraid-02).
+
 Generated creates use **prepared fields**: UUIDs/ULIDs inferred from Eloquent traits,
 plus timestamps inferred from the model's timestamp settings. The client captures
 them before enqueueing, separately from form input, and replay/server execution reuse

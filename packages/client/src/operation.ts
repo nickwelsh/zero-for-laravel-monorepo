@@ -6,6 +6,40 @@ export type MutationClient<S extends Schema, C extends ClientContext = ClientCon
     'mutate'
 >;
 
+export function validationFields(error: unknown): Readonly<Record<string, readonly string[]>> {
+    if (!error || typeof error !== 'object') return {};
+    if ('details' in error && error.details && typeof error.details === 'object' && 'fields' in error.details) {
+        const fields = error.details.fields;
+        if (fields && typeof fields === 'object')
+            return Object.fromEntries(
+                Object.entries(fields).filter(
+                    (entry): entry is [string, string[]] =>
+                        Array.isArray(entry[1]) && entry[1].every((value: unknown) => typeof value === 'string'),
+                ),
+            );
+    }
+    if ('issues' in error && Array.isArray(error.issues)) {
+        const fields: Record<string, string[]> = {};
+        for (const issue of error.issues as unknown[]) {
+            if (
+                issue &&
+                typeof issue === 'object' &&
+                'path' in issue &&
+                Array.isArray(issue.path) &&
+                'message' in issue &&
+                typeof issue.message === 'string'
+            ) {
+                const path = issue.path
+                    .filter((value: unknown) => typeof value === 'string' || typeof value === 'number')
+                    .join('.');
+                (fields[path] ??= []).push(issue.message);
+            }
+        }
+        return fields;
+    }
+    return {};
+}
+
 /** The write committed, but its native result failed its declared contract. */
 export class MutationResultError extends Error {
     readonly committed = true;

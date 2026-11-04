@@ -117,6 +117,61 @@ test('generation owns named controller modules and removes only stale generated 
     }
 });
 
+test('Formbraid generation publishes direct descriptors and bound factories without overwriting edits', function (): void {
+    $id = uniqid();
+    $directory = 'resources/js/zero-forms-'.$id;
+    $root = base_path($directory);
+    $enum = 'app/Formbraid/Fields'.$id.'.php';
+    File::ensureDirectoryExists($root);
+    File::put($root.'/metadata.json', json_encode([
+        'version' => 1, 'inputs' => ['must-not-load-browser-code.tsx'],
+        'fields' => ['Input' => ['props' => [
+            'label' => ['required' => true, 'type' => ['kind' => 'string']],
+            'constraints' => ['required' => true, 'type' => ['kind' => 'unknown']],
+        ]]],
+        'components' => (object) [], 'groups' => (object) [],
+    ], JSON_THROW_ON_ERROR));
+    config([
+        'zero.output' => $root.'/native/generated.ts',
+        'zero.controller_output' => $root.'/queries.php',
+        'zero.mutation_output' => $root.'/mutations.php',
+        'zero.formbraid_output' => $directory.'/forms',
+        'formbraid.metadata' => $directory.'/metadata.json',
+        'formbraid.component_enum' => $enum,
+        'formbraid.fields.types' => ['string' => 'Input', 'boolean' => 'Input'],
+        'formbraid.fields.fallbackType' => 'string',
+    ]);
+    Route::post('/write', [ControllerMutationController::class, 'store']);
+    Route::patch('/complete/{task}', [ControllerMutationController::class, 'complete']);
+    Route::get('/query/{title}', [QueryController::class, 'index']);
+    try {
+        expect(Artisan::call('zero:formbraid'))->toBe(0, Artisan::output());
+        $path = $root.'/forms/ZeroForLaravel/Tests/Fixtures/ControllerMutationController.ts';
+        $source = File::get($path);
+        expect($source)->toContain('const _form_store = createControllerForm(', 'parameters: {"task": string | number | boolean}', 'as store}', 'as complete}');
+        expect($source)->not->toContain('useControllerForm', 'fetch(');
+        expect(File::get($root.'/forms/requests/ZeroForLaravel/Tests/Fixtures/ControllerMutationRequest.ts'))->toContain('defineForm<ControllerMutationRequestValues>()', '"maxLength": 100');
+        expect(File::exists($root.'/forms/ZeroForLaravel/Tests/Fixtures/QueryController.ts'))->toBeFalse();
+        expect(Task::query()->count())->toBe(0);
+        expect(Artisan::call('zero:formbraid'))->toBe(0, Artisan::output());
+        expect(File::get($path))->toBe($source);
+        Route::post('/custom', [ControllerMutationController::class, 'projected']);
+        expect(Artisan::call('zero:formbraid'))->toBe(1);
+        expect(Artisan::output())->toContain('Set zero.formbraid_runtime');
+        expect(File::get($path))->toBe($source);
+        config(['zero.formbraid_runtime' => $directory.'/custom.ts']);
+        expect(Artisan::call('zero:formbraid'))->toBe(0, Artisan::output());
+        expect(File::get($path))->toContain('from "../../../../custom"', 'as projected}');
+        File::put($path, '// Application edit');
+        expect(Artisan::call('zero:formbraid'))->toBe(1);
+        expect(Artisan::output())->toContain('Refusing to overwrite');
+        expect(File::get($path))->toBe('// Application edit');
+    } finally {
+        File::deleteDirectory($root);
+        File::delete(base_path($enum));
+    }
+});
+
 class InvalidContextResolver
 {
     public function __invoke(Request $request): string

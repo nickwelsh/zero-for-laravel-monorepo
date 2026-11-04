@@ -5,6 +5,7 @@ export default defineConfig({
         entry: {
             index: 'src/index.ts',
             'react/index': 'src/react/index.ts',
+            formbraid: 'src/formbraid.ts',
             inertia: 'src/react/inertia.tsx',
             'search/index': 'src/search/index.ts',
             'react/search': 'src/react/search.tsx',

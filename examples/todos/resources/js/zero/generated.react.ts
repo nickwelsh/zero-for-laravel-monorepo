@@ -8,6 +8,8 @@ import {options} from "./zero.config";
 export function useZero() { return useNativeZero<typeof schema, undefined, Context>(); }
 export function createZeroBindings(preparation: MutationPreparation = {}) {
   const {mutators, actions} = createControllerMutationBindings<typeof schema, Context>(schema, definitions);
-  return {mutators, actions, ZeroProvider: createZeroProvider<Context>(schema, mutators, options, true, {actions, preparation}, contextContract)};
+  const ZeroProvider = createZeroProvider<Context>(schema, mutators, options, true, {actions, preparation}, contextContract);
+  const controllerRuntime = () => ({client: ZeroProvider.getClient(), actions, preparation});
+  return {mutators, actions, ZeroProvider, controllerRuntime};
 }
-export const {mutators, actions, ZeroProvider} = createZeroBindings();
+export const {mutators, actions, ZeroProvider, controllerRuntime} = createZeroBindings();

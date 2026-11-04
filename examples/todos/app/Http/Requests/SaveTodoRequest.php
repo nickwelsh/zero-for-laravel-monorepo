@@ -5,6 +5,7 @@ namespace App\Http\Requests;
 use App\Models\Todo;
 use App\Models\TodoList;
 use App\Models\User;
+use Formbraid\Laravel\Field;
 use Illuminate\Foundation\Http\FormRequest;
 
 class SaveTodoRequest extends FormRequest
@@ -30,6 +31,15 @@ class SaveTodoRequest extends FormRequest
             'list_id' => ['sometimes', 'required', 'uuid', 'exists:todo_lists,id'],
             'title' => ['sometimes', 'required', 'string', 'max:200'],
             'completed' => ['sometimes', 'boolean'],
+        ];
+    }
+
+    /** @return array<string, Field> */
+    public function fields(): array
+    {
+        return [
+            'list_id' => Field::make('HiddenField'),
+            'title' => Field::make()->label('New todo')->props(['placeholder' => 'What needs doing?']),
         ];
     }
 }

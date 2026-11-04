@@ -1,24 +1,16 @@
-import type { MutateRequest, Schema, Zero } from '@rocicorp/zero';
+import type { Schema, Zero } from '@rocicorp/zero';
 import { ZeroContext } from '@rocicorp/zero/react';
 import { createContext, useContext, useEffect, useRef, useState } from 'react';
 import type { ClientContext } from '../contract';
 import type {
     ControllerMutationAction,
+    ControllerMutationBinding,
     ControllerMutationWire,
-    MutationCodec,
     MutationPreparation,
 } from '../controller-mutation';
-import { completeMutation, MutationResultError } from '../operation';
+import { completeMutation, MutationResultError, validationFields } from '../operation';
 import { selectionKey } from '../validation';
 
-interface Binding<Input, Result, S extends Schema, C extends ClientContext> {
-    prepare(
-        input: Input,
-        route?: ControllerMutationWire['route'],
-        preparation?: MutationPreparation,
-    ): MutateRequest<ControllerMutationWire, S, C>;
-    serverResultSchema: MutationCodec<Result>;
-}
 export const ControllerMutations = createContext<{
     actions: Readonly<Record<string, unknown>>;
     preparation: MutationPreparation;
@@ -31,43 +23,9 @@ export interface ControllerMutationState {
 }
 const idle: ControllerMutationState = { status: 'idle', locallyApplied: false, error: undefined, fields: {} };
 
-function validationFields(error: unknown): ControllerMutationState['fields'] {
-    if (!error || typeof error !== 'object') return {};
-    if ('details' in error && error.details && typeof error.details === 'object' && 'fields' in error.details) {
-        const fields = error.details.fields;
-        if (fields && typeof fields === 'object')
-            return Object.fromEntries(
-                Object.entries(fields).filter(
-                    (entry): entry is [string, string[]] =>
-                        Array.isArray(entry[1]) && entry[1].every((value: unknown) => typeof value === 'string'),
-                ),
-            );
-    }
-    if ('issues' in error && Array.isArray(error.issues)) {
-        const fields: Record<string, string[]> = {};
-        for (const issue of error.issues as unknown[]) {
-            if (
-                issue &&
-                typeof issue === 'object' &&
-                'path' in issue &&
-                Array.isArray(issue.path) &&
-                'message' in issue &&
-                typeof issue.message === 'string'
-            ) {
-                const path = issue.path
-                    .filter((value: unknown) => typeof value === 'string' || typeof value === 'number')
-                    .join('.');
-                (fields[path] ??= []).push(issue.message);
-            }
-        }
-        return fields;
-    }
-    return {};
-}
-
 /** One native submission. Disposing observation never cancels an enqueued write. */
 export function useControllerMutation<Input, Result, S extends Schema, C extends ClientContext = ClientContext>(
-    binding: Binding<Input, Result, S, C> | ControllerMutationAction<Input, Result>,
+    binding: ControllerMutationBinding<Input, Result, S, C> | ControllerMutationAction<Input, Result>,
     route: ControllerMutationWire['route'] = {},
     preparation?: MutationPreparation,
 ) {
@@ -99,7 +57,7 @@ export function useControllerMutation<Input, Result, S extends Schema, C extends
             // React context erases the application's schema; generated references and
             // the provider registry restore the same binding by controller identity.
             const action = ('action' in binding ? registered.actions[binding.action] : binding) as
-                | Binding<Input, Result, S, C>
+                | ControllerMutationBinding<Input, Result, S, C>
                 | undefined;
             if (!action) throw new Error('The controller action is not registered with this Zero provider.');
             const parsed = 'inputSchema' in binding ? binding.inputSchema.parse(input) : input;

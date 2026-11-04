@@ -18,6 +18,10 @@ return [
     'mutation_output' => base_path('bootstrap/zero-mutations.php'),
     // Optional React wrapper. Its editable sibling config holds public connection options.
     'react' => false,
+    // Optional Formbraid producer; component metadata/configuration belong to formbraid/laravel.
+    'formbraid_output' => 'resources/js/formbraid/zero',
+    // Override for application-owned bindings (for example, custom optimism).
+    'formbraid_runtime' => null,
     // Synchronize after successful, non-pretend PostgreSQL migration batches.
     'sync_publication_on_migrate' => false,
     'publication' => env('ZERO_PUBLICATION', 'laravel_zero'),

@@ -21,6 +21,7 @@ use Typesense\Client;
 use ZeroForLaravel\Console\DevCommand;
 use ZeroForLaravel\Console\DoctorCommand;
 use ZeroForLaravel\Console\ExposureCommand;
+use ZeroForLaravel\Console\FormbraidCommand;
 use ZeroForLaravel\Console\GenerateCommand;
 use ZeroForLaravel\Console\ResetCommand;
 use ZeroForLaravel\Console\SyncPublicationCommand;
@@ -94,7 +95,7 @@ final class ZeroServiceProvider extends ServiceProvider
         });
         if ($this->app->runningInConsole()) {
             $this->publishes([__DIR__.'/../config/zero.php' => config_path('zero.php')], 'zero-config');
-            $this->commands([GenerateCommand::class, SyncPublicationCommand::class, DevCommand::class, DoctorCommand::class, ResetCommand::class, ExposureCommand::class]);
+            $this->commands([GenerateCommand::class, FormbraidCommand::class, SyncPublicationCommand::class, DevCommand::class, DoctorCommand::class, ResetCommand::class, ExposureCommand::class]);
             Event::listen(MigrationsEnded::class, function (MigrationsEnded $event): void {
                 if ($event->method !== 'up' || ($event->options['pretend'] ?? false) || ! config()->boolean('zero.sync_publication_on_migrate')) {
                     return;

@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests;
 
+use Formbraid\Laravel\Field;
 use Illuminate\Foundation\Http\FormRequest;
 
 class SaveTodoListRequest extends FormRequest
@@ -16,5 +17,11 @@ class SaveTodoListRequest extends FormRequest
     public function rules(): array
     {
         return ['name' => ['sometimes', 'required', 'string', 'max:100']];
+    }
+
+    /** @return array<string, Field> */
+    public function fields(): array
+    {
+        return ['name' => Field::make()->label('New list name')->props(['placeholder' => 'New list name'])];
     }
 }

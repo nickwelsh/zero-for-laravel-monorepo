@@ -22,6 +22,12 @@
         },
         {
             "language": "typescript",
+            "name": "formbraid",
+            "tsconfig": "../../tsconfig.json",
+            "entryPoints": ["../../packages/client/src/formbraid.ts"]
+        },
+        {
+            "language": "typescript",
             "name": "inertia",
             "tsconfig": "../../tsconfig.json",
             "entryPoints": ["../../packages/client/src/react/inertia.tsx"]

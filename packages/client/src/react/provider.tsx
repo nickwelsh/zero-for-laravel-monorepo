@@ -1,6 +1,15 @@
-import { createContext, useCallback, useMemo, useState, type ContextType, type ReactNode } from 'react';
-import { ZeroProvider as NativeProvider } from '@rocicorp/zero/react';
-import type { AnyMutatorRegistry, Schema, ZeroOptions } from '@rocicorp/zero';
+import {
+    createContext,
+    useCallback,
+    useContext,
+    useLayoutEffect,
+    useMemo,
+    useState,
+    type ContextType,
+    type ReactNode,
+} from 'react';
+import { ZeroContext, ZeroProvider as NativeProvider } from '@rocicorp/zero/react';
+import type { AnyMutatorRegistry, Schema, Zero, ZeroOptions } from '@rocicorp/zero';
 import type { ClientContext, ContextContract } from '../contract';
 import { validateContext } from '../validation';
 import { ControllerMutations } from './controller-mutation';
@@ -27,6 +36,17 @@ export function createZeroProvider<C extends ClientContext = ClientContext>(
     controllers: ContextType<typeof ControllerMutations> = { actions: {}, preparation: {} },
     contextContract?: ContextContract,
 ) {
+    const clients = new Set<Zero<Schema, undefined, C>>();
+    function Client({ children }: { children: ReactNode }) {
+        const zero = useContext(ZeroContext) as Zero<Schema, undefined, C>;
+        useLayoutEffect(() => {
+            clients.add(zero);
+            return () => {
+                clients.delete(zero);
+            };
+        }, [zero]);
+        return children;
+    }
     function Session({ userID, context, auth, children }: ProviderProps<C>) {
         const [ready, setReady] = useState(false);
         const initialized = useCallback(() => setReady(true), []);
@@ -43,12 +63,12 @@ export function createZeroProvider<C extends ClientContext = ClientContext>(
                     context={context}
                     storageKey={JSON.stringify([options.storageKey ?? '', context])}
                 >
-                    {children}
+                    <Client>{children}</Client>
                 </NativeProvider>
             </>
         );
     }
-    return function ZeroProvider({ userID, context, auth, children }: ProviderProps<C>) {
+    function ZeroProvider({ userID, context, auth, children }: ProviderProps<C>) {
         validateContext(context, contextContract);
         // oxlint-disable-next-line unicorn/no-array-sort -- The entries array is freshly owned by this function.
         const contextKey = JSON.stringify(Object.entries(context).sort(([a], [b]) => a.localeCompare(b)));
@@ -70,5 +90,12 @@ export function createZeroProvider<C extends ClientContext = ClientContext>(
                 </Session>
             </ControllerMutations.Provider>
         );
-    };
+    }
+    return Object.assign(ZeroProvider, {
+        getClient() {
+            if (clients.size === 0) throw new Error('Zero is still initializing.');
+            if (clients.size !== 1) throw new Error('A generated form requires one active Zero session per binding.');
+            return clients.values().next().value!;
+        },
+    });
 }

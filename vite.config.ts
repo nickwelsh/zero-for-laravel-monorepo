@@ -23,6 +23,7 @@ export default defineConfig({
             '**/resources/js/zero/generated.mutations.ts',
             '**/resources/js/zero/App/**',
             '**/resources/js/zero/generated.files.json',
+            '**/resources/js/formbraid/zero/**',
             'tests/interop/controller-api/**',
             '**/resources/js/actions/**',
             '**/resources/js/routes/**',
@@ -74,6 +75,7 @@ export default defineConfig({
             '**/resources/js/zero/generated.mutations.ts',
             '**/resources/js/zero/App/**',
             'tests/interop/controller-api/**',
+            '**/resources/js/formbraid/zero/**',
             '**/resources/js/actions/**',
             '**/resources/js/routes/**',
             '**/resources/js/wayfinder/**',
@@ -158,6 +160,9 @@ export default defineConfig({
     },
     resolve: {
         alias: {
+            '@nickwelsh/zero-for-laravel/formbraid': fileURLToPath(
+                new URL('./packages/client/src/formbraid.ts', import.meta.url),
+            ),
             '@nickwelsh/zero-for-laravel/react': fileURLToPath(
                 new URL('./packages/client/src/react/index.ts', import.meta.url),
             ),

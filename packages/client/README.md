@@ -94,5 +94,29 @@ Custom optimism is passed to the generated binding factory; disabled optimism is
 an explicit no-op client recipe using the same native protocol. Unsupported code
 in generated mode fails generation rather than silently disabling optimism.
 
+## Formbraid forms
+
+React 19 apps using Formbraid **0.2** consume generated descriptors directly:
+
+```tsx
+import { store } from '@/formbraid/zero/App/Http/Controllers/TodoListController';
+import { Form } from '@/formbraid';
+
+return <Form form={store} />;
+```
+
+Install `formbraid/laravel`, `@formbraid/core`, and `@formbraid/react` at `^0.2.0`.
+Register a build-only Formbraid integration running `php artisan zero:formbraid`.
+Actions with route parameters generate factories: `<Form form={update({ list: list.id })} />`.
+Formbraid owns drafts, rendering, and validation; the generated callback waits for
+authoritative native Zero acceptance and maps errors and typed results back to it.
+No Zero-specific form hook or React wrapper is required. Formbraid's own `useForm`
+remains optional for programmatic reset or other instance access.
+Cancellation stops observation, not a durable write; committed result-decode
+failures must not retry. The optional `/formbraid` export is generator tooling:
+`createControllerForm` constructs descriptors without hooks, React, or runtime
+Formbraid/Effect imports. Ordinary Zero applications need none of those form dependencies.
+See the [form guide](../../apps/docs/content/docs/0.x/docs/mutations.mdx#formbraid-02).
+
 See the [repository guide](../../README.md), [query design](../../docs/QUERY_DESIGN.md),
 [mutation design](../../docs/MUTATION_DESIGN.md), and [running example](../../examples/todos/README.md).

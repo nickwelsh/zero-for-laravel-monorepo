@@ -15,7 +15,8 @@ const native = vi.hoisted(() => ({
     query: vi.fn(),
     provider: vi.fn(),
 }));
-vi.mock('@rocicorp/zero/react', () => ({
+vi.mock('@rocicorp/zero/react', async () => ({
+    ZeroContext: (await import('react')).createContext(native.zero),
     useQuery: (request: unknown) => {
         if (request) native.query(request);
         return [native.raw, native.details];

@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "493fb8cecbfd80e44cbc3410af5f2da9",
+    "content-hash": "ba2a2561eae8e4b1ea871d27e13541ff",
     "packages": [
         {
             "name": "bacon/bacon-qr-code",
@@ -728,6 +728,76 @@
                 }
             ],
             "time": "2025-03-06T22:45:56+00:00"
+        },
+        {
+            "name": "formbraid/laravel",
+            "version": "v0.2.0",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/Formbraid/laravel.git",
+                "reference": "23ee30810a1ebb9f2ade76070aa5714c11cf1ea5"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://api.github.com/repos/Formbraid/laravel/zipball/23ee30810a1ebb9f2ade76070aa5714c11cf1ea5",
+                "reference": "23ee30810a1ebb9f2ade76070aa5714c11cf1ea5",
+                "shasum": ""
+            },
+            "require": {
+                "illuminate/console": "^12.0 || ^13.0",
+                "illuminate/filesystem": "^12.0 || ^13.0",
+                "illuminate/http": "^12.0 || ^13.0",
+                "illuminate/routing": "^12.0 || ^13.0",
+                "illuminate/support": "^12.0 || ^13.0",
+                "illuminate/validation": "^12.0 || ^13.0",
+                "php": "^8.3"
+            },
+            "require-dev": {
+                "larastan/larastan": "^3.0",
+                "laravel/pint": "^1.0",
+                "orchestra/testbench": "^10.0 || ^11.0",
+                "phpstan/phpstan": "^2.1",
+                "phpunit/phpunit": "^12.0"
+            },
+            "type": "library",
+            "extra": {
+                "laravel": {
+                    "providers": [
+                        "Formbraid\\Laravel\\FormbraidServiceProvider"
+                    ]
+                }
+            },
+            "autoload": {
+                "psr-4": {
+                    "Formbraid\\Laravel\\": "src/"
+                }
+            },
+            "autoload-dev": {
+                "psr-4": {
+                    "Formbraid\\Laravel\\Tests\\": "tests/"
+                }
+            },
+            "scripts": {
+                "test": [
+                    "phpunit"
+                ],
+                "check": [
+                    "phpstan analyse --memory-limit=1G"
+                ],
+                "format": [
+                    "pint --test"
+                ]
+            },
+            "license": [
+                "MIT"
+            ],
+            "description": "Generate portable Formbraid forms from Laravel FormRequests.",
+            "homepage": "https://docs.nickwelsh.me/formbraid/",
+            "support": {
+                "issues": "https://github.com/nickwelsh/formbraid/issues",
+                "source": "https://github.com/formbraid/laravel"
+            },
+            "time": "2026-11-04T01:18:12+00:00"
         },
         {
             "name": "fruitcake/php-cors",
@@ -3163,11 +3233,11 @@
         },
         {
             "name": "nickwelsh/zero-for-laravel",
-            "version": "dev-feat/policy-visibility",
+            "version": "dev-main",
             "dist": {
                 "type": "path",
                 "url": "../../packages/laravel",
-                "reference": "916d358446d87d7757f2d5dad265cfbc85d29a2c"
+                "reference": "13ee9e3cdd833903c4d0e43dead9dde1eb7f34a5"
             },
             "require": {
                 "casbin/casbin": "^4.6",
@@ -3182,6 +3252,7 @@
             },
             "require-dev": {
                 "driftingly/rector-laravel": "^2.3",
+                "formbraid/laravel": "^0.2.0",
                 "inertiajs/inertia-laravel": "^3.0",
                 "larastan/larastan": "^3.9",
                 "laravel/pint": "^1.0",
@@ -3195,6 +3266,7 @@
                 "typesense/typesense-php": "^6.0"
             },
             "suggest": {
+                "formbraid/laravel": "Generate Formbraid descriptors for native Zero controller mutations (^0.2.0).",
                 "laravel/scout": "Synchronize optional Typesense search indexes with Eloquent models.",
                 "typesense/typesense-php": "Use the optional authenticated InstantSearch transport."
             },

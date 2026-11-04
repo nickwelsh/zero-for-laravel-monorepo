@@ -119,6 +119,89 @@ rejections roll back business writes and persist an error outcome. Duplicate
 delivery does not rerun the action; a lost callback response can recover through
 native persisted results. These are not durable JavaScript promises across reloads.
 
+## Formbraid 0.2
+
+Use Formbraid's normal descriptor API in a React 19 app:
+
+```tsx
+import { store, update } from '@/formbraid/zero/App/Http/Controllers/TodoListController';
+import { Form } from '@/formbraid';
+
+<Form form={store} />;
+<Form form={update({ list: list.id })} defaultValues={{ name: list.name }} />;
+```
+
+Install `formbraid/laravel`, `@formbraid/core`, and `@formbraid/react` at `^0.2.0`,
+and `effect` at `4.0.2`. Run `php artisan formbraid:init` to scaffold the
+application-owned registry and components. Register a build-only Zero producer
+instead of the scaffold's HTTP Laravel producer:
+
+```ts title="resources/js/formbraid/zero.ts"
+import type { Integration } from '@formbraid/core/vite';
+
+export default {
+    name: 'zero',
+    registry: new URL('./index.ts', import.meta.url),
+    metadata: new URL('./_metadata.json', import.meta.url),
+    command: ['php', 'artisan', 'zero:formbraid'],
+    watch: ['app/**/*.php', 'routes/**/*.php', 'config/zero.php', 'config/formbraid.php'],
+    outputs: ['resources/js/formbraid/zero/**', 'resources/js/zero/**', 'app/Formbraid/FormField.php'],
+} satisfies Integration;
+```
+
+```ts title="vite.config.ts"
+import { vitePlugin as formbraid } from '@formbraid/core/vite';
+import zeroForms from './resources/js/formbraid/zero';
+
+// Alongside the application's other Vite plugins:
+formbraid({ integrations: [zeroForms] });
+```
+
+Vite inspects the component registry and writes metadata before running Artisan.
+`zero:formbraid` reuses Formbraid's request extraction, field/group generation,
+component enum, and hash-owned publication. It refreshes native Zero contracts and
+the React provider, then emits definitions and callback-backed controller forms
+under `zero.formbraid_output` (default `resources/js/formbraid/zero`). Only
+`#[ZeroMutation]` actions with one FormRequest produce forms. Parameterless actions
+export descriptors; actions with model/scalar route arguments export factories.
+There is no Zero-specific form hook or replacement `Form` component.
+
+Zero actions are native-only: do not use Formbraid's Fetch/Inertia controller
+descriptors for them. Ordinary HTTP forms may still use the Laravel producer in a
+separate output directory.
+
+Formbraid owns the editable draft, validation, errors, defaults, and submission
+lifetime. Zero owns preparation, optimistic replay, and the durable write. The
+generated callback resolves the application's connection only at submission,
+reuses its registered bindings/preparation, and retains the authoritative result type.
+
+The default runtime comes from `zero/generated.react.ts`. For application-owned
+bindings, set `zero.formbraid_runtime` to their project-relative TypeScript module;
+export `controllerRuntime` alongside `ZeroProvider` from the same
+`createZeroBindings(projections, preparation)` result. Static descriptors require
+one active Zero session per binding; ambiguous clients are rejected rather than
+selecting another user's connection. Separate applications can use separate binding instances.
+
+Initialize defaults through `<Form defaultValues={values} />`. Formbraid's own
+`useForm(store, options)` remains available when programmatic reset or instance
+access is useful. Use a key or explicit reset when switching records; rerenders
+must not reset edits.
+
+Success includes the decoded authoritative result as `result.value` in Formbraid's
+`onResult`. Local optimistic completion alone does not settle the form. Laravel
+field/root errors and generated input-codec errors become `invalid`; other errors
+become `failure`. A committed result-decoding failure remains a
+`MutationResultError` with `committed: true`: show the warning without retrying the
+write automatically. Cancellation or unmount stops observation and suppresses
+late outcomes, but cannot undo an enqueued mutation. An already-aborted submission
+does not enqueue a write. This transport does not report upload progress or add a
+file-upload path to Zero's JSON mutation protocol.
+
+The todos example consumes generated create-list and add-todo descriptors with
+application-owned components. Optional producer utilities live in
+`@nickwelsh/zero-for-laravel/formbraid`; application components need not import them.
+Zero's ordinary entry points do not load Formbraid or Effect.
+
 ## Creation defaults
 
 Use `withAttributes` on a Zero query or in a Zero scope to supply creation

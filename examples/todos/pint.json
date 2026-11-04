@@ -1,4 +1,4 @@
 {
     "preset": "laravel",
-    "notPath": ["bootstrap/zero-queries.php", "bootstrap/zero-mutations.php"]
+    "notPath": ["bootstrap/zero-queries.php", "bootstrap/zero-mutations.php", "app/Formbraid/FormField.php"]
 }

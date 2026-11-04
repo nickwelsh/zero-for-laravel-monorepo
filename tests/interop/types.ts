@@ -6,6 +6,10 @@ import type {
     InferMutationInput,
 } from '@nickwelsh/zero-for-laravel';
 import { useControllerMutation } from '@nickwelsh/zero-for-laravel/react';
+import { createControllerForm, type ControllerFormRuntime } from '@nickwelsh/zero-for-laravel/formbraid';
+import { defineForm } from '@formbraid/core';
+import type { Schema } from '@rocicorp/zero';
+import type { ClientContext } from '@nickwelsh/zero-for-laravel';
 import type { choices } from './controller-api/ZeroForLaravel/Tests/Fixtures/QueryController';
 import { index, show, dated } from './controller-api/ZeroForLaravel/Tests/Fixtures/QueryController';
 import { store } from './controller-api/ZeroForLaravel/Tests/Fixtures/ControllerMutationController';
@@ -34,6 +38,27 @@ function useContracts() {
 function immutableRows(rows: InferLiveQueryResult<typeof index.tasks>) {
     // @ts-expect-error generated rows are readonly
     rows[0]!.title = 'Changed';
+}
+
+function formContract(runtime: () => ControllerFormRuntime<Schema, ClientContext>) {
+    const definition = defineForm<{ title: string }>()({
+        id: 'Task',
+        defaultValues: { title: '' },
+        fields: {},
+        groups: {},
+    });
+    const form = createControllerForm(store, definition, runtime);
+    const wrong = defineForm<{ title: number }>()({
+        id: 'Wrong',
+        defaultValues: { title: 42 },
+        fields: {},
+        groups: {},
+    });
+    // @ts-expect-error a form must decode into the controller's input contract
+    createControllerForm(store, wrong, runtime);
+    // @ts-expect-error the descriptor retains the controller's required input fields
+    form.submission.submit({}, { signal: new AbortController().signal, onProgress: () => {} });
+    return form;
 }
 
 function editableInputs(result: QueryData<typeof choices.tasks>) {

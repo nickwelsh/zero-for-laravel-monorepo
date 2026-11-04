@@ -1,16 +1,12 @@
-import { useControllerMutation } from '@nickwelsh/zero-for-laravel/react';
 import { useState } from 'react';
-import InputError from '@/components/input-error';
+import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { store } from '@/zero/App/Http/Controllers/TodoListController';
+import { Form } from '@/formbraid';
+import { store } from '@/formbraid/zero/App/Http/Controllers/TodoListController';
 import type { Inertia } from '@/wayfinder/types';
 import { ListPanel } from './list-panel';
-import { commitMutation } from './mutations';
 
 export function TodosWorkspace({ userId, lists }: { userId: number; lists: Inertia.Pages.Dashboard['lists'] }) {
-    const create = useControllerMutation(store);
-    const [name, setName] = useState('');
     const [selectedId, setSelectedId] = useState<string | undefined>();
     const selected = lists.data.find((list) => list.id === selectedId) ?? lists.data[0];
     const online = lists.connection.name === 'connected';
@@ -60,32 +56,14 @@ export function TodosWorkspace({ userId, lists }: { userId: number; lists: Inert
             <div className="grid items-start gap-5 md:grid-cols-[16rem_minmax(0,1fr)]">
                 <aside aria-label="Todo lists" className="space-y-4 rounded-xl border bg-card p-4">
                     <h2 className="font-semibold">Your lists</h2>
-                    <form
+                    <Form
+                        form={store}
                         className="space-y-2"
-                        onSubmit={(event) => {
-                            event.preventDefault();
-                            void commitMutation(
-                                () => create({ name }),
-                                ({ id }) => {
-                                    setName('');
-                                    setSelectedId(id);
-                                },
-                            );
+                        onResult={(result) => {
+                            if (result.status === 'success') setSelectedId(result.value.id);
+                            if (result.status === 'failure') toast.error(result.error.message);
                         }}
-                    >
-                        <Input
-                            aria-label="New list name"
-                            placeholder="New list name"
-                            value={name}
-                            onChange={(event) => setName(event.target.value)}
-                            required
-                            maxLength={100}
-                        />
-                        <Button className="w-full" disabled={create.state.status === 'pending'}>
-                            {create.state.status === 'pending' ? 'Creating…' : 'Create list'}
-                        </Button>
-                        <InputError message={create.state.fields.name?.join(' ')} />
-                    </form>
+                    />
                     {lists.status === 'loading' && <p className="text-sm text-muted-foreground">Loading lists…</p>}
                     <nav aria-label="Choose a list" className="space-y-1">
                         {lists.data.map((list) => (
