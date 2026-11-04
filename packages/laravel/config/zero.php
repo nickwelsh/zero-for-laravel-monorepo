@@ -8,6 +8,8 @@ return [
     // Empty discovers models using HasZeroQueries under app/Models.
     'models' => [],
     'discovery' => [],
+    // Explicit table aliases; no table definitions are discovered automatically.
+    'tables' => [],
     // Separate publication opt-in from visibility. Missing policy bindings never mean public reads.
     'public_models' => [],
     'output' => resource_path('js/zero/generated.ts'),
