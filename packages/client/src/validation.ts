@@ -16,6 +16,11 @@ export function fail(field: string, message: string): never {
     throw new InputError({ [field]: message });
 }
 
+/** Literal-text ILIKE containment, paired with the PHP option expression. */
+export function optionContains(value: string): string {
+    return `%${value.replaceAll(/[\\%_]/g, '\\$&')}%`;
+}
+
 export function object(value: unknown, path: string): Record<string, unknown> {
     if (
         value === null ||

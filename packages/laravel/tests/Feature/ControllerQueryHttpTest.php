@@ -12,17 +12,69 @@ use Illuminate\Support\Facades\Route;
 use LogicException;
 use Symfony\Component\HttpFoundation\Response;
 use ZeroForLaravel\Generation\ControllerQueryCompiler;
+use ZeroForLaravel\Generation\ControllerQueryGenerator;
+use ZeroForLaravel\Generation\Mutations\ControllerMutationCompiler;
+use ZeroForLaravel\Generation\OptionQueryCompiler;
 use ZeroForLaravel\Generation\RequestContract;
 use ZeroForLaravel\Http\ControllerRouteDispatcher;
 use ZeroForLaravel\Query\RegisteredQueries;
 use ZeroForLaravel\Query\RegisteredQuery;
 use ZeroForLaravel\Query\ZeroQuery;
+use ZeroForLaravel\Tests\Fixtures\ControllerMutationController;
 use ZeroForLaravel\Tests\Fixtures\DateQueryRequest;
+use ZeroForLaravel\Tests\Fixtures\OwnerUser;
 use ZeroForLaravel\Tests\Fixtures\QueryController;
 use ZeroForLaravel\Tests\Fixtures\Task;
 use ZeroForLaravel\Tests\ProtectedHttpTestCase as HttpTestCase;
 
 uses(HttpTestCase::class);
+
+test('option reads validate their own arguments and reauthorize context without executing mutation hooks', function (): void {
+    /** @var HttpTestCase $this */
+    Route::post('/option-write/{task}', [ControllerMutationController::class, 'options']);
+    $mutation = resolve(ControllerMutationCompiler::class)->compile(ControllerMutationController::class, 'options');
+    $definitions = resolve(OptionQueryCompiler::class)->compile($mutation);
+    $registrations = eval(substr(resolve(ControllerQueryGenerator::class)->php($definitions), 5));
+    if (! is_array($registrations)) {
+        throw new LogicException('Expected generated registrations.');
+    }
+
+    foreach ($registrations as $name => $registration) {
+        if (! is_string($name) || ! $registration instanceof \ZeroForLaravel\Query\RegisteredOptionQuery) {
+            throw new LogicException('Expected an option registration.');
+        }
+    }
+
+    app()->instance(RegisteredQueries::class, new RegisteredQueries($registrations));
+    // Loading another page's relationships must not stale a generated option registration.
+    resolve(ControllerQueryCompiler::class)->compile(QueryController::class, 'relationships');
+    $parent = Task::create(['title' => 'Parent', 'user_id' => 'alice']);
+    $foreign = Task::create(['title' => 'Private', 'user_id' => 'bob']);
+    $this->actingAs(OwnerUser::findOrFail('alice'))->withHeader('X-Api-Key', 'private-test-secret');
+    $args = ['i0' => $parent->id, 'i1' => false, 'i2' => '50%_\\'];
+    $variants = [$args, [...$args, 'i0' => $foreign->id], [...$args, 'i1' => null], [...$args, 'i2' => str_repeat('x', 257)], [...$args, '__window' => 1000], [...$args, 'i2' => '']];
+    $batch = array_map(fn (array $input, int $index): array => ['id' => (string) $index, 'name' => $definitions[0]->name(), 'args' => [$input]], $variants, array_keys($variants));
+    $response = $this->postJson('/zero/query', ['transform', $batch])->assertOk()
+        ->assertJsonMissingPath('queries.0.error')->assertJsonPath('queries.0.ast.limit', 20)
+        ->assertJsonPath('queries.0.ast.orderBy', [['title', 'asc'], ['id', 'asc']])
+        ->assertJsonPath('queries.1.details.status', 403)->assertJsonPath('queries.2.error', 'parse')
+        ->assertJsonPath('queries.3.error', 'parse')->assertJsonPath('queries.4.error', 'parse')
+        ->assertJsonMissingPath('queries.5.error');
+    $ast = json_encode($response->json('queries.0.ast'), JSON_THROW_ON_ERROR);
+    expect($ast)->toContain(json_encode('%50\\%\\_\\\\%', JSON_THROW_ON_ERROR), 'permission_index', 'user:alice');
+    $resolve = ['id' => 'selected', 'name' => $definitions[1]->name(), 'args' => [['i0' => $parent->id, 'i1' => false, 'i2' => $foreign->id]]];
+    $resolved = $this->postJson('/zero/query', ['transform', [$resolve]])->assertOk()
+        ->assertJsonMissingPath('queries.0.error')->assertJsonPath('queries.0.ast.limit', 1);
+    expect(json_encode($resolved->json('queries.0.ast'), JSON_THROW_ON_ERROR))->not->toContain('ILIKE');
+    $registered = $registrations[$definitions[0]->name()];
+    $stale = new \ZeroForLaravel\Query\RegisteredOptionQuery($registered->action, $registered->parameters,
+        static fn (): ZeroQuery => Task::zeroQuery(), $registered->source, 'obsolete');
+    expect(fn () => $stale->assertCurrent())->toThrow(LogicException::class, 'Stale Zero option registration');
+    expect(Task::count())->toBe(2);
+    $this->actingAs(OwnerUser::findOrFail('bob'))
+        ->postJson('/zero/query', ['transform', [$batch[0]]])->assertOk()->assertJsonPath('queries.0.details.status', 403);
+    expect(resolve(RegisteredQueries::class)->forAction($mutation->action))->toBe([]);
+});
 
 final class QueryAccessMiddleware
 {

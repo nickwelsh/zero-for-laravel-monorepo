@@ -64,6 +64,7 @@ final class QueryExpression
             'guarded' => $typescript ? $child(0) : $child(0).'->guardedBy(request()->user(), '.$literal.')',
             'context' => $typescript ? 'ctx['.$literal.']' : 'new \\ZeroForLaravel\\Context\\ContextReference('.$literal.')',
             'argument', 'enum', 'validated' => $typescript ? 'args['.$literal.']' : '$args['.$literal.']',
+            'optionContains' => ($typescript ? 'optionContains' : \ZeroForLaravel\Formbraid\OptionPattern::class.'::contains').'('.$child(0).')',
             'field' => $child(0).'['.$literal.']',
             'dateOperand' => $typescript
                 ? ($this->value === null ? 'new Date('.$child(0).').getTime()' : 'encodeDate(new Date('.$child(0).'), '.$literal.')')

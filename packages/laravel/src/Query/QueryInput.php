@@ -46,6 +46,7 @@ final class QueryInput
         $valid = str_starts_with($type, 'enum:') ? in_array($value, self::enumValues($type), true) : match (self::scalarType($type)) {
             'string' => is_string($value),
             'bool' => is_bool($value),
+            'float' => (is_int($value) || is_float($value)) && is_finite((float) $value),
             'int' => is_int($value) && abs($value) <= 9007199254740991,
             default => false,
         };

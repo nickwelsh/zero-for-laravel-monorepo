@@ -15,6 +15,7 @@
             "@nickwelsh/zero-for-laravel": ["./packages/client/src/index.ts"],
             "@nickwelsh/zero-for-laravel/inertia": ["./packages/client/src/react/inertia.tsx"],
             "@nickwelsh/zero-for-laravel/formbraid": ["./packages/client/src/formbraid.ts"],
+            "@nickwelsh/zero-for-laravel/react/formbraid": ["./packages/client/src/react/formbraid.tsx"],
             "@nickwelsh/zero-for-laravel/react": ["./packages/client/src/react/index.ts"]
         }
     },

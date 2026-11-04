@@ -119,7 +119,7 @@ rejections roll back business writes and persist an error outcome. Duplicate
 delivery does not rerun the action; a lost callback response can recover through
 native persisted results. These are not durable JavaScript promises across reloads.
 
-## Formbraid 0.2
+## Formbraid 0.3
 
 Use Formbraid's normal descriptor API in a React 19 app:
 
@@ -131,7 +131,7 @@ import { Form } from '@/formbraid';
 <Form form={update({ list: list.id })} defaultValues={{ name: list.name }} />;
 ```
 
-Install `formbraid/laravel`, `@formbraid/core`, and `@formbraid/react` at `^0.2.0`,
+Install `formbraid/laravel`, `@formbraid/core`, and `@formbraid/react` at `^0.3.0`,
 and `effect` at `4.0.2`. Run `php artisan formbraid:init` to scaffold the
 application-owned registry and components. Register a build-only Zero producer
 instead of the scaffold's HTTP Laravel producer:
@@ -201,6 +201,87 @@ The todos example consumes generated create-list and add-todo descriptors with
 application-owned components. Optional producer utilities live in
 `@nickwelsh/zero-for-laravel/formbraid`; application components need not import them.
 Zero's ordinary entry points do not load Formbraid or Effect.
+
+### Query-backed options
+
+Declare an option query directly in the mutation FormRequest's `fields()` map.
+References supply their own inputs; there is no callback signature or separate input map:
+
+```php
+use Formbraid\Laravel\Field;
+use Formbraid\Laravel\OptionInput;
+use ZeroForLaravel\Formbraid\ZeroOptions;
+
+public function fields(): array
+{
+    return [
+        'other_party_id' => Field::make('ComboboxField')->options(ZeroOptions::query(
+            Party::zeroQuery()
+                ->where('organization_id', OptionInput::field('organization_id'))
+                ->where('id', '!=', OptionInput::context('party'))
+                ->where('name', 'ILIKE', ZeroOptions::contains(OptionInput::value()))
+                ->orderBy('name', 'asc')->orderBy('id', 'asc')->limit(20),
+            value: 'id', label: 'name',
+            resolve: Party::zeroQuery()
+                ->where('organization_id', OptionInput::field('organization_id'))
+                ->where('id', '!=', OptionInput::context('party'))
+                ->where('id', OptionInput::field('other_party_id'))->one(),
+            authorize: ['party' => 'view'],
+        )),
+    ];
+}
+```
+
+`value()` is the control-local value passed to `useFieldOptions({ value })`, such
+as typed filter text. It is **not** the submitted field ID. `field(path)` reads a
+current form draft value. `context(key)` reads a named model/scalar argument of the
+mutation action, captured by its generated form factory, for example
+`addRelation({ party: party.id })`. Pass canonical primary IDs for model context,
+not route slugs or custom route-binding values. Context is untrusted input, never
+an authorization claim. Model context requires an explicit portable read-policy
+ability in `authorize`; that policy is checked on every transform and remains in
+the live permission guard. Protected root rows automatically use the authenticated
+actor's visibility; related protected paths still require explicit visibility.
+
+`ZeroOptions::contains()` makes a literal substring pattern: `%`, `_`, and `\` in
+the typed value are escaped. Without it, operands keep the query operator's normal
+meaning. Listing requires an explicit literal limit from 1 through 100 and ordering
+that includes the model's primary key. The optional `resolve` query must end in
+`one()` and must not use `value()`. Give it the same eligibility/dependency filters,
+but compare the ID with the selected draft field. It resolves labels independently
+of the current search or result window, even while the picker is closed. Without
+a resolver, an existing selection is reported as unavailable. No dependency change
+silently clears the selected ID; that policy belongs to the application.
+
+Generation emits paired registered queries plus stable Formbraid source bindings.
+`zero:formbraid` attaches them automatically with `withOptionSources`; applications
+do not write query-specific React components. Put the generated `ZeroProvider`
+(and any access boundary) **above** the Formbraid form, since adapters mount at the
+form level, not inside the picker.
+
+A reusable registry control consumes only Formbraid APIs:
+
+```tsx
+const field = useFieldContext<string | null>();
+const [filter, setFilter] = useState('');
+const { listing, selection } = useFieldOptions({ value: filter, enabled: open });
+
+// Render listing.items in your combobox; render selection.item when complete.
+// On selection, store the ID, never the filter or label:
+field.setValue(String(item.value));
+```
+
+The Zero adapter uses ordinary `useData` subscriptions with no additional cache.
+Missing or invalid draft inputs produce idle state; empty strings, zero, and false
+are not treated as missing. Pending/partial or failed data is not published as
+selectable options. Option reads validate only their compiled scalar input
+contracts; they do not execute the mutation request's hooks, full validation, or
+write-route middleware. Enforce read permissions through visibility and explicit
+read guards, and keep authoritative relationship validation in the mutation.
+Only supported scalar references and concrete field paths are accepted; wildcard
+repeater references, pagination/load-more, and multi-select resolution are not
+part of this integration. The optional React producer helper is exported from
+`@nickwelsh/zero-for-laravel/react/formbraid`.
 
 ## Creation defaults
 

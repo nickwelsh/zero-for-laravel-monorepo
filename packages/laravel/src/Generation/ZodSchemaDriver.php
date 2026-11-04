@@ -14,19 +14,19 @@ final readonly class ZodSchemaDriver implements SchemaDriver
         return "import {z} from 'zod';";
     }
 
-    public function object(array $parameters, ?array $cursor = null, bool $public = false): string
+    public function object(array $parameters, ?array $cursor = null, bool $public = false, array $contracts = [], bool $routed = true): string
     {
-        $fields = [
+        $fields = $routed ? [
             '__route: z.string().optional()',
             '__routeArgs: z.record(z.string(), z.union([z.string(), z.number().int()])).optional()',
             '__window: z.number().int().min(1).max(2147483647).optional()',
-        ];
+        ] : [];
         if (! $public) {
             $fields[] = '__generation: z.uuid().optional()';
         }
 
         foreach ($parameters as $name => $type) {
-            $fields[] = json_encode($name, JSON_THROW_ON_ERROR).': '.$this->schema($type, $public);
+            $fields[] = json_encode($name, JSON_THROW_ON_ERROR).': '.(isset($contracts[$name]) ? (new Mutations\ZodMutationSchemaDriver)->value($contracts[$name]) : $this->schema($type, $public));
         }
 
         if ($cursor !== null) {

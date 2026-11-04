@@ -59,6 +59,17 @@ final readonly class ControllerDiscovery
         return array_values($programs);
     }
 
+    /** @return list<ControllerQuery> */
+    public function optionQueries(): array
+    {
+        $queries = [];
+        foreach ($this->mutations() as $mutation) {
+            array_push($queries, ...resolve(OptionQueryCompiler::class)->compile($mutation));
+        }
+
+        return $queries;
+    }
+
     /** @param Closure(Route): void $callback */
     private function walk(Closure $callback): void
     {

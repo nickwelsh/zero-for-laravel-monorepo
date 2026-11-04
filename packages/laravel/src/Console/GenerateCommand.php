@@ -30,7 +30,7 @@ final class GenerateCommand extends Command
             return self::FAILURE;
         }
 
-        $definitions = array_values(array_column($controllers->queries(), 'query'));
+        $definitions = [...array_values(array_column($controllers->queries(), 'query')), ...$controllers->optionQueries()];
         $mutations = $controllers->mutations();
         $source = $generator->generate($registry);
         $mutationGenerator = resolve(ControllerMutationGenerator::class);

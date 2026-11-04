@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "ba2a2561eae8e4b1ea871d27e13541ff",
+    "content-hash": "2eab519ed0fe34ff2783fd61364622a9",
     "packages": [
         {
             "name": "bacon/bacon-qr-code",
@@ -731,16 +731,16 @@
         },
         {
             "name": "formbraid/laravel",
-            "version": "v0.2.0",
+            "version": "v0.3.0",
             "source": {
                 "type": "git",
                 "url": "https://github.com/Formbraid/laravel.git",
-                "reference": "23ee30810a1ebb9f2ade76070aa5714c11cf1ea5"
+                "reference": "4446f3916fe91f01ffaa89fd9ca9d9063055e194"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/Formbraid/laravel/zipball/23ee30810a1ebb9f2ade76070aa5714c11cf1ea5",
-                "reference": "23ee30810a1ebb9f2ade76070aa5714c11cf1ea5",
+                "url": "https://api.github.com/repos/Formbraid/laravel/zipball/4446f3916fe91f01ffaa89fd9ca9d9063055e194",
+                "reference": "4446f3916fe91f01ffaa89fd9ca9d9063055e194",
                 "shasum": ""
             },
             "require": {
@@ -797,7 +797,7 @@
                 "issues": "https://github.com/nickwelsh/formbraid/issues",
                 "source": "https://github.com/formbraid/laravel"
             },
-            "time": "2026-11-04T01:18:12+00:00"
+            "time": "2026-11-04T16:59:36+00:00"
         },
         {
             "name": "fruitcake/php-cors",
@@ -3237,7 +3237,7 @@
             "dist": {
                 "type": "path",
                 "url": "../../packages/laravel",
-                "reference": "13ee9e3cdd833903c4d0e43dead9dde1eb7f34a5"
+                "reference": "efb77e6f252474bf047a98502b2b9eaf06d8aaa9"
             },
             "require": {
                 "casbin/casbin": "^4.6",
@@ -3252,7 +3252,7 @@
             },
             "require-dev": {
                 "driftingly/rector-laravel": "^2.3",
-                "formbraid/laravel": "^0.2.0",
+                "formbraid/laravel": "^0.3.0",
                 "inertiajs/inertia-laravel": "^3.0",
                 "larastan/larastan": "^3.9",
                 "laravel/pint": "^1.0",

@@ -5,13 +5,21 @@ declare(strict_types=1);
 namespace ZeroForLaravel\Generation;
 
 use Illuminate\Database\Eloquent\Model;
+use LogicException;
+use ZeroForLaravel\Generation\Mutations\ValueContract;
 
-/** A query extracted without invoking its HTTP controller. */
+/**
+ * A query extracted without invoking its HTTP controller.
+ *
+ * @phpstan-type OptionReference array{kind: string, path?: string, key?: string}
+ * @phpstan-type OptionMetadata array{request: string, field: string, id: string, operation: string, inputs: array<string, OptionReference>, contracts: array<string, array{kind: string, rules: list<string>}>, context: array<string, array{kind: string, type: string}>, authorize: array<string, string>, value: string, label: string}
+ */
 final readonly class ControllerQuery
 {
     /** @param array<string, string> $parameters
      * @param  array<string, string>  $ordinary
      * @param  list<array{parameter: string, class: class-string<Model>, ability: string, fingerprint: string}>  $guards
+     * @param  OptionMetadata|null  $optionSource
      */
     public function __construct(
         public string $action,
@@ -24,6 +32,7 @@ final readonly class ControllerQuery
         public string $schemaFingerprint,
         public array $ordinary = [],
         public array $guards = [],
+        public ?array $optionSource = null,
     ) {}
 
     public function name(): string
@@ -36,6 +45,18 @@ final readonly class ControllerQuery
     public function php(): string
     {
         return 'static fn (array $args): \\ZeroForLaravel\\Query\\ZeroQuery => '.$this->expression->emit(false);
+    }
+
+    /** @return array<string, ValueContract> */
+    public function optionContracts(): array
+    {
+        return array_map(static fn (array $contract): ValueContract => new ValueContract($contract['kind'], rules: $contract['rules']), $this->optionSource['contracts'] ?? []);
+    }
+
+    /** @return OptionMetadata */
+    public function options(): array
+    {
+        return $this->optionSource ?? throw new LogicException('Expected an option query.');
     }
 
     public function typescript(): string

@@ -19,7 +19,7 @@ export type {
     InferMutationInput,
     InferMutationResult,
 } from './controller-mutation';
-export { InputError, encodeDate, validateContext } from './validation';
+export { InputError, encodeDate, validateContext, optionContains } from './validation';
 export type {
     Column,
     ColumnValue,

@@ -8,10 +8,12 @@ controller-declared live queries and controller mutations. It consumes the local
 - Zero cache: <https://zero.todos.test> (local port 4858)
 - Owners create, rename, delete, and share lists with registered users.
 - Every reader can add, edit, complete, and delete todos.
-- Create-list and add-todo forms use Formbraid 0.2. Vite generates request
+- Create-list and add-todo forms use Formbraid 0.3. Vite generates request
   definitions and native Zero controller descriptors under `resources/js/formbraid/zero`.
   Create-list renders `<Form form={store} />`; add-todo uses Formbraid's optional
   `useForm` instance API to clear accepted drafts without erasing newer edits.
+  Its destination-list combobox searches a PHP-declared Zero option source and
+  resolves the selected label separately; only the selected list ID is submitted.
 - Private lists and todos are hidden from other users. User/auth tables are never
   published to Zero. Sharing uses a registered controller mutation with explicitly
   disabled optimism, preserving Laravel validation, binding, and policies.

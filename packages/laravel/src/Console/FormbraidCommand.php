@@ -15,6 +15,9 @@ use Illuminate\Foundation\Http\FormRequest;
 use RuntimeException;
 use Throwable;
 use ZeroForLaravel\Generation\ControllerDiscovery;
+use ZeroForLaravel\Generation\ControllerQuery;
+use ZeroForLaravel\Generation\OptionQueryCompiler;
+use ZeroForLaravel\Generation\SchemaDriver;
 
 /** Reuse Formbraid's definitions; only the controller's Zero submission callback differs. */
 final class FormbraidCommand extends Command
@@ -27,7 +30,7 @@ final class FormbraidCommand extends Command
     {
         try {
             if (! class_exists(ComponentMetadata::class)) {
-                throw new RuntimeException('Install formbraid/laravel ^0.2.0 before generating Zero forms.');
+                throw new RuntimeException('Install formbraid/laravel ^0.3.0 before generating Zero forms.');
             }
 
             $config = config()->array('formbraid');
@@ -75,8 +78,9 @@ final class FormbraidCommand extends Command
                 $request = $requestClass::createFrom(request(), new $requestClass);
                 $request->setContainer(app());
                 $extracted = $extractor->extract($request);
+                $options = resolve(OptionQueryCompiler::class)->compile($mutation);
                 $requestPath = $output.'/requests/'.FormEmitter::path($requestClass);
-                $files[$requestPath] = $emitter->emit($extracted['form']);
+                $files[$requestPath] = $emitter->emit($extracted['form'], array_values(array_unique(array_map(static fn (ControllerQuery $query): string => $query->options()['id'], $options))));
                 foreach ($extracted['diagnostics'] as $diagnostic) {
                     $this->warn($diagnostic);
                 }
@@ -93,6 +97,25 @@ final class FormbraidCommand extends Command
                 ];
                 $modules[$path][] = 'import {'.FormEmitter::name($requestClass).' as '.$definition.'} from '.$this->import($path, $requestPath).';';
                 $modules[$path][] = 'import {'.$method.' as '.$action.'} from '.$this->import($path, $root.'/'.$controllerPath).';';
+                if ($options !== []) {
+                    $modules[$path]['optionsImport'] = "import {withOptionSources} from '@formbraid/react';";
+                    $modules[$path]['adapterImport'] = "import {createZeroOptionSource} from '@nickwelsh/zero-for-laravel/react/formbraid';";
+                    $modules[$path]['queriesImport'] = 'import {bindings as _optionBindings, inputs as _optionInputs} from '.$this->import($path, $root.'/'.$base.'.queries.ts').';';
+                    $sources = [];
+                    foreach ($options as $query) {
+                        $sources[$query->options()['id']][$query->options()['operation']] = $query;
+                    }
+
+                    $entries = [];
+                    foreach ($sources as $id => $operations) {
+                        $list = $operations['list'];
+                        $metadata = $list->options();
+                        $entries[] = json_encode($id, JSON_THROW_ON_ERROR).': createZeroOptionSource({value: '.json_encode($metadata['value'], JSON_THROW_ON_ERROR).', label: '.json_encode($metadata['label'], JSON_THROW_ON_ERROR).', list: '.$this->operation($list).(isset($operations['resolve']) ? ', resolve: '.$this->operation($operations['resolve']) : '').'})';
+                    }
+
+                    $modules[$path][] = 'const _options_'.$method.' = {'.implode(', ', $entries).'};';
+                }
+
                 $parameters = [];
                 foreach ($mutation->parameters as $name => $parameter) {
                     if (in_array($parameter['kind'], ['model', 'scalar'], true)) {
@@ -101,6 +124,21 @@ final class FormbraidCommand extends Command
                 }
 
                 $expression = 'createControllerForm('.$action.', '.$definition.', controllerRuntime'.($parameters === [] ? '' : ', parameters').')';
+                if ($options !== []) {
+                    $context = [];
+                    foreach ($options as $query) {
+                        foreach ($query->options()['inputs'] as $reference) {
+                            if ($reference['kind'] === 'context') {
+                                $name = $reference['key'] ?? throw new RuntimeException('Missing option context key.');
+                                $key = json_encode($name, JSON_THROW_ON_ERROR);
+                                $context[$name] = $key.': parameters['.$key.']';
+                            }
+                        }
+                    }
+
+                    $expression = 'withOptionSources('.$expression.', _options_'.$method.', {'.implode(', ', $context).'})';
+                }
+
                 if ($parameters !== []) {
                     $expression = '(parameters: {'.implode('; ', $parameters).'}) => '.$expression;
                 }
@@ -126,6 +164,14 @@ final class FormbraidCommand extends Command
 
             return self::FAILURE;
         }
+    }
+
+    private function operation(ControllerQuery $query): string
+    {
+        $name = json_encode($query->name(), JSON_THROW_ON_ERROR);
+        $parse = resolve(SchemaDriver::class)->parse('_optionInputs['.$name.']', 'args');
+
+        return '{inputs: '.json_encode((object) $query->options()['inputs'], JSON_THROW_ON_ERROR).', select: args => { try { return _optionBindings['.$name.']('.$parse.'); } catch { return undefined; } }}';
     }
 
     private function import(string $from, string $to): string

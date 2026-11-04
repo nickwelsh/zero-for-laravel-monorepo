@@ -6,6 +6,7 @@ export default defineConfig({
             index: 'src/index.ts',
             'react/index': 'src/react/index.ts',
             formbraid: 'src/formbraid.ts',
+            'react/formbraid': 'src/react/formbraid.tsx',
             inertia: 'src/react/inertia.tsx',
             'search/index': 'src/search/index.ts',
             'react/search': 'src/react/search.tsx',
@@ -15,6 +16,8 @@ export default defineConfig({
         clean: true,
         deps: {
             neverBundle: [
+                '@formbraid/core',
+                '@formbraid/react',
                 '@inertiajs/react',
                 '@rocicorp/zero',
                 '@rocicorp/zero/react',

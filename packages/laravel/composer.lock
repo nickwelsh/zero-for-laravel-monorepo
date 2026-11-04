@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "f1d033468d172d387624123d84a791a6",
+    "content-hash": "953a2c932ade0d89eb4b153f6906cf16",
     "packages": [
         {
             "name": "brick/math",
@@ -7630,16 +7630,16 @@
         },
         {
             "name": "formbraid/laravel",
-            "version": "v0.2.0",
+            "version": "v0.3.0",
             "source": {
                 "type": "git",
                 "url": "https://github.com/Formbraid/laravel.git",
-                "reference": "23ee30810a1ebb9f2ade76070aa5714c11cf1ea5"
+                "reference": "4446f3916fe91f01ffaa89fd9ca9d9063055e194"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/Formbraid/laravel/zipball/23ee30810a1ebb9f2ade76070aa5714c11cf1ea5",
-                "reference": "23ee30810a1ebb9f2ade76070aa5714c11cf1ea5",
+                "url": "https://api.github.com/repos/Formbraid/laravel/zipball/4446f3916fe91f01ffaa89fd9ca9d9063055e194",
+                "reference": "4446f3916fe91f01ffaa89fd9ca9d9063055e194",
                 "shasum": ""
             },
             "require": {
@@ -7696,7 +7696,7 @@
                 "issues": "https://github.com/nickwelsh/formbraid/issues",
                 "source": "https://github.com/formbraid/laravel"
             },
-            "time": "2026-11-04T01:18:12+00:00"
+            "time": "2026-11-04T16:59:36+00:00"
         },
         {
             "name": "hamcrest/hamcrest-php",

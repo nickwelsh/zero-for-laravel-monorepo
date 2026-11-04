@@ -28,6 +28,8 @@ const forms = await import(new URL('dist/formbraid.js', root).href);
 if (typeof forms.createControllerForm !== 'function') throw new Error('Missing Formbraid descriptor producer.');
 allowReact = true;
 await import(new URL('dist/react/index.js', root).href);
+const optionSources = await import(new URL('dist/react/formbraid.js', root).href);
+if (typeof optionSources.createZeroOptionSource !== 'function') throw new Error('Missing Zero option source producer.');
 console.log(
     'Built exports exist; core and form producers load without React; all bindings load without Formbraid or Effect.',
 );

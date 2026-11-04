@@ -12,8 +12,8 @@ minimumReleaseAgeExclude:
   - '@nickwelsh/refquill-schema@0.1.0'
   - '@nickwelsh/refquill-win32-x64@0.1.0'
   - '@nickwelsh/refquill@0.1.0'
-  - '@formbraid/core@0.2.0'
-  - '@formbraid/react@0.2.0'
+  - '@formbraid/core@0.2.0 || 0.3.0'
+  - '@formbraid/react@0.2.0 || 0.3.0'
 allowBuilds:
   typesense-instantsearch-adapter: false
   esbuild: true

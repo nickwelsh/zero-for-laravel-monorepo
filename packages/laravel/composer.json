@@ -13,7 +13,7 @@
     },
     "require-dev": {
         "driftingly/rector-laravel": "^2.3",
-        "formbraid/laravel": "^0.2.0",
+        "formbraid/laravel": "^0.3.0",
         "inertiajs/inertia-laravel": "^3.0",
         "larastan/larastan": "^3.9",
         "laravel/pint": "^1.0",
@@ -74,7 +74,7 @@
         }
     },
     "suggest": {
-        "formbraid/laravel": "Generate Formbraid descriptors for native Zero controller mutations (^0.2.0).",
+        "formbraid/laravel": "Generate Formbraid descriptors and live option sources for Zero controller mutations (^0.3.0).",
         "laravel/scout": "Synchronize optional Typesense search indexes with Eloquent models.",
         "typesense/typesense-php": "Use the optional authenticated InstantSearch transport."
     },

@@ -143,6 +143,7 @@ test('Formbraid generation publishes direct descriptors and bound factories with
     ]);
     Route::post('/write', [ControllerMutationController::class, 'store']);
     Route::patch('/complete/{task}', [ControllerMutationController::class, 'complete']);
+    Route::post('/options/{task}', [ControllerMutationController::class, 'options']);
     Route::get('/query/{title}', [QueryController::class, 'index']);
     try {
         expect(Artisan::call('zero:formbraid'))->toBe(0, Artisan::output());
@@ -150,6 +151,12 @@ test('Formbraid generation publishes direct descriptors and bound factories with
         $source = File::get($path);
         expect($source)->toContain('const _form_store = createControllerForm(', 'parameters: {"task": string | number | boolean}', 'as store}', 'as complete}');
         expect($source)->not->toContain('useControllerForm', 'fetch(');
+        expect($source)->toContain('createZeroOptionSource', 'withOptionSources(', '"task": parameters["task"]', 'resolve:', '"kind":"value"');
+        preg_match_all('/_optionBindings\["(q_[a-f0-9]+)"\]/', $source, $bindings);
+        foreach ($bindings[1] as $binding) {
+            expect(File::get($root.'/native/generated.queries.ts'))->toContain('"'.$binding.'"');
+        }
+
         expect(File::get($root.'/forms/requests/ZeroForLaravel/Tests/Fixtures/ControllerMutationRequest.ts'))->toContain('defineForm<ControllerMutationRequestValues>()', '"maxLength": 100');
         expect(File::exists($root.'/forms/ZeroForLaravel/Tests/Fixtures/QueryController.ts'))->toBeFalse();
         expect(Task::query()->count())->toBe(0);

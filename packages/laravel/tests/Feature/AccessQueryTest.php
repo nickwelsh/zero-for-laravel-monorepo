@@ -187,6 +187,10 @@ afterEach(function (): void {
 
 test('native access checks run under the projection transaction lock and never run the controller', function (): void {
     $generated = array_values(resolve(RegisteredQueries::class)->all())[0];
+    if (! $generated instanceof RegisteredQuery) {
+        throw new LogicException('Expected a controller query.');
+    }
+
     Route::get('/access-trap/{list}', [AccessWatchNeverController::class, 'show'])
         ->middleware([SubstituteBindings::class, AccessWatchMiddleware::class]);
     app()->instance(RegisteredQueries::class, new RegisteredQueries([
@@ -277,6 +281,10 @@ test('native access rejects untrusted actors unknown queries unguarded queries a
     accessNativeQuery($input)->assertOk()->assertJsonPath('queries.0.error', 'parse');
 
     $registered = array_values(resolve(RegisteredQueries::class)->all())[0];
+    if (! $registered instanceof RegisteredQuery) {
+        throw new LogicException('Expected a controller query.');
+    }
+
     app()->instance(RegisteredQueries::class, new RegisteredQueries([
         'unguarded' => new RegisteredQuery($registered->action, $registered->component, $registered->prop,
             $registered->parameters, $registered->declaration(...)),

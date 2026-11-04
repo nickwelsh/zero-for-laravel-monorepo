@@ -9,6 +9,7 @@ namespace App\Formbraid;
 enum FormField: string
 {
     case CheckboxField = 'CheckboxField';
+    case ComboboxField = 'ComboboxField';
     case CreateListButton = 'CreateListButton';
     case HiddenField = 'HiddenField';
     case SubmitButton = 'SubmitButton';

@@ -415,6 +415,14 @@ final class ZeroQuery implements JsonSerializable
         }
     }
 
+    /** Construction operands for the generator integration, without executing global scopes.
+     * @return array<string, mixed>
+     */
+    public function constructionAst(): array
+    {
+        return self::copyValues($this->ast, false);
+    }
+
     /** @return array{singular: bool, relationships: stdClass} */
     public function format(): array
     {
@@ -434,15 +442,15 @@ final class ZeroQuery implements JsonSerializable
      * @param  array<K, mixed>  $values
      * @return array<K, mixed>
      */
-    private static function copyValues(array $values): array
+    private static function copyValues(array $values, bool $effective = true): array
     {
         foreach ($values as $key => $value) {
             if (is_array($value)) {
-                $values[$key] = self::copyValues($value);
+                $values[$key] = self::copyValues($value, $effective);
             } elseif ($value instanceof self) {
-                $values[$key] = $value->ast();
+                $values[$key] = $effective ? $value->ast() : $value->constructionAst();
             } elseif ($value instanceof stdClass) {
-                $values[$key] = (object) self::copyValues((array) $value);
+                $values[$key] = (object) self::copyValues((array) $value, $effective);
             }
         }
 

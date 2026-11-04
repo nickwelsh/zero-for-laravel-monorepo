@@ -76,6 +76,9 @@ final class ControllerMutationController
     #[ZeroMutation]
     public function noResult(ControllerMutationRequest $request): void {}
 
+    #[ZeroMutation(optimism: 'disabled')]
+    public function options(OptionRequest $request, Task $task): void {}
+
     #[ZeroMutation]
     public function bulk(BulkMutationRequest $request): void
     {

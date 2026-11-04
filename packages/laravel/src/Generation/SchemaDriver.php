@@ -11,8 +11,9 @@ interface SchemaDriver
 
     /** @param array<string, string> $parameters
      * @param  array<string, string>|null  $cursor
+     * @param  array<string, Mutations\ValueContract>  $contracts
      */
-    public function object(array $parameters, ?array $cursor = null, bool $public = false): string;
+    public function object(array $parameters, ?array $cursor = null, bool $public = false, array $contracts = [], bool $routed = true): string;
 
     /** @param array<string, string> $parameters */
     public function encode(array $parameters, string $input): string;

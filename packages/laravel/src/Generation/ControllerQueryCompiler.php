@@ -6,6 +6,7 @@ namespace ZeroForLaravel\Generation;
 
 use BackedEnum;
 use Closure;
+use Formbraid\Laravel\OptionInput;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Http\Request;
@@ -28,6 +29,7 @@ use ReflectionNamedType;
 use ReflectionObject;
 use ReflectionParameter;
 use ZeroForLaravel\Context\ContextDefinition;
+use ZeroForLaravel\Formbraid\ZeroOptions;
 use ZeroForLaravel\Metadata\ModelMetadata;
 use ZeroForLaravel\Metadata\ModelRegistry;
 use ZeroForLaravel\Permissions\PolicyCompiler;
@@ -59,6 +61,56 @@ final class ControllerQueryCompiler
     public function construction(Expr $expression, array $variables = []): QueryExpression
     {
         return $this->expression($expression, $variables)->snapshot();
+    }
+
+    /** Compile the query expression, not an executed or sampled FormRequest. */
+    public function formOption(string $request, string $field, string $operation): QueryExpression
+    {
+        $reflection = new ReflectionMethod($request, 'fields');
+        $this->file = $reflection->getFileName() ?: throw new LogicException('FormRequest source is unavailable.');
+        $this->action = $request.'::fields';
+        $this->prop = $field;
+        $this->callbackId = 0;
+        $nodes = (new NodeTraverser(new NameResolver))->traverse($this->parser->parse(file_get_contents($this->file) ?: '') ?? []);
+        $node = (new NodeFinder)->findFirst($nodes, fn (Node $candidate): bool => $candidate instanceof Stmt\ClassMethod && $candidate->name->name === 'fields' && $candidate->getEndLine() === $reflection->getEndLine());
+        if (! $node instanceof Stmt\ClassMethod) {
+            throw new LogicException($this->action.': cannot locate fields().');
+        }
+
+        $statements = $node->stmts ?? [];
+        $return = array_pop($statements);
+        if (! $return instanceof Stmt\Return_ || ! $return->expr instanceof Expr\Array_) {
+            $this->unsupported($node, 'Option fields require a final literal field map.');
+        }
+
+        $variables = $this->statements($statements, []);
+        foreach ($return->expr->items as $item) {
+            if ($item?->key instanceof Scalar\String_ && $item->key->value === $field) {
+                $call = (new NodeFinder)->findFirst($item->value, fn (Node $candidate): bool => $candidate instanceof Expr\StaticCall && $candidate->class instanceof Name && $candidate->class->toString() === ZeroOptions::class && $candidate->name instanceof Identifier && $candidate->name->name === 'query');
+                if (! $call instanceof Expr\StaticCall) {
+                    $this->unsupported($item, 'Declare ZeroOptions::query directly on the field.');
+                }
+
+                foreach ($call->getArgs() as $index => $argument) {
+                    if (($operation === 'list' && ($argument->name?->name === 'query' || ($argument->name === null && $index === 0))) || ($operation === 'resolve' && ($argument->name?->name === 'resolve' || ($argument->name === null && $index === 3)))) {
+                        $expression = $this->expression($argument->value, $variables)->snapshot();
+                        // Option sources always read protected root rows as the authenticated actor.
+                        // fields() constructs metadata without an ambient authenticated request.
+                        if ($expression->model?->policyVisibility) {
+                            $expression = new QueryExpression('method', 'visibleTo', [$expression, new QueryExpression('actor', type: 'actor')], $expression->model, 'query', $expression->singular);
+                        }
+
+                        $this->coverage($expression);
+
+                        return $expression;
+                    }
+                }
+
+                $this->unsupported($call, 'Missing option '.$operation.' query.');
+            }
+        }
+
+        $this->unsupported($node, 'Unknown option field '.$field.'.');
     }
 
     /**
@@ -284,6 +336,39 @@ final class ControllerQueryCompiler
         return $queries;
     }
 
+    /** @return list<array<string, mixed>> */
+    public function dependencies(QueryExpression $expression): array
+    {
+        $dependencies = [];
+        if ($expression->model?->policyVisibility && in_array($expression->kind, ['query', 'local', 'bound'], true)) {
+            $dependencies[] = ['policy' => (new PolicyCompiler)->compile($expression->model->class)->fingerprint];
+        }
+
+        if ($expression->kind === 'method' && in_array($expression->value, ['with', 'whereHas', 'whereDoesntHave', 'whereExists', 'exists'], true)) {
+            $model = $expression->model ?? throw new LogicException('Relationship has no source model.');
+            $name = $expression->children[1]->value;
+            if (! is_string($name)) {
+                throw new LogicException('Relationship requires a literal name.');
+            }
+
+            $relation = $this->models->relation($model, $name);
+            $pivots = [];
+            foreach ($relation['path'] as $path) {
+                if (isset($this->models->pivotColumns()[$path['table']])) {
+                    $pivots[$path['table']] = $this->models->pivotColumns()[$path['table']];
+                }
+            }
+
+            $dependencies[] = ['source' => $model->name, 'relation' => $name, 'path' => $relation, 'constraints' => $model->relationConstraints[$name] ?? [], 'pivots' => $pivots];
+        }
+
+        foreach ($expression->children as $child) {
+            array_push($dependencies, ...$this->dependencies($child));
+        }
+
+        return $dependencies;
+    }
+
     private function coverage(QueryExpression $expression, bool $inherited = false): void
     {
         if ($expression->kind === 'conditional') {
@@ -345,39 +430,6 @@ final class ControllerQueryCompiler
 
         return $removed !== null && ! in_array(VisibleToCurrentUser::class, $removed, true)
             && isset(ScopeRegistry::globals($expression->model)[VisibleToCurrentUser::class]);
-    }
-
-    /** @return list<array<string, mixed>> */
-    private function dependencies(QueryExpression $expression): array
-    {
-        $dependencies = [];
-        if ($expression->model?->policyVisibility && in_array($expression->kind, ['query', 'local', 'bound'], true)) {
-            $dependencies[] = ['policy' => (new PolicyCompiler)->compile($expression->model->class)->fingerprint];
-        }
-
-        if ($expression->kind === 'method' && in_array($expression->value, ['with', 'whereHas', 'whereDoesntHave', 'whereExists', 'exists'], true)) {
-            $model = $expression->model ?? throw new LogicException('Relationship has no source model.');
-            $name = $expression->children[1]->value;
-            if (! is_string($name)) {
-                throw new LogicException('Relationship requires a literal name.');
-            }
-
-            $relation = $this->models->relation($model, $name);
-            $pivots = [];
-            foreach ($relation['path'] as $path) {
-                if (isset($this->models->pivotColumns()[$path['table']])) {
-                    $pivots[$path['table']] = $this->models->pivotColumns()[$path['table']];
-                }
-            }
-
-            $dependencies[] = ['source' => $model->name, 'relation' => $name, 'path' => $relation, 'constraints' => $model->relationConstraints[$name] ?? [], 'pivots' => $pivots];
-        }
-
-        foreach ($expression->children as $child) {
-            array_push($dependencies, ...$this->dependencies($child));
-        }
-
-        return $dependencies;
     }
 
     private function mutate(QueryExpression $receiver, QueryExpression $value): QueryExpression
@@ -637,6 +689,27 @@ final class ControllerQueryCompiler
         }
 
         if ($node instanceof Expr\StaticCall && $node->class instanceof Name && $node->name instanceof Identifier) {
+            if ($node->class->toString() === OptionInput::class) {
+                $method = $node->name->name;
+                $args = $node->getArgs();
+                $input = match (true) {
+                    $method === 'value' && $args === [] => OptionInput::value(),
+                    in_array($method, ['field', 'context'], true) && count($args) === 1 && $args[0]->value instanceof Scalar\String_ => OptionInput::$method($args[0]->value->value),
+                    default => $this->unsupported($node, 'Option inputs require value(), field(literal path), or context(literal key).'),
+                };
+
+                return ScopeCompiler::value($input);
+            }
+
+            if ($node->class->toString() === ZeroOptions::class && $node->name->name === 'contains' && count($node->getArgs()) === 1) {
+                $input = $this->expression($node->getArgs()[0]->value, $variables);
+                if ($input->kind !== 'optionInput') {
+                    $this->unsupported($node, 'contains() requires a symbolic option input.');
+                }
+
+                return new QueryExpression('optionContains', children: [$input], type: 'string');
+            }
+
             foreach ($this->models->all() as $model) {
                 if ($model->class === $node->class->toString()) {
                     $query = QueryExpression::reference(new QueryExpression('query', model: $model, type: 'query'));
@@ -1016,7 +1089,7 @@ final class ControllerQueryCompiler
             }
 
             $value = $arguments[$count - 1];
-            if (in_array($operator, ['IN', 'NOT IN'], true) ? $value->type !== 'list' : ! in_array($value->type, ['string', 'int', 'float', 'bool', 'null'], true)) {
+            if (in_array($operator, ['IN', 'NOT IN'], true) ? $value->type !== 'list' : ! in_array($value->type, ['string', 'int', 'float', 'bool', 'null', 'option'], true)) {
                 $this->unsupported($node, 'Comparison operand must be a scalar, or a list for membership.');
             }
         }

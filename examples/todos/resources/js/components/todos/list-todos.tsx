@@ -17,11 +17,14 @@ export function ListTodos({ listId, todos }: { listId: string; todos: ListRow['t
 
     return (
         <div className="space-y-4">
-            <Form form={instance} className="flex items-start gap-2">
+            <Form form={instance} className="space-y-3">
                 {({ fields, components }) => (
                     <>
-                        <fields.title />
-                        <components.SubmitButton label="Add todo" pendingLabel="Adding…" />
+                        <fields.list_id />
+                        <div className="flex items-start gap-2">
+                            <fields.title />
+                            <components.SubmitButton label="Add todo" pendingLabel="Adding…" />
+                        </div>
                     </>
                 )}
             </Form>

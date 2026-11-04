@@ -11,6 +11,7 @@ use ZeroForLaravel\Generation\ControllerQueryGenerator;
 use ZeroForLaravel\Generation\Mutations\ControllerMutationCompiler;
 use ZeroForLaravel\Generation\Mutations\ControllerMutationGenerator;
 use ZeroForLaravel\Generation\Mutations\MutationProgram;
+use ZeroForLaravel\Generation\OptionQueryCompiler;
 use ZeroForLaravel\Generation\PublicApiGenerator;
 use ZeroForLaravel\Generation\TypeScriptGenerator;
 use ZeroForLaravel\Generation\ZodSchemaDriver;
@@ -60,6 +61,17 @@ $fixture = new class('export') extends TestCase
         }
 
         $compiler = new ControllerMutationCompiler((new ParserFactory)->createForNewestSupportedVersion(), new ModelRegistry($this->models()));
+        if ($mode === 'options') {
+            $models = new ModelRegistry($this->models());
+            app()->instance(ModelRegistry::class, $models);
+            $queries = (new OptionQueryCompiler(new ControllerQueryCompiler((new ParserFactory)->createForNewestSupportedVersion(), $models), $models))->compile($compiler->compile(ControllerMutationController::class, 'options'));
+            $metadata = [];
+            foreach ($queries as $query) {
+                $metadata[$query->options()['operation']] = ['name' => $query->name(), 'inputs' => $query->options()['inputs']];
+            }
+
+            return (new ControllerQueryGenerator(new ZodSchemaDriver))->typescript($queries, './generated')."\nexport const optionQueries = ".json_encode($metadata, JSON_THROW_ON_ERROR)." as const;\n";
+        }
         $programs = array_map(fn (string $method): MutationProgram => $compiler->compile(ControllerMutationController::class, $method), ['store', 'complete', 'authoritative', 'noResult', 'explicit', 'structured', 'projected', 'bulk']);
 
         if ($mode === 'public') {

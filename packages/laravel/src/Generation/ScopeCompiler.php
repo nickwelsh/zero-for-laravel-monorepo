@@ -5,11 +5,13 @@ declare(strict_types=1);
 namespace ZeroForLaravel\Generation;
 
 use Closure;
+use Formbraid\Laravel\OptionInput;
 use LogicException;
 use PhpParser\ParserFactory;
 use ReflectionMethod;
 use ZeroForLaravel\Context\ContextDefinition;
 use ZeroForLaravel\Context\ContextReference;
+use ZeroForLaravel\Formbraid\OptionPattern;
 use ZeroForLaravel\Metadata\ModelMetadata;
 use ZeroForLaravel\Permissions\VisibleToCurrentUser;
 use ZeroForLaravel\Scopes\ScopeRegistry;
@@ -45,6 +47,14 @@ final class ScopeCompiler
     public static function value(mixed $value): QueryExpression
     {
         $value = ContextReference::normalize($value);
+        if ($value instanceof OptionInput) {
+            return new QueryExpression('optionInput', json_encode($value->toArray(), JSON_THROW_ON_ERROR), type: 'option');
+        }
+
+        if ($value instanceof OptionPattern) {
+            return new QueryExpression('optionContains', children: [self::value($value->input)], type: 'string');
+        }
+
         if ($value instanceof ContextReference) {
             return new QueryExpression('context', $value->field, type: ContextDefinition::configured()->fields[$value->field]['type']);
         }

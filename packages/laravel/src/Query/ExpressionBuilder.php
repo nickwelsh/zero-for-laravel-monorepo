@@ -7,8 +7,10 @@ namespace ZeroForLaravel\Query;
 use Carbon\CarbonImmutable;
 use Closure;
 use DateTimeInterface;
+use Formbraid\Laravel\OptionInput;
 use InvalidArgumentException;
 use ZeroForLaravel\Context\ContextReference;
+use ZeroForLaravel\Formbraid\OptionPattern;
 use ZeroForLaravel\Metadata\ModelMetadata;
 use ZeroForLaravel\Support\Input;
 
@@ -72,7 +74,7 @@ final readonly class ExpressionBuilder
             $value = isset($column['dateFormat']) ? $date->format($column['dateFormat']) : $date->getTimestampMs();
         }
 
-        if (! $value instanceof Parameter && ! $value instanceof ContextReference && $value !== MissingValue::Missing) {
+        if (! $value instanceof Parameter && ! $value instanceof ContextReference && ! $value instanceof OptionInput && ! $value instanceof OptionPattern && $value !== MissingValue::Missing) {
             if (in_array($operator, ['IN', 'NOT IN'], true)) {
                 if (! is_array($value) || ! array_is_list($value)) {
                     throw new InvalidArgumentException('Membership requires a scalar list.');
@@ -174,6 +176,10 @@ final readonly class ExpressionBuilder
     {
         if ($value instanceof Parameter) {
             return $value->toArray();
+        }
+
+        if ($value instanceof OptionInput || $value instanceof OptionPattern) {
+            return ['type' => 'literal', 'value' => $value];
         }
 
         $value = ContextReference::normalize($value);

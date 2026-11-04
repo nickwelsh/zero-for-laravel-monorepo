@@ -6,7 +6,9 @@ use App\Models\Todo;
 use App\Models\TodoList;
 use App\Models\User;
 use Formbraid\Laravel\Field;
+use Formbraid\Laravel\OptionInput;
 use Illuminate\Foundation\Http\FormRequest;
+use ZeroForLaravel\Formbraid\ZeroOptions;
 
 class SaveTodoRequest extends FormRequest
 {
@@ -38,7 +40,13 @@ class SaveTodoRequest extends FormRequest
     public function fields(): array
     {
         return [
-            'list_id' => Field::make('HiddenField'),
+            'list_id' => Field::make('ComboboxField')->label('Destination list')->options(ZeroOptions::query(
+                TodoList::zeroQuery()
+                    ->where('name', 'ILIKE', ZeroOptions::contains(OptionInput::value()))
+                    ->orderBy('name', 'asc')->orderBy('id', 'asc')->limit(20),
+                value: 'id', label: 'name',
+                resolve: TodoList::zeroQuery()->where('id', OptionInput::field('list_id'))->one(),
+            )),
             'title' => Field::make()->label('New todo')->props(['placeholder' => 'What needs doing?']),
         ];
     }

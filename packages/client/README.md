@@ -96,7 +96,7 @@ in generated mode fails generation rather than silently disabling optimism.
 
 ## Formbraid forms
 
-React 19 apps using Formbraid **0.2** consume generated descriptors directly:
+React 19 apps using Formbraid **0.3** consume generated descriptors directly:
 
 ```tsx
 import { store } from '@/formbraid/zero/App/Http/Controllers/TodoListController';
@@ -105,7 +105,7 @@ import { Form } from '@/formbraid';
 return <Form form={store} />;
 ```
 
-Install `formbraid/laravel`, `@formbraid/core`, and `@formbraid/react` at `^0.2.0`.
+Install `formbraid/laravel`, `@formbraid/core`, and `@formbraid/react` at `^0.3.0`.
 Register a build-only Formbraid integration running `php artisan zero:formbraid`.
 Actions with route parameters generate factories: `<Form form={update({ list: list.id })} />`.
 Formbraid owns drafts, rendering, and validation; the generated callback waits for
@@ -116,7 +116,13 @@ Cancellation stops observation, not a durable write; committed result-decode
 failures must not retry. The optional `/formbraid` export is generator tooling:
 `createControllerForm` constructs descriptors without hooks, React, or runtime
 Formbraid/Effect imports. Ordinary Zero applications need none of those form dependencies.
-See the [form guide](../../apps/docs/content/docs/0.x/docs/mutations.mdx#formbraid-02).
+For query-backed options, use `ZeroOptions::query(...)` in the request's `fields()`
+map with direct `OptionInput::value()`, `field(path)`, and `context(key)` operands.
+Generation attaches live source bindings automatically. Reusable controls consume
+Formbraid's `useFieldOptions`; the optional `/react/formbraid` adapter owns Zero subscriptions.
+Selected-label resolution uses a separate optional `one()` query, independent of
+the current filter. Put ZeroProvider above the form.
+See the [form guide](../../apps/docs/content/docs/0.x/docs/mutations.mdx#formbraid-03).
 
 See the [repository guide](../../README.md), [query design](../../docs/QUERY_DESIGN.md),
 [mutation design](../../docs/MUTATION_DESIGN.md), and [running example](../../examples/todos/README.md).

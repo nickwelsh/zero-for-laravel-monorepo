@@ -14,8 +14,8 @@ const _definition = defineForm<SaveTodoRequestValues>()({
         "list_id": {
             "name": "list_id",
             "type": "string",
-            "component": "HiddenField",
-            "label": "List Id",
+            "component": "ComboboxField",
+            "label": "Destination list",
             "props": {},
             "constraints": {
                 "required": true
@@ -25,7 +25,22 @@ const _definition = defineForm<SaveTodoRequestValues>()({
                 "sometimes",
                 "uuid",
                 "exists"
-            ]
+            ],
+            "options": {
+                "kind": "source",
+                "id": "App\\Http\\Requests\\SaveTodoRequest:list_id",
+                "inputs": [
+                    {
+                        "kind": "value"
+                    }
+                ],
+                "resolveInputs": [
+                    {
+                        "kind": "field",
+                        "path": "list_id"
+                    }
+                ]
+            }
         },
         "title": {
             "name": "title",

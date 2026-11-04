@@ -160,6 +160,9 @@ export default defineConfig({
     },
     resolve: {
         alias: {
+            '@nickwelsh/zero-for-laravel/react/formbraid': fileURLToPath(
+                new URL('./packages/client/src/react/formbraid.tsx', import.meta.url),
+            ),
             '@nickwelsh/zero-for-laravel/formbraid': fileURLToPath(
                 new URL('./packages/client/src/formbraid.ts', import.meta.url),
             ),

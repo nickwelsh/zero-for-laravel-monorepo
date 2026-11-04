@@ -72,7 +72,7 @@ final readonly class AccessQueries
             }
 
             $registered = resolve(RegisteredQueries::class)->all()[$query] ?? null;
-            if ($registered === null || $registered->guards === []) {
+            if (! $registered instanceof RegisteredQuery || $registered->guards === []) {
                 Input::fail('query', 'An application-registered query with captured instance Gates is required.');
             }
 

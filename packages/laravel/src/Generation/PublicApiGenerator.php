@@ -41,6 +41,10 @@ final class PublicApiGenerator
 
         $queryActions = [];
         foreach ($queries as $query) {
+            if ($query->optionSource !== null) {
+                continue;
+            }
+
             [$controller, $method] = explode('@', $query->action, 2);
             $segments = explode('\\', $controller);
             foreach ([...$segments, $method] as $segment) {
