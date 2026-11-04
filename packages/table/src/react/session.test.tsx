@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, render, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vite-plus/test';
 import { useEffect } from 'react';
 import { definitions } from '../../../../tests/interop/generated';
@@ -95,6 +95,7 @@ beforeEach(() => {
 });
 afterEach(() => {
     cleanup();
+    vi.restoreAllMocks();
     vi.unstubAllGlobals();
 });
 
@@ -175,4 +176,61 @@ it('rejects late metadata after identity changes and clears all protected data o
     expect(table.items).toHaveLength(0);
     expect(table.count.value).toBeUndefined();
     expect(table.diagnostics.loadedRows).toBe(0);
+});
+
+it('bounds the rendered window independently of loaded rows and preserves keyboard cell focus', async () => {
+    vi.stubGlobal(
+        'ResizeObserver',
+        class {
+            observe() {}
+            unobserve() {}
+            disconnect() {}
+        },
+    );
+    vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(52);
+    vi.spyOn(window, 'scrollTo').mockImplementation(() => {});
+    const large = createTable({ ...capabilities, pageSize: 1000, defaults: { sort: [], groupBy: [] } }, (args) => ({
+        key: queryKey(args),
+        one: false,
+        request: () => ({ args }),
+        decode: (raw: unknown) => raw as readonly Row[],
+    }));
+    const rows = Array.from({ length: 1000 }, (_, i) => ({
+        id: String(i),
+        title: `Row ${i}`,
+        done: false,
+        list_id: null,
+    }));
+    native.rows.set(queryKey({ filter: null, sort: [], groupBy: [], path: [], __window: 1001 }), rows);
+    function Grid() {
+        const session = useDataTable(large);
+        return (
+            <DataTable.Root table={session}>
+                <DataTable.Viewport table={session} scrollElement="window" aria-label="Tasks">
+                    {(item) =>
+                        item.kind === 'row' ? (
+                            <DataTable.Row item={item}>
+                                {/* oxlint-disable-next-line jsx-a11y/prefer-tag-over-role -- ARIA grid, not a native table. */}
+                                <div role="gridcell" tabIndex={-1}>
+                                    {item.row.title}
+                                </div>
+                            </DataTable.Row>
+                        ) : (
+                            item.kind
+                        )
+                    }
+                </DataTable.Viewport>
+            </DataTable.Root>
+        );
+    }
+    const screen = render(<Grid />);
+    await waitFor(() => expect(screen.getByText('Row 0')).toBeDefined());
+    expect(screen.getAllByRole('row').length).toBeLessThan(80);
+    expect(screen.queryByText('Row 999')).toBeNull();
+    act(() => screen.getByText('Row 0').focus());
+    fireEvent.keyDown(document.activeElement!, { key: 'ArrowDown' });
+    await waitFor(() => expect(document.activeElement?.textContent).toBe('Row 1'));
+    fireEvent.keyDown(document.activeElement!, { key: 'End' });
+    await waitFor(() => expect(document.activeElement?.textContent).toBe('Row 999'));
+    expect(screen.getAllByRole('row').length).toBeLessThan(80);
 });

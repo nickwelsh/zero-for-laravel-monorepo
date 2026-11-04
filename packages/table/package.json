@@ -26,6 +26,9 @@
     "scripts": {
         "build": "vp pack"
     },
+    "dependencies": {
+        "@tanstack/react-virtual": "^3.14.26"
+    },
     "devDependencies": {
         "@nickwelsh/zero-for-laravel": "workspace:*"
     },

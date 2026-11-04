@@ -8,6 +8,7 @@ export default defineConfig({
         clean: true,
         deps: {
             neverBundle: [
+                '@tanstack/react-virtual',
                 '@nickwelsh/zero-for-laravel',
                 '@nickwelsh/zero-for-laravel/react',
                 '@rocicorp/zero',

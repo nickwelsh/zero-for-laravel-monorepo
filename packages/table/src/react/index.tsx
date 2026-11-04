@@ -1,6 +1,9 @@
 /* oxlint-disable unicorn/no-array-sort -- ES2022 support; only newly allocated arrays are sorted. */
-import { Fragment, useEffect, useLayoutEffect, useMemo, useSyncExternalStore, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useSyncExternalStore, type ReactNode } from 'react';
 import { useData, useZero, type Data } from '@nickwelsh/zero-for-laravel/react';
+import { SessionContext, Viewport, Group, Row } from './viewport';
+export { useTableViewport } from './viewport';
+export type { ViewportOptions } from './viewport';
 import {
     groupId,
     queryKey,
@@ -49,6 +52,13 @@ const errorOf = (error: unknown) => (error instanceof Error ? error : new Error(
 /** Owns query demand and metadata, never a second copy of Zero's canonical rows. */
 export class TableSession<Row, C extends Capabilities = Capabilities> {
     private currentState: TableState<C>;
+    focusedItem: string | undefined;
+    focusItem = (id: string | undefined) => {
+        if (this.focusedItem !== id) {
+            this.focusedItem = id;
+            this.emit();
+        }
+    };
     get state(): TableState<C> {
         return this.currentState;
     }
@@ -483,12 +493,12 @@ function Root<Row, C extends Capabilities>({ table, children }: { table: TableSe
     useSyncExternalStore(table.subscribe, table.snapshot, table.snapshot);
     useEffect(() => table.mount(), [table]);
     return (
-        <Fragment>
+        <SessionContext.Provider value={table}>
             {table.leaves.map((leaf) => (
                 <LeafOwner key={leaf.key} table={table} leaf={leaf} />
             ))}
             {children}
-        </Fragment>
+        </SessionContext.Provider>
     );
 }
-export const DataTable = { Root };
+export const DataTable = { Root, Viewport, Group, Row };
