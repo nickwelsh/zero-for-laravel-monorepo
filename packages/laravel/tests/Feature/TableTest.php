@@ -125,7 +125,9 @@ test('nullable filter operations do not depend on declaration order and unsuppor
     $context = new ResolvedContext(['user_id' => 'alice'], 'alice');
     expect($table->sql($context, ['kind' => 'condition', 'field' => 'rating', 'operator' => 'isNull'])->pluck('title')->all())->toBe(['éclair']);
     expect(fn (): ZeroQuery => $table->rows(['kind' => 'condition', 'field' => 'rating', 'operator' => 'gt', 'value' => 1]))->toThrow(ValidationException::class);
+
     $unsupported = Table::for(Task::class)->visibleTo($alice);
     $unsupported->base->whereExists('tags');
+
     expect(fn (): Builder => $unsupported->sql($context))->toThrow(LogicException::class, 'portable SQL lowering');
 });
