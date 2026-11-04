@@ -4,15 +4,15 @@ Controller-first live queries and mutations for [Rocicorp Zero](https://zero.roc
 Laravel owns validation, binding, authorization, and authoritative writes. Zero owns
 replication, subscriptions, optimistic transactions, replay, and mutation outcomes.
 
-**v0.5.0** provides controller-first queries and mutations. Install matching versions of
+**v0.6.0** provides controller-first queries and mutations. Install matching versions of
 `nickwelsh/zero-for-laravel` and `@nickwelsh/zero-for-laravel`. Both the Zero client
 and zero-cache must use **1.11.3**. PHP 8.3+, Laravel 12/13, PostgreSQL 15+ with
 logical replication, and React 18/19 are supported targets. Automatic live page
 props require Inertia 3 (the React adapter requires `@inertiajs/react` ^3.8.0).
 
 ```sh
-composer require nickwelsh/zero-for-laravel:^0.5.0
-pnpm add @nickwelsh/zero-for-laravel@^0.5.0 @rocicorp/zero@1.11.3
+composer require nickwelsh/zero-for-laravel:^0.6.0
+pnpm add @nickwelsh/zero-for-laravel@^0.6.0 @rocicorp/zero@1.11.3
 ```
 
 The [shared todos example](examples/todos/README.md) is a complete application with

@@ -147,7 +147,7 @@ Before tagging, update `packages/client/package.json`, current-version docs, and
 the example checks, and `deploy:check`. Inspect `npm pack --dry-run` from
 `packages/client`. Push the tested `main` commit and matching annotated `v<version>`
 tag, then publish a GitHub Release for that tag. For this release the version is
-**0.5.0** and tag **v0.5.0**. Stable releases use `latest`; prerelease versions must
+**0.6.0** and tag **v0.6.0**. Stable releases use `latest`; prerelease versions must
 be marked as GitHub prereleases and use `next`.
 
 `Publish npm` runs reusable CI, verifies the tag/version, and calls

@@ -1,5 +1,36 @@
 # Changelog
 
+## [0.6.0] - 2026-11-04
+
+- Add Formbraid **0.2** integration for native Zero controller mutations.
+  `zero:formbraid` generates standard descriptors and bound factories from
+  FormRequests: import a controller's `store` and render `<Form form={store} />`.
+  Submissions retain Laravel validation, authoritative results, cancellation
+  semantics, and the application's Zero session and mutation preparation.
+- Add managed Casbin policies shared by Laravel Gates, Eloquent `visibleTo()`
+  collections, and native Zero predicates. Transactional permission projections
+  maintain grants, role assignments, and subject/resource facts without exposing
+  private permission tables in browser schemas or query results.
+- Add opt-in `VisibleToCurrentUser` global scoping, native subscribed access-loss
+  handling, and advisory current-user permission predictions. Access invalidation
+  affects only the relevant permission decisions; browser predictions never
+  authorize reads or writes.
+- Add application-owned typed Zero context, portable Eloquent-style scopes, and
+  `withAttributes()` creation defaults. Explicit creation attributes take precedence;
+  defaults do not stamp updates or replace authorization.
+- Remove pre-controller-first compatibility APIs and legacy model definitions.
+  Harden malformed-quote search parsing with a single-pass scanner, refresh API
+  documentation, and update the authenticated shared-todos example.
+
+Use matching PHP and JavaScript **v0.6.0** packages with Zero client/cache **1.11.3**.
+Configure the application-owned context enum and resolver, migrate legacy model
+definitions to the controller-first APIs, and regenerate/deploy PHP and TypeScript
+contracts together. Policy visibility is opt-in: publish its configuration and
+migrations, rebuild projections, and synchronize the publication before serving
+protected live queries. Plan production migrations and incompatible queued work
+separately; do not reset application data as an upgrade step. Formbraid support is
+optional and requires its **0.2** packages.
+
 ## [0.5.0] - 2026-10-31
 
 Initial release.
@@ -29,4 +60,5 @@ Deploy generated PHP and TypeScript contracts together. Supported targets are PH
 8.3+, Laravel 12/13, PostgreSQL 15+, and React 18/19. Automatic live pages require
 Inertia Laravel 3 and `@inertiajs/react` ^3.8.0.
 
+[0.6.0]: https://github.com/nickwelsh/zero-for-laravel-monorepo/releases/tag/v0.6.0
 [0.5.0]: https://github.com/nickwelsh/zero-for-laravel-monorepo/releases/tag/v0.5.0
