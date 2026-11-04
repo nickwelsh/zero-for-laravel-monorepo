@@ -20,26 +20,41 @@ interface Token {
 
 function tokenize(input: string): Array<Token> {
     const tokens: Array<Token> = [];
-    // Match only at the current offset instead of retrying malformed phrases at later quotes.
-    const pattern = /\s+|(?<punct>[(){}-])|(?<quote>"(?:\\.|[^"\\])*")|(?<word>[^\s(){}"]+)/guy;
-    let consumed = 0;
-    for (const match of input.matchAll(pattern)) {
-        if (match.index !== consumed) {
-            throw new Error('Close the quote to search for this phrase.');
+    let position = 0;
+    while (position < input.length) {
+        const character = input[position]!;
+        if (/\s/u.test(character)) {
+            position += 1;
+        } else if ('(){}-'.includes(character)) {
+            tokens.push({ value: character, quoted: false });
+            position += 1;
+        } else if (character === '"') {
+            position += 1;
+            let value = '';
+            while (position < input.length && input[position] !== '"') {
+                let next = input[position]!;
+                position += 1;
+                if (next === '\\') {
+                    next = input[position] ?? '';
+                    if (!/./u.test(next)) {
+                        throw new Error('Close the quote to search for this phrase.');
+                    }
+                    position += 1;
+                }
+                value += next;
+            }
+            if (position === input.length) {
+                throw new Error('Close the quote to search for this phrase.');
+            }
+            position += 1;
+            tokens.push({ value, quoted: true });
+        } else {
+            const start = position;
+            do {
+                position += 1;
+            } while (position < input.length && !/[\s(){}"]/u.test(input[position]!));
+            tokens.push({ value: input.slice(start, position), quoted: false });
         }
-        consumed = match.index + match[0].length;
-        const groups = match.groups ?? {};
-        const value = groups['punct'] ?? groups['word'] ?? groups['quote'];
-        if (value !== undefined) {
-            const quoted = groups['quote'] !== undefined;
-            tokens.push({
-                value: quoted ? value.slice(1, -1).replaceAll(/\\(?<escaped>.)/gu, '$<escaped>') : value,
-                quoted,
-            });
-        }
-    }
-    if (consumed !== input.length) {
-        throw new Error('Close the quote to search for this phrase.');
     }
     if (tokens.length > 64) {
         throw new Error('Try a shorter search (up to 64 terms).');

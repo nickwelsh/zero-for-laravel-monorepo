@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vite-plus/test';
-import { createSearchGrammar, rankSearchRows } from './index';
+import { createSearchGrammar, parseSearchSyntax, rankSearchRows } from './index';
 const metadata = {
     index: 'records',
     key: 'id',
@@ -12,6 +12,28 @@ const grammar = createSearchGrammar(metadata, {
     aliases: { label: 'tags' },
     values: { 'is:done': { field: 'done', value: true } },
     dates: { after: { field: 'created_at', operator: '>=' } },
+});
+describe('Search syntax', () => {
+    it.each([
+        ['"say \\"hello\\""', 'say "hello"'],
+        ['"path\\\\file"', 'path\\file'],
+        ['"\\😀"', '😀'],
+        ['"line\nbreak"', 'line\nbreak'],
+        ['"AND (OR) - {}"', 'AND (OR) - {}'],
+        ['in-progress', 'in-progress'],
+    ])('preserves the value in %j', (input, value) => {
+        expect(parseSearchSyntax(`title:${input}`)).toEqual({ kind: 'term', operator: 'title', value });
+    });
+    it.each([
+        '"unfinished',
+        'label:work "unfinished',
+        '"trailing\\',
+        '"escaped\\"',
+        ...['\n', '\r', '\u2028', '\u2029'].map((newline) => `"bad\\${newline}"`),
+        `"${'\\"'.repeat(100_000)}`,
+    ])('rejects unterminated or invalid escaped phrases (case %#)', (input) => {
+        expect(() => parseSearchSyntax(input)).toThrow('Close the quote to search for this phrase.');
+    });
 });
 describe('Scout grammar', () => {
     it('keeps ordinary text in the search engine and compiles typed refinements', () => {
