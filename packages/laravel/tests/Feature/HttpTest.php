@@ -92,6 +92,50 @@ test('configured models must be Eloquent model classes', function (): void {
     app()->make(ModelRegistry::class);
 })->throws(LogicException::class, 'Eloquent model classes');
 
+test('Effect generation is opt-in and preserves PHP contracts while detecting validator drift', function (): void {
+    $directory = sys_get_temp_dir().'/zero-effect-'.uniqid();
+    config(['zero.controller_output' => $directory.'/queries.php', 'zero.mutation_output' => $directory.'/mutations.php']);
+    Route::post('/write', [ControllerMutationController::class, 'store']);
+    Route::get('/tasks/{title}', [QueryController::class, 'index']);
+    Route::get('/sorted/{direction}', [QueryController::class, 'sorted']);
+    $options = ['--output' => $directory.'/generated.ts'];
+    try {
+        expect(Artisan::call('zero:generate', $options))->toBe(0);
+        foreach (['queries', 'mutations'] as $kind) {
+            expect(File::get($directory.'/generated.'.$kind.'.ts'))->toContain("from 'zod'");
+            expect(File::get($directory.'/generated.'.$kind.'.ts'))->not->toContain('effect/');
+        }
+
+        $queries = File::get($directory.'/queries.php');
+        $mutations = File::get($directory.'/mutations.php');
+        $models = File::get($directory.'/generated.ts');
+        $controller = File::get($directory.'/ZeroForLaravel/Tests/Fixtures/ControllerMutationController.ts');
+
+        config(['zero.schema_driver' => 'effect']);
+        app()->forgetInstance(\ZeroForLaravel\Generation\SchemaDriver::class);
+        app()->forgetInstance(\ZeroForLaravel\Generation\Mutations\MutationSchemaDriver::class);
+        expect(Artisan::call('zero:generate', [...$options, '--check' => true]))->toBe(1);
+        expect(Artisan::call('zero:generate', $options))->toBe(0);
+        foreach (['queries', 'mutations'] as $kind) {
+            expect(File::get($directory.'/generated.'.$kind.'.ts'))->toContain("from 'effect/Schema'", 'toStandardSchemaV1', 'parse(input: unknown)');
+            expect(File::get($directory.'/generated.'.$kind.'.ts'))->not->toContain("from 'zod'");
+        }
+
+        expect(File::get($directory.'/queries.php'))->toBe($queries);
+        expect(File::get($directory.'/mutations.php'))->toBe($mutations);
+        expect(File::get($directory.'/generated.ts'))->toBe($models);
+        expect(File::get($directory.'/ZeroForLaravel/Tests/Fixtures/ControllerMutationController.ts'))->toBe($controller);
+        expect(Artisan::call('zero:generate', [...$options, '--check' => true]))->toBe(0, Artisan::output());
+    } finally {
+        File::deleteDirectory($directory);
+    }
+});
+
+test('generation rejects unknown schema drivers', function (): void {
+    config(['zero.schema_driver' => 'efffect']);
+    Artisan::call('zero:generate');
+})->throws(LogicException::class, 'zero.schema_driver must be zod or effect.');
+
 test('generation owns named controller modules and removes only stale generated files', function (): void {
     $directory = sys_get_temp_dir().'/zero-public-'.uniqid();
     config(['zero.controller_output' => $directory.'/queries.php', 'zero.mutation_output' => $directory.'/mutations.php', 'zero.tables.tasks' => TasksTable::class]);

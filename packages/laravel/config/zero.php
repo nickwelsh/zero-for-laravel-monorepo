@@ -13,6 +13,8 @@ return [
     // Separate publication opt-in from visibility. Missing policy bindings never mean public reads.
     'public_models' => [],
     'output' => resource_path('js/zero/generated.ts'),
+    // Generated validators: zod (default) or effect (requires Effect 4 in the application).
+    'schema_driver' => 'zod',
     // TypeScript module root for the opt-in WayfinderServiceProvider (not a filesystem path).
     'wayfinder_import' => '@/zero',
     // Deploy this registration together with the sibling generated.queries.ts module.

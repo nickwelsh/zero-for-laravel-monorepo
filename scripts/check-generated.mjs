@@ -27,6 +27,19 @@ for (const [mode, path] of [
 }
 console.log('Generated controller fixtures match their PHP actions.');
 
+for (const driver of ['zod', 'effect']) {
+    const path = `tests/interop/schema-parity-${driver}.generated.ts`;
+    const generated = execFileSync(
+        'php',
+        ['packages/laravel/tests/Fixtures/export-controller-mutations.php', 'schema-parity', driver],
+        { encoding: 'utf8' },
+    );
+    if (generated !== readFileSync(path, 'utf8')) {
+        throw new Error(`Generated schema parity fixture is stale: ${path}`);
+    }
+}
+console.log('Zod and Effect parity fixtures match their PHP contracts.');
+
 const publicFiles = JSON.parse(
     execFileSync('php', ['packages/laravel/tests/Fixtures/export-controller-mutations.php', 'public'], {
         encoding: 'utf8',

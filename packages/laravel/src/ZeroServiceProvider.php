@@ -39,8 +39,13 @@ final class ZeroServiceProvider extends ServiceProvider
         $this->app->register(SurveyorServiceProvider::class);
         $this->app->register(RangerServiceProvider::class);
         $this->app->register(Permissions\PermissionServiceProvider::class);
-        $this->app->singletonIf(Generation\SchemaDriver::class, Generation\ZodSchemaDriver::class);
         $this->mergeConfigFrom(__DIR__.'/../config/zero.php', 'zero');
+        $this->app->singletonIf(Generation\Mutations\MutationSchemaDriver::class, fn (): Generation\Mutations\MutationSchemaDriver => match (config()->string('zero.schema_driver')) {
+            'zod' => new Generation\Mutations\ZodMutationSchemaDriver,
+            'effect' => new Generation\EffectSchemaDriver,
+            default => throw new LogicException('zero.schema_driver must be zod or effect.'),
+        });
+        $this->app->singletonIf(Generation\SchemaDriver::class, fn (Application $app): Generation\SchemaDriver => $app->make(Generation\Mutations\MutationSchemaDriver::class));
         $this->app->singleton(Query\RegisteredQueries::class, fn (): Query\RegisteredQueries => Query\RegisteredQueries::load(config()->string('zero.controller_output')));
         $this->app->singleton(function (): Mutation\ControllerMutationRegistry {
             $path = config()->string('zero.mutation_output');
