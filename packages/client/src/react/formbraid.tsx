@@ -1,6 +1,6 @@
 import type { Option, OptionInputReference } from '@formbraid/core';
-import type { OptionSourceAdapter, OptionSourceProps, ResolvedOptionInput } from '@formbraid/react';
-import { createElement } from 'react';
+import type { OptionListState, OptionSourceProps, ResolvedOptionInput } from '@formbraid/react';
+import { createElement, type ComponentType, type ReactNode } from 'react';
 import { useData, type ReadSelection } from './data';
 
 /** Generated argument names bind to portable references; query validation decides readiness. */
@@ -8,14 +8,25 @@ export interface ZeroOptionOperation {
     readonly inputs: Readonly<Record<string, OptionInputReference>>;
     readonly select: (args: Readonly<Record<string, unknown>>) => ReadSelection | undefined;
 }
+/** Optional infinite-prefix extension; remains compatible with Formbraid 0.3 sources. */
+export type ZeroOptionListState = OptionListState & {
+    readonly hasMore?: boolean | undefined;
+    readonly loadMore?: () => void;
+};
+export type ZeroOptionSourceProps =
+    | Exclude<OptionSourceProps, { operation: 'list' }>
+    | (Omit<Extract<OptionSourceProps, { operation: 'list' }>, 'children'> & {
+          readonly children: (state: ZeroOptionListState) => ReactNode;
+      });
+export type ZeroOptionSourceAdapter = ComponentType<ZeroOptionSourceProps>;
 
 export function createZeroOptionSource(config: {
     readonly list: ZeroOptionOperation;
     readonly resolve?: ZeroOptionOperation;
     readonly value: string;
     readonly label: string;
-}): OptionSourceAdapter {
-    function Feed({ source, selection }: { source: OptionSourceProps; selection: ReadSelection }) {
+}): ZeroOptionSourceAdapter {
+    function Feed({ source, selection }: { source: ZeroOptionSourceProps; selection: ReadSelection }) {
         const data = useData(selection);
         if (data.status === 'failure' || data.status === 'stale') {
             return source.operation === 'list'
@@ -31,7 +42,12 @@ export function createZeroOptionSource(config: {
         try {
             if (source.operation === 'list') {
                 if (!Array.isArray(data.data)) throw new Error('Option listing must return an array.');
-                return source.children({ status: 'complete', items: data.data.map(option) });
+                return source.children({
+                    status: 'complete',
+                    items: data.data.map(option),
+                    hasMore: data.hasMore,
+                    loadMore: () => data.loadMore(),
+                });
             }
             const item = data.data === undefined ? undefined : option(data.data);
             return source.children(

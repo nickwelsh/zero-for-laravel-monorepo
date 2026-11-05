@@ -33,6 +33,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 65
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ inputs.ref || inputs.tag }}
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: '24'
@@ -42,22 +45,29 @@ jobs:
         run: |
           node --input-type=module <<'JS'
           import { setTimeout } from 'node:timers/promises';
-          const version = process.env.RELEASE_TAG.slice(1);
+          import { existsSync, readFileSync } from 'node:fs';
+          const paths = ['packages/client/package.json', 'packages/table/package.json'].filter(existsSync);
+          const packages = paths.map(path => JSON.parse(readFileSync(path, 'utf8')));
+          if (process.env.RELEASE_TAG !== `v${packages[0].version}` || packages.some(pkg => pkg.version.includes('-'))) {
+            throw new Error('Docs require the matching stable release commit.');
+          }
           for (let attempt = 0; attempt < 60; attempt++) {
             try {
-              const response = await fetch('https://registry.npmjs.org/@nickwelsh%2fzero-for-laravel/latest', {
-                signal: AbortSignal.timeout(15_000),
-              });
-              if (!response.ok) throw new Error(`npm returned ${response.status}`);
-              const published = await response.json();
-              if (published.version === version) process.exit(0);
-              console.log(`Waiting for ${version} to be approved as latest (currently ${published.version}).`);
+              const versions = await Promise.all(packages.map(async pkg => {
+                const response = await fetch(`https://registry.npmjs.org/${encodeURIComponent(pkg.name)}/latest`, {
+                  signal: AbortSignal.timeout(15_000),
+                });
+                if (!response.ok) throw new Error(`${pkg.name}: npm returned ${response.status}`);
+                return (await response.json()).version;
+              }));
+              if (packages.every((pkg, index) => pkg.version === versions[index])) process.exit(0);
+              console.log(`Waiting for package approval: ${packages.map((pkg, index) => `${pkg.name}@${pkg.version} (latest ${versions[index]})`).join(', ')}.`);
             } catch (error) {
               console.log(`Cannot confirm npm publication: ${error.message}`);
             }
             await setTimeout(60_000);
           }
-          throw new Error('Approve the staged npm version, then rerun failed jobs to deploy docs.');
+          throw new Error('Approve the staged npm versions, then rerun failed jobs to deploy docs.');
           JS
 
   deploy:
@@ -85,15 +95,19 @@ jobs:
           RELEASE_TAG: ${{ inputs.tag }}
         run: |
           node --input-type=module <<'JS'
-          import { readFileSync } from 'node:fs';
-          const { version } = JSON.parse(readFileSync('packages/client/package.json', 'utf8'));
-          const response = await fetch('https://registry.npmjs.org/@nickwelsh%2fzero-for-laravel/latest', {
-            signal: AbortSignal.timeout(15_000),
-          });
-          if (!response.ok) throw new Error(`npm returned ${response.status}`);
-          const published = await response.json();
-          if (version.includes('-') || process.env.RELEASE_TAG !== `v${version}` || published.version !== version) {
-            throw new Error('Refusing to replace production docs with a version other than the current stable npm release.');
+          import { existsSync, readFileSync } from 'node:fs';
+          const paths = ['packages/client/package.json', 'packages/table/package.json'].filter(existsSync);
+          const packages = paths.map(path => JSON.parse(readFileSync(path, 'utf8')));
+          if (process.env.RELEASE_TAG !== `v${packages[0].version}`) throw new Error('Release tag mismatch.');
+          for (const { name, version } of packages) {
+            const response = await fetch(`https://registry.npmjs.org/${encodeURIComponent(name)}/latest`, {
+              signal: AbortSignal.timeout(15_000),
+            });
+            if (!response.ok) throw new Error(`${name}: npm returned ${response.status}`);
+            const published = await response.json();
+            if (version.includes('-') || published.version !== version) {
+              throw new Error(`Refusing to deploy docs before ${name}@${version} is the current stable npm release.`);
+            }
           }
           JS
       - run: pnpm --filter @zero-for-laravel/docs run deploy

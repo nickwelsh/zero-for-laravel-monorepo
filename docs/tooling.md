@@ -2,7 +2,8 @@
 
 The monorepo is the source of truth. `packages/laravel` owns the Composer library,
 PHP generation/runtime, and Pest tests. `packages/client` owns the native Zero,
-React, and Inertia exports. `tests/interop` checks PHP/TypeScript agreement;
+React, and Inertia exports. `packages/table` owns headless table state, editors,
+and the optional Formbraid adapter. `tests/interop` checks PHP/TypeScript agreement;
 `tests/integration` runs a real cache. `examples/todos` is the shared application.
 `apps/docs` owns authored MDX, site configuration, and generated API JSON; docs-base
 owns the Waku/Fumadocs rendering application.
@@ -49,7 +50,7 @@ real-cache integration suite, coverage, and the docs deployment dry run.
 | `pnpm test`                         | Native ZQL comparisons, mutations, React, Inertia, and interop |
 | `pnpm contracts:check`              | Exact generated PHP/TypeScript fixture agreement               |
 | `pnpm test:integration`             | Disposable PostgreSQL/Laravel/Zero integration                 |
-| `pnpm build`                        | Client package and production docs                             |
+| `pnpm build`                        | Client/table packages and production docs                      |
 | `pnpm package:check`                | Built exports, optional-peer isolation, native entry points    |
 
 When deliberately changing a generated contract, regenerate its fixture from PHP.
@@ -98,7 +99,7 @@ pnpm docs:start
 ```
 
 `apps/docs/refquill.json` selects PHP source and all public TypeScript entry points:
-core, React, Inertia, and optional search. Paths resolve from `apps/docs`.
+core, React, Inertia, optional search, and table adapters. Paths resolve from `apps/docs`.
 Commit `apps/docs/generated/api.json`
 after source changes, never edit or format it by hand. Both `docs:dev` and
 `docs:build` regenerate it automatically. The generated reference owns
@@ -141,33 +142,44 @@ Use a supervised one-off docs service with `--portal` when previewing docs in an
 
 ## Release v0.5 and later minors
 
-The Composer and npm packages share tags; no Composer `version` field is needed.
+The Composer and client npm packages share tags; no Composer `version` field is needed.
+The optional table package has its own version and requires the matching client
+minor through its peer dependency.
 Before tagging, update `packages/client/package.json`, current-version docs, and
 `CHANGELOG.md`; regenerate the API and run `pnpm check`, `pnpm test:integration`,
-the example checks, and `deploy:check`. Inspect `npm pack --dry-run` from
-`packages/client`. Push the tested `main` commit and matching annotated `v<version>`
+the example checks, and `deploy:check`. When changing the table package, update
+`packages/table/package.json` and its client peer requirement as needed. Inspect
+both package tarballs and test their imports/types in a clean consumer outside
+the workspace, with and without optional Formbraid packages.
+Push the tested `main` commit and matching annotated `v<version>`
 tag, then publish a GitHub Release for that tag. For this release the version is
-**0.6.0** and tag **v0.6.0**. Stable releases use `latest`; prerelease versions must
+**0.7.0**, tag **v0.7.0**, and table version **0.1.0**. Stable releases use `latest`; prerelease versions must
 be marked as GitHub prereleases and use `next`.
 
 `Publish npm` runs reusable CI, verifies the tag/version, and calls
 `npm stage publish --access public --provenance --tag <dist-tag>` from the client
-package. It uses npm trusted publishing/OIDC in environment `npm`, with
+package and from the table package if that exact table version is not published.
+It uses npm trusted publishing/OIDC in environment `npm`, with
 `id-token: write`, not an npm token. The trusted publisher must name owner
 `nickwelsh`, repository `zero-for-laravel-monorepo`, workflow `publish-npm.yml`,
-environment `npm`, and allow **staged publishing only**. CI never approves npm.
+environment `npm`, and allow **staged publishing only** for both packages. Initial
+creation and trusted-publisher configuration of `@nickwelsh/zero-table` are owner
+release prerequisites; a registry 404 alone does not establish publishing authority.
+CI never approves npm.
 
 The owner reviews and approves with an authenticated package-owner account and 2FA:
 
 ```sh
 npm stage list @nickwelsh/zero-for-laravel
+npm stage list @nickwelsh/zero-table
 npm stage view <stage-id>
 npm stage approve <stage-id>
 ```
 
 The release workflow also tags the PHP subtree mirror after CI. Stable docs wait
-until npm's public `latest` equals the approved release, then build/deploy the exact
-release commit to Cloudflare. They recheck `latest` before deploying. Main pushes
+until npm's public `latest` equals both package versions in the release commit,
+then build/deploy that exact commit to Cloudflare. They recheck both `latest` tags
+before deploying. Main pushes
 and prereleases do not deploy docs. If approval takes more than one hour, approve
 npm then **Re-run failed jobs**; successful staging/mirror jobs are not repeated.
 Manual docs redeployment takes an existing stable tag and applies the same checks.

@@ -50,7 +50,7 @@ function publish() {
     });
 }
 
-const Adapter = createZeroOptionSource({
+const adapterConfig = {
     value: 'id',
     label: 'title',
     list: {
@@ -67,7 +67,8 @@ const Adapter = createZeroOptionSource({
             return parsed.success ? bindings[optionQueries.resolve.name](parsed.data) : undefined;
         },
     },
-});
+} satisfies Parameters<typeof createZeroOptionSource>[0];
+const Adapter = createZeroOptionSource(adapterConfig);
 const fieldDefinition = {
     name: 'reference',
     type: 'string',
@@ -172,6 +173,7 @@ it('resolves a prefilled ID while closed, searches independently, and submits on
     expect(
         native.requests.filter((request) => request.query.queryName === optionQueries.list.name).at(-1)?.args,
     ).toEqual({
+        __window: 21,
         i0: parent,
         i1: false,
         i2: 'Matching',
@@ -235,4 +237,35 @@ it.each([
     ['café', '%café%'],
 ])('escapes literal containment text %j', (value, expected) => {
     expect(optionContains(value)).toBe(expected);
+});
+
+it('offers growing live prefixes through the same Formbraid source without losing selected-ID resolution', async () => {
+    native.list = Array.from({ length: 21 }, (_, index) => ({ id: `${index}`, title: `Choice ${index}` }));
+    render(
+        <Adapter
+            operation="list"
+            enabled
+            inputs={[
+                { reference: { kind: 'context', key: 'task' }, present: true, value: parent },
+                { reference: { kind: 'field', path: 'done' }, present: true, value: false },
+                { reference: { kind: 'value' }, present: true, value: '' },
+            ]}
+        >
+            {(state) => (
+                <>
+                    <output>{state.items.length} choices</output>
+                    {state.hasMore && (
+                        <button type="button" onClick={() => state.loadMore?.()}>
+                            More choices
+                        </button>
+                    )}
+                </>
+            )}
+        </Adapter>,
+    );
+    await waitFor(() => expect(screen.getByText('20 choices')).toBeDefined());
+    expect(screen.queryByText('21 choices')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'More choices' }));
+    await waitFor(() => expect(screen.getByText('21 choices')).toBeDefined());
+    expect(screen.queryByRole('button', { name: 'More choices' })).toBeNull();
 });

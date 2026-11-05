@@ -14,13 +14,16 @@ final readonly class ZodSchemaDriver implements SchemaDriver
         return "import {z} from 'zod';";
     }
 
-    public function object(array $parameters, ?array $cursor = null, bool $public = false, array $contracts = [], bool $routed = true): string
+    public function object(array $parameters, ?array $cursor = null, bool $public = false, array $contracts = [], bool $routed = true, bool $window = false): string
     {
         $fields = $routed ? [
             '__route: z.string().optional()',
             '__routeArgs: z.record(z.string(), z.union([z.string(), z.number().int()])).optional()',
-            '__window: z.number().int().min(1).max(2147483647).optional()',
         ] : [];
+        if ($routed || $window) {
+            $fields[] = '__window: z.number().int().min(1).max(2147483647).optional()';
+        }
+
         if (! $public) {
             $fields[] = '__generation: z.uuid().optional()';
         }

@@ -152,6 +152,20 @@ test('explicit creation sites and metadata remain separate from request input', 
     expect(fn () => $models->connection()->transaction(fn () => $registry->execute($program->name(), $wire, new ResolvedContext(['user_id' => 'alice'], 'alice'))))->toThrow(ValidationException::class);
 });
 
+test('discovering table relationships does not invalidate a deployed mutation binding', function (): void {
+    Route::post('/explicit', [ControllerMutationController::class, 'explicit']);
+    [$models, $program, $registry, $wire] = mutationRegistration($this, 'explicit');
+    $models->relation($models->get('Task'), 'list');
+    $models->relation($models->get('Task'), 'tags');
+
+    $fresh = (new ControllerMutationCompiler((new ParserFactory)->createForNewestSupportedVersion(), $models))
+        ->compile(ControllerMutationController::class, 'explicit');
+    expect($fresh->name())->toBe($program->name());
+    $wire['version'] = $fresh->fingerprint;
+    expect($models->connection()->transaction(fn () => $registry->execute($fresh->name(), $wire, new ResolvedContext(['user_id' => 'alice'], 'alice'))))
+        ->toBe(['data' => ['id' => $wire['prepared']['ids']['key:task']]]);
+});
+
 test('controller FormRequests isolate invocation input from transport query and retain the authenticated user', function (): void {
     Route::post('/isolated', [ControllerMutationController::class, 'store']);
     [$models, $program, $registry, $wire] = mutationRegistration($this, 'store');

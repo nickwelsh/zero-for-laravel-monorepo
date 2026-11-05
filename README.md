@@ -4,21 +4,27 @@ Controller-first live queries and mutations for [Rocicorp Zero](https://zero.roc
 Laravel owns validation, binding, authorization, and authoritative writes. Zero owns
 replication, subscriptions, optimistic transactions, replay, and mutation outcomes.
 
-**v0.6.0** provides controller-first queries and mutations. Install matching versions of
+**v0.7.0** provides controller-first queries and mutations. Install matching versions of
 `nickwelsh/zero-for-laravel` and `@nickwelsh/zero-for-laravel`. Both the Zero client
 and zero-cache must use **1.11.3**. PHP 8.3+, Laravel 12/13, PostgreSQL 15+ with
 logical replication, and React 18/19 are supported targets. Automatic live page
 props require Inertia 3 (the React adapter requires `@inertiajs/react` ^3.8.0).
 
 ```sh
-composer require nickwelsh/zero-for-laravel:^0.6.0
-pnpm add @nickwelsh/zero-for-laravel@^0.6.0 @rocicorp/zero@1.11.3
+composer require nickwelsh/zero-for-laravel:^0.7.0
+pnpm add @nickwelsh/zero-for-laravel@^0.7.0 @rocicorp/zero@1.11.3
 ```
 
 The [shared todos example](examples/todos/README.md) is a complete application with
 authentication, shared/private lists, controller mutations, and live Inertia props.
 The [query design](docs/QUERY_DESIGN.md) and [mutation design](docs/MUTATION_DESIGN.md)
 record the architecture and acceptance requirements.
+
+For editable grouped data grids, add `@nickwelsh/zero-table@^0.1.0`. Its
+[consumer guide](packages/table/README.md) covers fluent Laravel capabilities,
+React hooks and unstyled components, infinite loading, snapshot group counts,
+and optional Formbraid 0.3 editors. The table package requires client **^0.7.0**;
+ordinary Zero applications do not depend on it.
 
 ## Declare live props in controllers
 
@@ -216,12 +222,12 @@ Outside React, construct Zero with the `mutators` returned by
 whereas native results retain wire values. A committed result decode failure is
 not a rolled-back write and must not trigger resubmission.
 
-React 19 apps can use Formbraid **0.2** with generated controller descriptors:
+React 19 apps can use Formbraid **0.3** with generated controller descriptors:
 import `store` from `@/formbraid/zero/App/Http/Controllers/TodoListController`
 and render `<Form form={store} />`. `zero:formbraid` reuses Formbraid's component
 metadata and request generator, attaching native Zero submission callbacks.
 Formbraid owns draft state; success waits for authoritative acceptance. See the
-[form guide](apps/docs/content/docs/0.x/docs/mutations.mdx#formbraid-02).
+[form guide](apps/docs/content/docs/0.x/docs/mutations.mdx#formbraid-03).
 
 Generated creates use **prepared fields**: UUIDs/ULIDs inferred from Eloquent traits,
 plus timestamps inferred from the model's timestamp settings. The client captures

@@ -52,20 +52,23 @@ test('option reads validate their own arguments and reauthorize context without 
     $foreign = Task::create(['title' => 'Private', 'user_id' => 'bob']);
     $this->actingAs(OwnerUser::findOrFail('alice'))->withHeader('X-Api-Key', 'private-test-secret');
     $args = ['i0' => $parent->id, 'i1' => false, 'i2' => '50%_\\'];
-    $variants = [$args, [...$args, 'i0' => $foreign->id], [...$args, 'i1' => null], [...$args, 'i2' => str_repeat('x', 257)], [...$args, '__window' => 1000], [...$args, 'i2' => '']];
+    $variants = [$args, [...$args, 'i0' => $foreign->id], [...$args, 'i1' => null], [...$args, 'i2' => str_repeat('x', 257)], [...$args, '__window' => 0], [...$args, 'i2' => ''], [...$args, '__window' => 41], [...$args, '__window' => 2147483648], [...$args, '__route' => 'forged']];
     $batch = array_map(fn (array $input, int $index): array => ['id' => (string) $index, 'name' => $definitions[0]->name(), 'args' => [$input]], $variants, array_keys($variants));
     $response = $this->postJson('/zero/query', ['transform', $batch])->assertOk()
-        ->assertJsonMissingPath('queries.0.error')->assertJsonPath('queries.0.ast.limit', 20)
+        ->assertJsonMissingPath('queries.0.error')->assertJsonPath('queries.0.ast.limit', 21)
         ->assertJsonPath('queries.0.ast.orderBy', [['title', 'asc'], ['id', 'asc']])
         ->assertJsonPath('queries.1.details.status', 403)->assertJsonPath('queries.2.error', 'parse')
         ->assertJsonPath('queries.3.error', 'parse')->assertJsonPath('queries.4.error', 'parse')
-        ->assertJsonMissingPath('queries.5.error');
+        ->assertJsonMissingPath('queries.5.error')->assertJsonPath('queries.6.ast.limit', 41)
+        ->assertJsonPath('queries.7.error', 'parse')->assertJsonPath('queries.8.error', 'parse');
     $ast = json_encode($response->json('queries.0.ast'), JSON_THROW_ON_ERROR);
     expect($ast)->toContain(json_encode('%50\\%\\_\\\\%', JSON_THROW_ON_ERROR), 'permission_index', 'user:alice');
     $resolve = ['id' => 'selected', 'name' => $definitions[1]->name(), 'args' => [['i0' => $parent->id, 'i1' => false, 'i2' => $foreign->id]]];
     $resolved = $this->postJson('/zero/query', ['transform', [$resolve]])->assertOk()
         ->assertJsonMissingPath('queries.0.error')->assertJsonPath('queries.0.ast.limit', 1);
     expect(json_encode($resolved->json('queries.0.ast'), JSON_THROW_ON_ERROR))->not->toContain('ILIKE');
+    $resolve['args'][0]['__window'] = 41;
+    $this->postJson('/zero/query', ['transform', [$resolve]])->assertOk()->assertJsonPath('queries.0.error', 'parse');
     $registered = $registrations[$definitions[0]->name()];
     $stale = new \ZeroForLaravel\Query\RegisteredOptionQuery($registered->action, $registered->parameters,
         static fn (): ZeroQuery => Task::zeroQuery(), $registered->source, 'obsolete');

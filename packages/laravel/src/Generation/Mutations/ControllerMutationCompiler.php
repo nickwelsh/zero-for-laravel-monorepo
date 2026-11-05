@@ -89,7 +89,14 @@ final class ControllerMutationCompiler
         $operations = $config->optimism === 'generated' ? $this->statements($node->stmts ?? [], $variables) : [];
         $this->validateSeeds($node);
         $data = ['mutable-scopes-v1', ContextDefinition::configured()->contract(), $controller, $method, $config, $parameters, $operations, $this->sources,
-            array_map(fn (ModelMetadata $model): array => $model->toArray(), $this->models->all())];
+            array_map(function (ModelMetadata $model): array {
+                $schema = $model->toArray();
+                // Mutation operations use model fields, not lazy query relationships.
+                $schema['relations'] = [];
+                $schema['relationConstraints'] = [];
+
+                return $schema;
+            }, $this->models->all())];
 
         return new MutationProgram($controller.'@'.$method, $config->optimism, $config->conceal,
             $return->getName() !== 'void', $parameters, $operations, $this->sites, $this->guards,

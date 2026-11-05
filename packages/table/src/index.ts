@@ -1,5 +1,7 @@
 /* oxlint-disable unicorn/no-array-sort -- ES2022 support; only newly allocated arrays are sorted. */
 import { encodeDate, type Column } from '@nickwelsh/zero-for-laravel';
+export { column, editors, parseEditorValue } from './columns';
+export type { Editor, ColumnDefinition, CellChange, CellSubmitResult } from './columns';
 
 export type Scalar = string | number | boolean | null;
 export type GroupPath = readonly { readonly field: string; readonly value: Scalar }[];
@@ -76,6 +78,10 @@ export type TableQueryInput<C extends Capabilities = Capabilities> = Omit<TableS
     readonly path: GroupPath;
     readonly __window?: number;
     readonly __generation?: string;
+    /** Identity-only draft visibility read, independent of the current view. */
+    readonly __row?: readonly (string | number | boolean)[];
+    /** Renew visibility after a failed optimistic write has settled. */
+    readonly __refresh?: string;
 };
 export interface Selection<Row> {
     readonly key: string;
@@ -188,7 +194,25 @@ interface NativeQuery {
 export function applyTableQuery<Q, C extends Capabilities>(base: Q, input: TableQueryInput<C>, capabilities: C): Q {
     validateState(capabilities, { ...input, expanded: [] });
     if (input.path.length !== input.groupBy.length) invalid('complete leaf path required');
+    if (input['__refresh'] !== undefined && input['__row'] === undefined) invalid('identity refresh');
     let query = base as unknown as NativeQuery;
+    if (input['__row'] !== undefined) {
+        if (
+            !Array.isArray(input['__row']) ||
+            input['__row'].length !== capabilities.key.length ||
+            input.filter !== null ||
+            input.groupBy.length ||
+            input.sort.length ||
+            input['__window'] !== 1
+        )
+            invalid('identity read');
+        capabilities.key.forEach((field, index) => {
+            const value = input['__row']![index];
+            if (value === null) invalid('identity value');
+            scalar(value, capabilities.columns[field]!);
+            query = query.where(field, '=', value);
+        });
+    }
     if (input.filter)
         query = query.where((builder) => {
             function expression(node: FilterNode<C>): unknown {

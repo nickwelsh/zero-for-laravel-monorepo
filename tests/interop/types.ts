@@ -15,6 +15,7 @@ import { index, show, dated } from './controller-api/ZeroForLaravel/Tests/Fixtur
 import { store } from './controller-api/ZeroForLaravel/Tests/Fixtures/ControllerMutationController';
 import tasks from './table.generated';
 import { useDataTable } from '@nickwelsh/zero-table/react';
+import { column, editors, type CellChange } from '@nickwelsh/zero-table';
 
 // Compiled by typecheck; these exercise only public generated controller contracts.
 function useContracts() {
@@ -91,7 +92,13 @@ function generatedPageTypes(page: { heading: string; tasks: QueryData<typeof ind
 }
 
 function useTableContracts() {
-    const table = useDataTable(tasks);
+    const table = useDataTable(tasks, {
+        columns: [column.text('title', { editor: editors.text(), query: { filter: 'title', sort: 'title' } })],
+    });
+    // @ts-expect-error generated model fields constrain editable columns
+    useDataTable(tasks, { columns: [column.text('unknown')] });
+    // @ts-expect-error column query associations cannot invent backend capabilities
+    useDataTable(tasks, { columns: [column.text('title', { query: { sort: 'done' } })] });
     table.setFilter({ kind: 'condition', field: 'title', operator: 'contains', value: 'alpha' });
     table.setFilter({ kind: 'condition', field: 'completed', operator: 'equals', value: true });
     // @ts-expect-error generated aliases, not database column names
@@ -111,4 +118,14 @@ function useTableContracts() {
         return { title, completed };
     }
     return undefined;
+}
+
+function typedCellChanges(change: CellChange<{ title: string; done: boolean }>) {
+    if (change.field === 'done') {
+        const value: boolean = change.value;
+        // @ts-expect-error the field discriminant narrows its value
+        const text: string = change.value;
+        return value;
+    }
+    return change.value.toUpperCase();
 }

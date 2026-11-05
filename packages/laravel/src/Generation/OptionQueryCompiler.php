@@ -181,6 +181,10 @@ final readonly class OptionQueryCompiler
 
     private function limited(QueryExpression $expression): bool
     {
+        if ($expression->kind === 'infinite') {
+            return is_int($expression->value) && $expression->value > 0 && $expression->value <= 100;
+        }
+
         if ($expression->kind === 'method' && $expression->value === 'limit') {
             $limit = $expression->children[1];
 

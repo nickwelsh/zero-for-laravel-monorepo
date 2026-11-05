@@ -32,7 +32,7 @@ final class OptionRequest extends FormRequest
                     ->where('done', OptionInput::field('done'))
                     ->where('id', '!=', OptionInput::context('task'))
                     ->where('title', 'ILIKE', ZeroOptions::contains(OptionInput::value()))
-                    ->orderBy('title', 'asc')->orderBy('id', 'asc')->limit(20),
+                    ->orderBy('title', 'asc')->orderBy('id', 'asc')->infinite(20),
                 value: 'id', label: 'title',
                 resolve: Task::zeroQuery()
                     ->where('done', OptionInput::field('done'))

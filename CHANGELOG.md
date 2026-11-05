@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.7.0] - Unreleased
+
+- Add `@nickwelsh/zero-table` **0.1.0**, a headless editable table with React hooks,
+  unstyled components, independent nested grouping, virtualized window/panel
+  scrolling, and infinite live row prefixes. Laravel table definitions declare
+  allowed filters, sorts and groups once and generate native Zero queries plus
+  authorized SQL snapshot counts and directories.
+- Add opt-in background preloading with a shared 1,000-requested-row / 8-query
+  budget and batches of 100, configurable collapsed-group hover loading, and
+  40-item viewport lookahead. Budgets constrain background demand, not explicit
+  expansion, scrolling, or total native cache memory. Cold bulk hydration can
+  still stall; no experimental Zero dependency patch is included.
+- Add gated inline cell editing, scalar/custom editors, and an optional Formbraid
+  bridge with searchable, independently resolved, infinite relation choices.
+  Move the optional Formbraid integration to **0.3** across PHP and JavaScript.
+
+Upgrade the PHP and client packages together to **0.7.0**, then regenerate and
+deploy PHP/TypeScript contracts together. The table package requires client
+**^0.7.0** and Zero client/cache **1.11.3**. Formbraid users must upgrade
+`formbraid/laravel`, `@formbraid/core`, and `@formbraid/react` together to **^0.3.0**
+and regenerate form descriptors. Counts remain snapshots, and background preload
+defaults to off. Existing applications do not need Formbraid or the table package.
+
 ## [0.6.0] - 2026-11-04
 
 - Add Formbraid **0.2** integration for native Zero controller mutations.
@@ -60,5 +83,6 @@ Deploy generated PHP and TypeScript contracts together. Supported targets are PH
 8.3+, Laravel 12/13, PostgreSQL 15+, and React 18/19. Automatic live pages require
 Inertia Laravel 3 and `@inertiajs/react` ^3.8.0.
 
+[0.7.0]: https://github.com/nickwelsh/zero-for-laravel-monorepo/compare/v0.6.0...HEAD
 [0.6.0]: https://github.com/nickwelsh/zero-for-laravel-monorepo/releases/tag/v0.6.0
 [0.5.0]: https://github.com/nickwelsh/zero-for-laravel-monorepo/releases/tag/v0.5.0

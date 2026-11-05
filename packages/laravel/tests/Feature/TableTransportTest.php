@@ -4,8 +4,11 @@ declare(strict_types=1);
 
 namespace ZeroForLaravel\Tests\Feature;
 
+use Closure;
 use Illuminate\Foundation\Auth\User;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Validation\ValidationException;
 use LogicException;
@@ -29,8 +32,34 @@ use ZeroForLaravel\Tests\Fixtures\Task;
 use ZeroForLaravel\Tests\Fixtures\TaskList;
 use ZeroForLaravel\Tests\Fixtures\TasksTable;
 use ZeroForLaravel\Tests\OwnerPostgresTestCase;
+use ZeroForLaravel\ZeroServiceProvider;
 
-uses(OwnerPostgresTestCase::class);
+class TableTransportTestCase extends OwnerPostgresTestCase
+{
+    protected function getPackageProviders($app): array
+    {
+        return [ZeroServiceProvider::class];
+    }
+
+    protected function defineEnvironment($app): void
+    {
+        parent::defineEnvironment($app);
+        $app['config']->set('zero.tables', ['tasks' => TasksTable::class]);
+        $app['config']->set('zero.middleware', [TableScopeMiddleware::class]);
+    }
+}
+
+final class TableScopeMiddleware
+{
+    public function handle(Request $request, Closure $next): mixed
+    {
+        abort_unless($request->header('X-Table-Scope') === 'allowed', 403);
+
+        return $next($request);
+    }
+}
+
+uses(TableTransportTestCase::class);
 
 final class UnsafeTable
 {
@@ -103,6 +132,26 @@ test('table native registrations and metadata reject stale, malformed and anonym
     expect($ast['limit'])->toBe(3);
     expect(json_encode($ast, JSON_THROW_ON_ERROR))->toContain('user:alice', 'permission_index');
     expect(fn (): array => $registered->invoke(['__window' => 0], new ResolvedContext(['user_id' => 'alice'], 'alice'), new QueryCompiler(resolve(ModelRegistry::class))))->toThrow(ValidationException::class);
+
+    $identity = ['filter' => null, 'sort' => [], 'groupBy' => [], 'path' => [], '__window' => 1, '__row' => ['00000000-0000-4000-8000-000000000001'], '__refresh' => '00000000-0000-4000-8000-000000000123'];
+    $ast = $registered->invoke($identity, new ResolvedContext(['user_id' => 'alice'], 'alice'), new QueryCompiler(resolve(ModelRegistry::class)));
+    expect($ast['limit'])->toBe(1);
+    expect(json_encode($ast, JSON_THROW_ON_ERROR))->toContain('00000000-0000-4000-8000-000000000001', 'user:alice', 'permission_index');
+    foreach ([['__row' => []], ['__row' => null], ['__row' => [false]], ['__row' => ['one', 'two']], ['__window' => 2], ['__refresh' => 'invalid'], ['filter' => ['kind' => 'condition', 'field' => 'title', 'operator' => 'contains', 'value' => 'Task']]] as $invalid) {
+        expect(fn (): array => $registered->invoke([...$identity, ...$invalid], new ResolvedContext(['user_id' => 'alice'], 'alice'), new QueryCompiler(resolve(ModelRegistry::class))))->toThrow(ValidationException::class);
+    }
+});
+
+test('metadata runs configured scope middleware as well as browser authentication', function (): void {
+    /** @var TableTransportTestCase $this */
+    $definition = resolve(TableRegistry::class)->all()[0];
+    $body = ['version' => 1, 'contract' => $definition->contract, 'filter' => null, 'groupBy' => [], 'directories' => []];
+    $this->postJson('/zero/tables/tasks/metadata', $body)->assertUnauthorized();
+    $alice = (new User)->setKeyType('string')->forceFill(['id' => 'alice']);
+    $this->actingAs($alice);
+    $this->postJson('/zero/tables/tasks/metadata', $body)->assertForbidden();
+    $this->postJson('/zero/tables/tasks/metadata', $body, ['X-Table-Scope' => 'allowed'])
+        ->assertOk()->assertJsonPath('totalCount', 53);
 });
 
 test('table generation is symbolic and emits paired descriptors without changing the no-table output', function (): void {
@@ -128,6 +177,6 @@ test('table generation is symbolic and emits paired descriptors without changing
         file_put_contents($path, $generator->php([], [$definition]));
         expect(RegisteredQueries::load($path)->all()[$definition->queryName()])->toBeInstanceOf(RegisteredTableQuery::class);
     } finally {
-        \Illuminate\Support\Facades\File::delete($path);
+        File::delete($path);
     }
 });

@@ -5,12 +5,14 @@ declare(strict_types=1);
 use App\Enums\ZeroContext;
 use App\Models\Todo;
 use App\Models\TodoList;
+use App\Tables\TodosTable;
 use App\Zero\ResolveZeroContext;
 
 return [
     // Only these domain models may enter Zero's browser schema.
     'models' => [TodoList::class, Todo::class],
     'public_models' => [],
+    'tables' => ['todos' => TodosTable::class],
     'output' => resource_path('js/zero/generated.ts'),
     'react' => true,
     // Synchronize after successful, non-pretend PostgreSQL migration batches.

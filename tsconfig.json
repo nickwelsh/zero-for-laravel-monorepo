@@ -14,6 +14,7 @@
         "paths": {
             "@nickwelsh/zero-table": ["./packages/table/src/index.ts"],
             "@nickwelsh/zero-table/react": ["./packages/table/src/react/index.tsx"],
+            "@nickwelsh/zero-table/formbraid": ["./packages/table/src/formbraid.tsx"],
             "@nickwelsh/zero-for-laravel": ["./packages/client/src/index.ts"],
             "@nickwelsh/zero-for-laravel/inertia": ["./packages/client/src/react/inertia.tsx"],
             "@nickwelsh/zero-for-laravel/formbraid": ["./packages/client/src/formbraid.ts"],

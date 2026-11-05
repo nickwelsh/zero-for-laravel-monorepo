@@ -12,7 +12,10 @@ await access(new URL('README.md', root));
 let allowReact = false;
 registerHooks({
     resolve(specifier, context, nextResolve) {
-        if (!allowReact && (specifier === 'react' || specifier.startsWith('react/'))) {
+        if (
+            !allowReact &&
+            (specifier === 'react' || specifier.startsWith('react/') || specifier.startsWith('@tanstack/'))
+        ) {
             throw new Error('The core package must load without React.');
         }
         if (specifier.startsWith('@formbraid/') || specifier === 'effect' || specifier.startsWith('effect/')) {
@@ -41,6 +44,9 @@ await import(new URL('dist/react/index.js', tableRoot).href);
 await import(new URL('dist/react/index.js', root).href);
 const optionSources = await import(new URL('dist/react/formbraid.js', root).href);
 if (typeof optionSources.createZeroOptionSource !== 'function') throw new Error('Missing Zero option source producer.');
+const tableForms = await import(new URL('dist/formbraid.js', tableRoot).href);
+if (typeof tableForms.formbraidSubmit !== 'function' || typeof tableForms.RelationEditor !== 'function')
+    throw new Error('Missing optional table form bridge.');
 console.log(
     'Built exports exist; core and form producers load without React; all bindings load without Formbraid or Effect.',
 );

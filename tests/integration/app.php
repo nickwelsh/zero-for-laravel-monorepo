@@ -22,7 +22,6 @@ use Inertia\Inertia;
 use Inertia\Response;
 use Symfony\Component\Console\Output\ConsoleOutput;
 use ZeroForLaravel\Attributes\ZeroMutation;
-use ZeroForLaravel\Generation\Mutations\ControllerMutationCompiler;
 use ZeroForLaravel\Inertia\ZeroInertiaServiceProvider;
 use ZeroForLaravel\Permissions\Casbin;
 use ZeroForLaravel\Permissions\VisibleToCurrentUser;
@@ -36,6 +35,10 @@ use ZeroForLaravel\Tests\Fixtures\Task;
 use ZeroForLaravel\Tests\Fixtures\TaskList;
 use ZeroForLaravel\Tests\Fixtures\ZeroContext;
 use ZeroForLaravel\ZeroServiceProvider;
+use ZeroForLaravel\Tables\AllowedFilter;
+use ZeroForLaravel\Tables\AllowedGroup;
+use ZeroForLaravel\Tables\Table;
+use ZeroForLaravel\Tables\TableContext;
 
 // Access checks reload this configured model rather than trusting the request's
 // deliberately incomplete identity. Eloquent must not coerce alice/bob to ints.
@@ -97,6 +100,22 @@ class FixtureReads
     }
 }
 
+class FixtureTable
+{
+    public function definition(TableContext $context): Table
+    {
+        return Table::for(Task::class)->visibleTo($context->user())
+            ->allowedFilters([
+                AllowedFilter::text('title')->operators(['equals', 'notEquals', 'contains', 'startsWith', 'endsWith']),
+                AllowedFilter::exact('completed', 'done'),
+                AllowedFilter::exact('list', 'list_id')->nullable(),
+                AllowedFilter::date('date', 'completed_at')->operators(['equals', 'notEquals', 'in', 'gt', 'gte', 'lt', 'lte'])->nullable(),
+            ])->allowedSorts(['title', 'completed_at'])
+            ->allowedGroups([AllowedGroup::field('done'), AllowedGroup::belongsTo('list')->label('name')])
+            ->pageSize(2);
+    }
+}
+
 class FixtureMutations
 {
     /** @return array{id: string} */
@@ -120,7 +139,13 @@ $root = getenv('ZERO_INTEGRATION_ROOT');
 if (! is_string($root) || ! is_dir($root) || ! str_starts_with(basename($root), 'zero-live-')) {
     throw new RuntimeException('Missing isolated fixture root.');
 }
-$app = Application::configure(basePath: $root)->withProviders([ZeroServiceProvider::class, ZeroInertiaServiceProvider::class])->withExceptions()->create();
+$app = Application::configure(basePath: $root)->withProviders([ZeroServiceProvider::class, ZeroInertiaServiceProvider::class])
+    // This stateless fixture substitutes its test bearer identities for browser
+    // sessions. The Todos browser proof exercises real web/auth/CSRF middleware.
+    ->withMiddleware(function (Illuminate\Foundation\Configuration\Middleware $middleware): void {
+        $middleware->group('web', [FixtureIdentity::class]);
+        $middleware->alias(['auth' => FixtureIdentity::class]);
+    })->withExceptions()->create();
 $app->afterBootstrapping(LoadConfiguration::class, function ($app) use ($root) {
     $app['config']->set([
         'logging.default' => 'single', 'logging.channels.single' => ['driver' => 'single', 'path' => $root.'/laravel.log'],
@@ -133,6 +158,7 @@ $app->afterBootstrapping(LoadConfiguration::class, function ($app) use ($root) {
             'charset' => 'utf8', 'prefix' => '', 'search_path' => 'public', 'sslmode' => 'prefer',
         ],
         'zero.models' => [Task::class, TaskList::class, Tag::class, Comment::class],
+        'zero.tables' => ['tasks' => FixtureTable::class],
         'zero.context' => ZeroContext::class,
         'zero.context_resolver' => ContextResolver::class,
         'zero.middleware' => [FixtureIdentity::class], 'zero.api_key' => getenv('ZERO_API_KEY'),
@@ -186,12 +212,6 @@ if (PHP_SAPI === 'cli') {
     Schema::table('users', function (Illuminate\Database\Schema\Blueprint $table): void {
         $table->boolean('access_blocked')->default(false);
     });
-    $contracts = [];
-    foreach (['store', 'update'] as $method) {
-        $program = app(ControllerMutationCompiler::class)->compile(FixtureMutations::class, $method);
-        $contracts[$program->name()] = $program->contract();
-    }
-    file_put_contents($root.'/controller-contracts.json', json_encode($contracts, JSON_THROW_ON_ERROR));
     exit(0);
 }
 $request = Request::capture();

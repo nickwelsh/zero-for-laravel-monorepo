@@ -19,9 +19,9 @@ return [
     'fingerprint' => '6ea851ab27d37deb499c8dda6f665e0d60f01e00b34bf9fc02abfcb73967c7c7',
   ),
 ), 'q_95e097c03a3cc356fa33ca7de72d998ed3fc4a83cb9ed5b747a43b4ccd34361b'),
-    'q_41409c546d5f427dafdeb91e8808dbc5da7e3df48c84094dfc0e97102b3d4267' => new \ZeroForLaravel\Query\RegisteredOptionQuery('App\\Http\\Controllers\\TodoController@store', array (
+    'q_794d3560aa885bacab8df4aefa20acac9e04a7ba0851ca0802404d6b6747373f' => new \ZeroForLaravel\Query\RegisteredOptionQuery('App\\Http\\Controllers\\TodoController@store', array (
   'i0' => 'string',
-), static fn (array $args): \ZeroForLaravel\Query\ZeroQuery => \App\Models\TodoList::zeroQuery()->where('name', 'ILIKE', ZeroForLaravel\Formbraid\OptionPattern::contains($args['i0']))->orderBy('name', 'asc')->orderBy('id', 'asc')->limit(20)->visibleTo(request()->user()), array (
+), static fn (array $args): \ZeroForLaravel\Query\ZeroQuery => \App\Models\TodoList::zeroQuery()->where('name', 'ILIKE', ZeroForLaravel\Formbraid\OptionPattern::contains($args['i0']))->orderBy('name', 'asc')->orderBy('id', 'asc')->visibleTo(request()->user())->infinite(20), array (
   'request' => 'App\\Http\\Requests\\SaveTodoRequest',
   'field' => 'list_id',
   'id' => 'App\\Http\\Requests\\SaveTodoRequest:list_id',
@@ -53,7 +53,7 @@ return [
   ),
   'value' => 'id',
   'label' => 'name',
-), 'q_41409c546d5f427dafdeb91e8808dbc5da7e3df48c84094dfc0e97102b3d4267'),
+), 'q_794d3560aa885bacab8df4aefa20acac9e04a7ba0851ca0802404d6b6747373f'),
     'q_ee21cb2ad786d10e017eb5479f8787bf576c1246642df879d1f871d07a0e9804' => new \ZeroForLaravel\Query\RegisteredOptionQuery('App\\Http\\Controllers\\TodoController@store', array (
   'i0' => 'string',
 ), static fn (array $args): \ZeroForLaravel\Query\ZeroQuery => \App\Models\TodoList::zeroQuery()->where('id', $args['i0'])->one()->visibleTo(request()->user()), array (
@@ -89,9 +89,9 @@ return [
   'value' => 'id',
   'label' => 'name',
 ), 'q_ee21cb2ad786d10e017eb5479f8787bf576c1246642df879d1f871d07a0e9804'),
-    'q_a575bb4b2c9e550a211c2a60f744e854d2c5e3124ffc92676d4f7482e34e74a4' => new \ZeroForLaravel\Query\RegisteredOptionQuery('App\\Http\\Controllers\\TodoController@update', array (
+    'q_395e91275ee83fea6dacff33cb5f2fbebd461a90dbbbc761d86484a602696838' => new \ZeroForLaravel\Query\RegisteredOptionQuery('App\\Http\\Controllers\\TodoController@update', array (
   'i0' => 'string',
-), static fn (array $args): \ZeroForLaravel\Query\ZeroQuery => \App\Models\TodoList::zeroQuery()->where('name', 'ILIKE', ZeroForLaravel\Formbraid\OptionPattern::contains($args['i0']))->orderBy('name', 'asc')->orderBy('id', 'asc')->limit(20)->visibleTo(request()->user()), array (
+), static fn (array $args): \ZeroForLaravel\Query\ZeroQuery => \App\Models\TodoList::zeroQuery()->where('name', 'ILIKE', ZeroForLaravel\Formbraid\OptionPattern::contains($args['i0']))->orderBy('name', 'asc')->orderBy('id', 'asc')->visibleTo(request()->user())->infinite(20), array (
   'request' => 'App\\Http\\Requests\\SaveTodoRequest',
   'field' => 'list_id',
   'id' => 'App\\Http\\Requests\\SaveTodoRequest:list_id',
@@ -123,7 +123,7 @@ return [
   ),
   'value' => 'id',
   'label' => 'name',
-), 'q_a575bb4b2c9e550a211c2a60f744e854d2c5e3124ffc92676d4f7482e34e74a4'),
+), 'q_395e91275ee83fea6dacff33cb5f2fbebd461a90dbbbc761d86484a602696838'),
     'q_30471d43196629bcc854513e6e8f5b7f07948b8f5b7de4512eedfaf4177ce71d' => new \ZeroForLaravel\Query\RegisteredOptionQuery('App\\Http\\Controllers\\TodoController@update', array (
   'i0' => 'string',
 ), static fn (array $args): \ZeroForLaravel\Query\ZeroQuery => \App\Models\TodoList::zeroQuery()->where('id', $args['i0'])->one()->visibleTo(request()->user()), array (
@@ -159,4 +159,5 @@ return [
   'value' => 'id',
   'label' => 'name',
 ), 'q_30471d43196629bcc854513e6e8f5b7f07948b8f5b7de4512eedfaf4177ce71d'),
+    'q_0fdab00ea7600bf1e0cf67200ecc75dbf4edf6e2f1fbd592a4ad964bf54d828c' => new \ZeroForLaravel\Tables\RegisteredTableQuery('todos', '0fdab00ea7600bf1e0cf67200ecc75dbf4edf6e2f1fbd592a4ad964bf54d828c'),
 ];

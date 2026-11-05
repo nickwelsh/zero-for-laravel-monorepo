@@ -138,7 +138,7 @@ final class ZeroServiceProvider extends ServiceProvider
                 Route::post('mutate', [ZeroController::class, 'mutate'])->name('zero.mutate');
             });
             if (config()->array('zero.tables') !== []) {
-                Route::prefix(config()->string('zero.route_prefix'))->middleware(['web', 'auth'])->group(function (): void {
+                Route::prefix(config()->string('zero.route_prefix'))->middleware(array_values(array_unique(['web', 'auth', ...$names])))->group(function (): void {
                     Route::post('tables/{table}/metadata', Http\TableMetadataController::class)->name('zero.tables.metadata');
                 });
             }

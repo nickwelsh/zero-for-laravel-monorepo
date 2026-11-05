@@ -44,6 +44,6 @@ overrides:
   'markdownlint-cli2>smol-toml': 1.9.0
   'micromark-extension-math>katex': 0.18.2
 
-# Required by the docs-base initializer until Waku fixes its API request handler.
+# Waku API request handling and memory-bounded docs static generation.
 patchedDependencies:
   waku@1.0.0-rc.3: apps/docs/patches/waku@1.0.0-rc.3.patch

@@ -410,7 +410,7 @@ import type {Schema} from '@rocicorp/zero';
 import {createControllerMutations, type ClientContext, type ModelContract} from '@nickwelsh/zero-for-laravel';
 import {z} from 'zod';
 export const controllerMutationContracts = {
-    "m_1906095314bb6cf4d17686ed181c270a": {
+    "m_c128d377a8a04e5741182b75c1da35e0": {
         "action": "ZeroForLaravel\\Tests\\Fixtures\\PreferenceMutationController@assign",
         "optimism": "generated",
         "conceal": false,
@@ -931,7 +931,7 @@ export const controllerMutationContracts = {
             "key:subscribe": "uuid",
             "key:unsubscribe": "uuid"
         },
-        "version": "1906095314bb6cf4d17686ed181c270a2e8da2043364c5c430c3cc3d675bde7f",
+        "version": "c128d377a8a04e5741182b75c1da35e0edd551e70f0faf9076354c4a9790373f",
         "returnType": "array"
     }
 } as const;
@@ -944,10 +944,10 @@ export const clientResultSchema0 = z.union([z.strictObject({"id": z.string()}), 
 const codec0 = {input: inputSchema0, encode: (input: Input0) => ({...(input["list_id"] === undefined ? {} : {"list_id": (input["list_id"] === null ? null : input["list_id"])})}), serverResult: serverResultSchema0, clientResult: clientResultSchema0};
 export function createControllerMutationBindings<S extends Schema, C extends ClientContext = ClientContext>(schema: S, models: Readonly<Record<string, ModelContract>>) {
   const codecs = {
-    "m_1906095314bb6cf4d17686ed181c270a": {...codec0},
+    "m_c128d377a8a04e5741182b75c1da35e0": {...codec0},
   };
   const runtime = createControllerMutations<S, C>(schema, models, controllerMutationContracts, codecs);
   return {...runtime, actions: {
-    "ZeroForLaravel\\Tests\\Fixtures\\PreferenceMutationController@assign": runtime.bind("m_1906095314bb6cf4d17686ed181c270a", codecs["m_1906095314bb6cf4d17686ed181c270a"]),
+    "ZeroForLaravel\\Tests\\Fixtures\\PreferenceMutationController@assign": runtime.bind("m_c128d377a8a04e5741182b75c1da35e0", codecs["m_c128d377a8a04e5741182b75c1da35e0"]),
   }};
 }

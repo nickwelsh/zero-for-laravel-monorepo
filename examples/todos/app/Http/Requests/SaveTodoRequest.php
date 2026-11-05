@@ -43,7 +43,7 @@ class SaveTodoRequest extends FormRequest
             'list_id' => Field::make('ComboboxField')->label('Destination list')->options(ZeroOptions::query(
                 TodoList::zeroQuery()
                     ->where('name', 'ILIKE', ZeroOptions::contains(OptionInput::value()))
-                    ->orderBy('name', 'asc')->orderBy('id', 'asc')->limit(20),
+                    ->orderBy('name', 'asc')->orderBy('id', 'asc')->infinite(20),
                 value: 'id', label: 'name',
                 resolve: TodoList::zeroQuery()->where('id', OptionInput::field('list_id'))->one(),
             )),

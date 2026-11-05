@@ -41,7 +41,7 @@ final readonly class ControllerQueryGenerator
                 }
             }
 
-            $lines[] = '  '.json_encode($query->name(), JSON_THROW_ON_ERROR).': '.$this->schemas->object($query->parameters, $cursor, contracts: $query->optionContracts(), routed: $query->optionSource === null).',';
+            $lines[] = '  '.json_encode($query->name(), JSON_THROW_ON_ERROR).': '.$this->schemas->object($query->parameters, $cursor, contracts: $query->optionContracts(), routed: $query->optionSource === null, window: $query->expression->kind === 'infinite').',';
         }
 
         $lines[] = '};';

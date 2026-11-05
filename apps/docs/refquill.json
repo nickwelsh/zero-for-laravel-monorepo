@@ -43,6 +43,24 @@
             "name": "react-search",
             "tsconfig": "../../tsconfig.json",
             "entryPoints": ["../../packages/client/src/react/search.tsx"]
+        },
+        {
+            "language": "typescript",
+            "name": "table",
+            "tsconfig": "../../tsconfig.json",
+            "entryPoints": ["../../packages/table/src/index.ts"]
+        },
+        {
+            "language": "typescript",
+            "name": "react-table",
+            "tsconfig": "../../tsconfig.json",
+            "entryPoints": ["../../packages/table/src/react/index.tsx"]
+        },
+        {
+            "language": "typescript",
+            "name": "table-formbraid",
+            "tsconfig": "../../tsconfig.json",
+            "entryPoints": ["../../packages/table/src/formbraid.tsx"]
         }
     ]
 }

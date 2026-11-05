@@ -91,7 +91,7 @@ final class QueryExpression
 
     public function ordersKey(): bool
     {
-        if ($this->kind === 'reference') {
+        if (in_array($this->kind, ['reference', 'infinite', 'paginate'], true)) {
             return $this->children[0]->ordersKey();
         }
 

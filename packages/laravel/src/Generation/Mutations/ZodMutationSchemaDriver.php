@@ -14,9 +14,9 @@ final readonly class ZodMutationSchemaDriver implements MutationSchemaDriver
         return (new ZodSchemaDriver)->imports();
     }
 
-    public function object(array $parameters, ?array $cursor = null, bool $public = false, array $contracts = [], bool $routed = true): string
+    public function object(array $parameters, ?array $cursor = null, bool $public = false, array $contracts = [], bool $routed = true, bool $window = false): string
     {
-        return (new ZodSchemaDriver)->object($parameters, $cursor, $public, $contracts, $routed);
+        return (new ZodSchemaDriver)->object($parameters, $cursor, $public, $contracts, $routed, $window);
     }
 
     public function encode(array $parameters, string $input): string

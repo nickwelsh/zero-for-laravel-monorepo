@@ -97,7 +97,11 @@ final class ControllerQueryCompiler
                         // Option sources always read protected root rows as the authenticated actor.
                         // fields() constructs metadata without an ambient authenticated request.
                         if ($expression->model?->policyVisibility) {
-                            $expression = new QueryExpression('method', 'visibleTo', [$expression, new QueryExpression('actor', type: 'actor')], $expression->model, 'query', $expression->singular);
+                            $base = $expression->kind === 'infinite' ? $expression->children[0] : $expression;
+                            $visible = new QueryExpression('method', 'visibleTo', [$base, new QueryExpression('actor', type: 'actor')], $expression->model, 'query', $expression->singular);
+                            $expression = $expression->kind === 'infinite'
+                                ? new QueryExpression('infinite', $expression->value, [$visible], $expression->model, 'query')
+                                : $visible;
                         }
 
                         $this->coverage($expression);

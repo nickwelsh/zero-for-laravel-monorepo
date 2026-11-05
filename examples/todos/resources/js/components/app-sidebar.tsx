@@ -22,6 +22,7 @@ const mainNavItems: NavItem[] = [
         href: dashboard(),
         icon: LayoutGrid,
     },
+    { title: 'Data table', href: '/grouping', icon: LayoutGrid },
 ];
 
 const footerNavItems: NavItem[] = [

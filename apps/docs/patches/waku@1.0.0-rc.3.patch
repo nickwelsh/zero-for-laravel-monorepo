@@ -1,7 +1,21 @@
+diff --git a/dist/router/define-router-utils/build-handler.js b/dist/router/define-router-utils/build-handler.js
+index 4ac6d335f17df9ef6be437a0a27cc168dd680838..dd68530675e704542ec1389ce2e3cf993b4758ba 100644
+--- a/dist/router/define-router-utils/build-handler.js
++++ b/dist/router/define-router-utils/build-handler.js
+@@ -35,7 +35,7 @@ export const createBuildHandler = ({ resolve, getBuildPaths, getBuildElementIds,
+         });
+         const path2moduleIds = {};
+         const htmlTasks = [];
+-        const { runTask, waitForTasks } = createTaskRunner(500);
++        const { runTask, waitForTasks } = createTaskRunner(8);
+         const buildTargets = Array.from(await getBuildPaths?.() || [], (target)=>{
+             const pathname = typeof target === 'string' ? target : target.pathname;
+             if (!pathname.startsWith('/') || pathname.startsWith('//') || pathname.includes('?') || pathname.includes('#')) {
 diff --git a/dist/router/define-router-utils/request-handler.js b/dist/router/define-router-utils/request-handler.js
+index df38a73b928c3d9399b2f7261e622464cd894655..f66779b8981328f34f60df57bb2d9f56b51baa3e 100644
 --- a/dist/router/define-router-utils/request-handler.js
 +++ b/dist/router/define-router-utils/request-handler.js
-@@ -212,7 +212,7 @@
+@@ -212,7 +212,7 @@ export const createRequestHandler = ({ resolve, routeEntries, runHandled, getExt
                  if (typeof resolved === 'function') {
                      const url = new URL(req.url);
                      url.pathname = pathname;

@@ -20,7 +20,7 @@ import type { Capabilities, TableItem } from '../index';
 import type { TableSession } from './index';
 
 export const SessionContext = createContext<unknown>(undefined);
-function useSession<Row, C extends Capabilities>(provided?: TableSession<Row, C>): TableSession<Row, C> {
+export function useSession<Row, C extends Capabilities>(provided?: TableSession<Row, C>): TableSession<Row, C> {
     const context = useContext(SessionContext) as TableSession<Row, C> | undefined;
     const table = provided ?? context;
     if (!table) throw new Error('Table components require DataTable.Root or an explicit table session.');
@@ -30,12 +30,16 @@ export interface ViewportOptions {
     scrollElement: 'window' | RefObject<HTMLElement | null>;
     estimateSize?: number;
     overscan?: number;
+    /** Load ahead of the visible range without rendering extra rows. Defaults to 40. */
+    prefetchRows?: number;
 }
 export function useTableViewport<Row, C extends Capabilities>(
     table: TableSession<Row, C>,
-    { scrollElement, estimateSize = 52, overscan = 6 }: ViewportOptions,
+    { scrollElement, estimateSize = 52, overscan = 6, prefetchRows = 40 }: ViewportOptions,
 ) {
     'use no memo';
+    if (!Number.isSafeInteger(prefetchRows) || prefetchRows < 0)
+        throw new RangeError('prefetchRows must be a non-negative integer.');
     const revision = useSyncExternalStore(table.subscribe, table.snapshot, table.snapshot);
     const container = useRef<HTMLDivElement>(null);
     const [scrollMargin, setScrollMargin] = useState(0);
@@ -64,11 +68,14 @@ export function useTableViewport<Row, C extends Capabilities>(
         };
     }, [scrollElement]);
     const getItemKey = useCallback((index: number) => items[index]!.id, [items]);
-    const pinned = table.focusedItem === undefined ? -1 : items.findIndex((item) => item.id === table.focusedItem);
+    const pinned = items.flatMap((item, index) =>
+        item.id === table.focusedItem || item.id === table.editingRowId ? [index] : [],
+    );
+    const pinnedKey = pinned.join(',');
     const rangeExtractor = useCallback(
-        (range: Range) =>
-            [...new Set([...defaultRangeExtractor(range), ...(pinned < 0 ? [] : [pinned])])].sort((a, b) => a - b),
-        [pinned],
+        (range: Range) => [...new Set([...defaultRangeExtractor(range), ...pinned])].sort((a, b) => a - b),
+        // oxlint-disable-next-line react-hooks-plugin/exhaustive-deps -- Index identity, not array identity.
+        [pinnedKey],
     );
     const options = {
         count: items.length,
@@ -92,14 +99,19 @@ export function useTableViewport<Row, C extends Capabilities>(
     const page = useWindowVirtualizer<HTMLDivElement>({ ...options, enabled: scrollElement === 'window' });
     const virtualizer = scrollElement === 'window' ? page : panel;
     const virtualItems = virtualizer.getVirtualItems();
-    const visible = virtualItems.map((item) => items[item.index]!).filter(Boolean);
-    const visibleKey = visible.map((item) => item.id).join('\n');
+    // Network lookahead follows the actual viewport, not DOM overscan or a distant
+    // row pinned for editing/focus. Group directories and live prefixes share it.
+    const range = virtualizer.range;
+    const nearby = range
+        ? items.slice(Math.max(0, range.startIndex - prefetchRows), range.endIndex + prefetchRows + 1)
+        : [];
+    const nearbyKey = nearby.map((item) => item.id).join('\n');
     useEffect(() => {
-        table.setViewport(visible.map((item) => item.id));
-        for (const item of visible) if (item.kind === 'load-more') table.loadMore(item.id);
+        table.setViewport(nearby.map((item) => item.id));
+        for (const item of nearby) if (item.kind === 'load-more') table.loadMore(item.id);
         // Canonical IDs and session revisions carry demand; array object identity does not.
         // oxlint-disable-next-line react-hooks-plugin/exhaustive-deps
-    }, [table, visibleKey, revision]);
+    }, [table, nearbyKey, revision]);
     const focus = (index: number, column = 0) => {
         const item = items[index];
         if (!item) return;
@@ -195,6 +207,7 @@ export function Viewport<Row, C extends Capabilities>({
     children,
     estimateSize,
     overscan,
+    prefetchRows,
     ...props
 }: Omit<HTMLAttributes<HTMLDivElement>, 'children'> &
     ViewportOptions & { table?: TableSession<Row, C>; children: (item: TableItem<Row>) => ReactNode }) {
@@ -204,6 +217,7 @@ export function Viewport<Row, C extends Capabilities>({
         scrollElement,
         ...(estimateSize === undefined ? {} : { estimateSize }),
         ...(overscan === undefined ? {} : { overscan }),
+        ...(prefetchRows === undefined ? {} : { prefetchRows }),
     });
     const behavior = viewport.getViewportProps();
     return (
@@ -237,6 +251,8 @@ export function Group<Row, C extends Capabilities>({
     group: Extract<TableItem<Row>, { kind: 'group' }>;
 }) {
     const table = useSession(provided);
+    const hoverTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+    useEffect(() => () => clearTimeout(hoverTimer.current), []);
     return (
         <button
             type="button"
@@ -250,11 +266,18 @@ export function Group<Row, C extends Capabilities>({
             }}
             onPointerEnter={(event) => {
                 props.onPointerEnter?.(event);
-                table.warm(group.id);
+                if (!event.defaultPrevented && event.pointerType !== 'touch') {
+                    clearTimeout(hoverTimer.current);
+                    hoverTimer.current = setTimeout(() => table.warm(group.id), 150);
+                }
+            }}
+            onPointerLeave={(event) => {
+                props.onPointerLeave?.(event);
+                clearTimeout(hoverTimer.current);
             }}
             onFocus={(event) => {
                 props.onFocus?.(event);
-                table.warm(group.id);
+                if (!event.defaultPrevented) table.warm(group.id);
             }}
         >
             {children ?? group.label}

@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+/* oxlint-disable unicorn/no-array-sort -- ES2022; only newly allocated ID arrays are sorted. */
 import { spawn, execFileSync, type ChildProcess } from 'node:child_process';
 import {
     mkdtempSync,
@@ -23,7 +24,7 @@ import {
     type ControllerMutationContract,
 } from '../../packages/client/src/controller-mutation';
 import { ZeroProvider } from '@rocicorp/zero/react';
-import { act, render, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, waitFor } from '@testing-library/react';
 import { useEffect } from 'react';
 import { useData, type Data } from '../../packages/client/src/react/data';
 import { liveQuery, withQueryInputs } from '../../packages/client/src/live-query';
@@ -31,6 +32,16 @@ import { createInertiaAdapter } from '../../packages/client/src/react/inertia';
 import type { index, show } from '../interop/controller-api/ZeroForLaravel/Tests/Fixtures/QueryController';
 import { expect, it, vi } from 'vite-plus/test';
 import { schema as fixtureSchema, definitions, type Context } from '../interop/generated';
+import {
+    applyTableQuery,
+    createTable,
+    column,
+    editors,
+    type TableDescriptor,
+    type FilterNode,
+} from '../../packages/table/src';
+import { DataTable, useDataTable } from '../../packages/table/src/react';
+import { encodeDate } from '../../packages/client/src';
 
 type LiveSchema = typeof fixtureSchema;
 
@@ -163,10 +174,21 @@ it.skipIf(!enabled)(
             const schema = generated.exports.schema;
             expect(Object.keys(schema.tables)).toHaveLength(Object.keys(fixtureSchema.tables).length);
             expect(Object.keys(schema.tables)).toEqual(expect.arrayContaining(Object.keys(fixtureSchema.tables)));
-            const contracts = JSON.parse(readFileSync(join(root, 'controller-contracts.json'), 'utf8')) as Record<
-                string,
-                ControllerMutationContract
-            >;
+            // Consume the deployed client manifest, not a second compilation
+            // against a registry whose lazy relationships have since changed.
+            const mutationModule = {
+                exports: {} as { controllerMutationContracts: Record<string, ControllerMutationContract> },
+            };
+            runInNewContext(
+                execFileSync('node_modules/.bin/esbuild', [join(root, 'generated.mutations.ts'), '--format=cjs'], {
+                    encoding: 'utf8',
+                }),
+                {
+                    require: (specifier: string) => (specifier === 'zod' ? { z } : { createControllerMutations }),
+                    module: mutationModule,
+                },
+            );
+            const contracts = mutationModule.exports.controllerMutationContracts;
             const name = Object.keys(contracts).find(
                 (registration) => contracts[registration]!.action === 'FixtureMutations@store',
             )!;
@@ -209,6 +231,26 @@ it.skipIf(!enabled)(
                 },
             };
             runInNewContext(compiled, { require: (specifier: string) => modules[specifier], module });
+            const tableModule = { exports: {} as { default: TableDescriptor<{ id: string; title: string }> } };
+            runInNewContext(
+                execFileSync(
+                    'node_modules/.bin/esbuild',
+                    [join(root, 'tables/tasks.ts'), '--format=cjs', '--target=es2022'],
+                    { encoding: 'utf8' },
+                ),
+                {
+                    require: (specifier: string) =>
+                        specifier === '../generated'
+                            ? { schema, definitions }
+                            : specifier === '@nickwelsh/zero-table'
+                              ? { createTable, applyTableQuery }
+                              : specifier === '@nickwelsh/zero-for-laravel'
+                                ? { liveQuery, encodeDate }
+                                : modules[specifier],
+                    module: tableModule,
+                },
+            );
+            const tableDescriptor = tableModule.exports.default;
             const tasks = module.exports.actions['ZeroForLaravel\\Tests\\Fixtures\\QueryController@sorted.tasks']!;
             const queryName = tasks({ direction: 'asc' }).request().query.queryName;
             const showTask = module.exports.actions[
@@ -381,6 +423,206 @@ it.skipIf(!enabled)(
             }
             try {
                 await until(() => complete && result.length === 2, 'Authorized query never completed');
+                // Exercise generated table queries on the real synchronized Zero
+                // client, not a second invocation of the SQL compiler. Expected
+                // membership is enumerated independently for asymmetric inputs.
+                const parityIDs = Array.from(
+                    { length: 8 },
+                    (_, i) => `019a0000-0000-7000-8000-${String(i + 10).padStart(12, '0')}`,
+                );
+                const titles = [
+                    'Alpha%_\\tail',
+                    'alpha',
+                    'é',
+                    'e\u0301',
+                    '0',
+                    'false',
+                    'Alpha%_\\tail',
+                    'Alpha%_\\tail',
+                ];
+                const quote = (value: string) => `'${value.replaceAll("'", "''")}'`;
+                psql(
+                    `INSERT INTO tasks (id,user_id,title,done,completed_at,deleted_at) VALUES ${parityIDs.map((id, i) => `('${id}','${i === 6 ? 'bob' : 'alice'}',${quote(titles[i]!)},${i === 1},${i === 0 ? "'2026-01-01 00:00:00.123'" : i === 1 ? "'2026-01-01 01:00:00'" : 'NULL'},${i === 7 ? 'now()' : 'NULL'})`).join(',')}`,
+                );
+                const condition = (field: string, operator: string, value?: unknown): FilterNode =>
+                    ({ kind: 'condition', field, operator, ...(value === undefined ? {} : { value }) }) as FilterNode;
+                const date = '2025-12-31T19:00:00.123-05:00';
+                const cases: [FilterNode, number[]][] = [
+                    [condition('title', 'equals', 'Alpha%_\\tail'), [0]],
+                    [condition('title', 'contains', '%_\\'), [0]],
+                    [condition('title', 'startsWith', 'Alpha%_\\'), [0]],
+                    [condition('title', 'endsWith', '\\tail'), [0]],
+                    [condition('title', 'equals', 'alpha'), [1]],
+                    [condition('title', 'equals', 'é'), [2]],
+                    [condition('title', 'equals', 'e\u0301'), [3]],
+                    [condition('title', 'equals', '0'), [4]],
+                    [condition('title', 'equals', 'false'), [5]],
+                    [condition('completed', 'equals', true), [1]],
+                    [condition('date', 'equals', date), [0]],
+                    [condition('date', 'gt', date), [1]],
+                    [condition('date', 'gte', date), [0, 1]],
+                    [condition('date', 'lt', '2026-01-01T01:00:00Z'), [0]],
+                    [condition('date', 'lte', '2026-01-01T01:00:00Z'), [0, 1]],
+                    [condition('date', 'notEquals', date), [1]],
+                    [condition('date', 'in', [date, '2026-01-01T01:00:00Z']), [0, 1]],
+                    [condition('date', 'isNotNull'), [0, 1]],
+                    [
+                        {
+                            kind: 'or',
+                            children: [condition('title', 'contains', '%_\\'), condition('title', 'equals', 'alpha')],
+                        },
+                        [0, 1],
+                    ],
+                ];
+                for (const [filter, indices] of cases) {
+                    const expected = indices.map((i) => parityIDs[i]!).sort();
+                    const input = { filter, sort: [], groupBy: [], path: [], __window: 100 };
+                    const selected = zero.materialize(
+                        tableDescriptor.rows(input).request() as ReturnType<typeof tasks> extends { request(): infer R }
+                            ? R
+                            : never,
+                        { ttl: 0 },
+                    );
+                    let ids: readonly string[] = [];
+                    let finished = false;
+                    const remove = selected.addListener((rows, type) => {
+                        ids = (rows as readonly { id: string }[]).map((row) => row.id);
+                        finished = type === 'complete';
+                    });
+                    try {
+                        await until(
+                            () => finished && JSON.stringify([...ids].sort()) === JSON.stringify(expected),
+                            `Native table parity failed: ${JSON.stringify(filter)}; got ${ids.join(',')}`,
+                        );
+                        const metadata = await fetch(`${base}${tableDescriptor.capabilities.metadataURL}`, {
+                            method: 'POST',
+                            headers: {
+                                Authorization: 'Bearer alice',
+                                'Content-Type': 'application/json',
+                                Accept: 'application/json',
+                            },
+                            body: JSON.stringify({
+                                version: 1,
+                                contract: tableDescriptor.capabilities.contract,
+                                filter,
+                                groupBy: ['done'],
+                                directories: [{ path: [], after: null }],
+                            }),
+                        });
+                        expect(metadata.status).toBe(200);
+                        const snapshot = (await metadata.json()) as {
+                            totalCount: number;
+                            directories: { groups: { value: boolean; count: number }[] }[];
+                        };
+                        expect(snapshot.totalCount, JSON.stringify(filter)).toBe(expected.length);
+                        expect(snapshot.directories[0]!.groups.reduce((sum, group) => sum + group.count, 0)).toBe(
+                            expected.length,
+                        );
+                    } finally {
+                        remove();
+                        selected.destroy();
+                    }
+                }
+                // Exercise the real generated descriptor and React query lifecycle.
+                // Mocked native results cannot catch identity-owner render loops.
+                function EditableTable() {
+                    const session = useDataTable(tableDescriptor, {
+                        initialState: {
+                            groupBy: [],
+                            filter: { kind: 'condition', field: 'title', operator: 'equals', value: 'Initial' },
+                        },
+                        columns: [column.text('title', { header: 'Title', editor: editors.text() })],
+                        editing: { enabled: true, submit: async () => ({ status: 'accepted' }) },
+                    });
+                    return (
+                        <DataTable.Root table={session}>
+                            <DataTable.EditingStatus />
+                            {session.items.flatMap((item) =>
+                                item.kind === 'row'
+                                    ? [
+                                          <DataTable.Cell
+                                              key={item.id}
+                                              table={session}
+                                              rowId={item.id}
+                                              columnId="title"
+                                          />,
+                                      ]
+                                    : [],
+                            )}
+                        </DataTable.Root>
+                    );
+                }
+                const editingHost = render(
+                    <ZeroProvider zero={zero}>
+                        <EditableTable />
+                    </ZeroProvider>,
+                );
+                try {
+                    await waitFor(() => expect(editingHost.getByRole('gridcell', { name: 'Title' })).toBeDefined(), {
+                        timeout: 10000,
+                    });
+                    fireEvent.doubleClick(editingHost.getByRole('gridcell', { name: 'Title' }));
+                    await waitFor(() => expect(editingHost.getByRole('textbox', { name: 'Title' })).toBeDefined(), {
+                        timeout: 10000,
+                    });
+                    fireEvent.change(editingHost.getByRole('textbox', { name: 'Title' }), {
+                        target: { value: 'Unsaved draft' },
+                    });
+                    expect((editingHost.getByRole('textbox', { name: 'Title' }) as HTMLInputElement).value).toBe(
+                        'Unsaved draft',
+                    );
+                    fireEvent.keyDown(editingHost.getByRole('textbox', { name: 'Title' }), { key: 'Escape' });
+                    expect(editingHost.queryByRole('textbox')).toBeNull();
+                    expect(editingHost.getByRole('gridcell', { name: 'Title' }).textContent).toBe('Initial');
+                } finally {
+                    editingHost.unmount();
+                }
+                // Identity reads ignore view membership, never mandatory visibility
+                // or soft deletion. Their live result must revoke an individual row.
+                for (const index of [0, 6, 7]) {
+                    const id = parityIDs[index]!;
+                    const selected = zero.materialize(
+                        tableDescriptor
+                            .rows({
+                                filter: null,
+                                sort: [],
+                                groupBy: [],
+                                path: [],
+                                __window: 1,
+                                __row: [id],
+                                __refresh: randomUUID(),
+                            })
+                            .request() as ReturnType<typeof tasks> extends { request(): infer R } ? R : never,
+                        { ttl: 0 },
+                    );
+                    let ids: readonly string[] = [];
+                    let finished = false;
+                    const remove = selected.addListener((rows, type) => {
+                        ids = (rows as readonly { id: string }[]).map((row) => row.id);
+                        finished = type === 'complete';
+                    });
+                    try {
+                        const expected = index === 0 ? [id] : [];
+                        await until(
+                            () => finished && JSON.stringify(ids) === JSON.stringify(expected),
+                            'Identity visibility did not match ownership and deletion',
+                        );
+                        if (index === 0) {
+                            psql(`UPDATE tasks SET user_id='bob' WHERE id='${id}'`);
+                            await until(() => finished && ids.length === 0, 'Identity read retained a revoked row');
+                            psql(`UPDATE tasks SET user_id='alice' WHERE id='${id}'`);
+                            await until(
+                                () => finished && ids[0] === id,
+                                'Identity read did not recover authorized membership',
+                            );
+                        }
+                    } finally {
+                        remove();
+                        selected.destroy();
+                    }
+                }
+                psql(`DELETE FROM tasks WHERE id IN (${parityIDs.map(quote).join(',')})`);
+                await until(() => complete && result.length === 2, 'Parity fixture cleanup did not synchronize');
                 expect(
                     psql(
                         "SELECT count(*) FROM pg_tables WHERE schemaname='public' AND tablename='permission_access_revision'",

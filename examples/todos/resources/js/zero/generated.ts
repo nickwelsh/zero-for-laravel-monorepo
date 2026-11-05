@@ -26,10 +26,13 @@ const table2 = table("todos").columns({
   "created_at": number().optional(),
   "updated_at": number().optional(),
 } ).primaryKey("id");
+const table2Relations = relationships(table2, ({one}) => ({
+  "list": one({sourceField: ["list_id"], destField: ["id"], destSchema: table1}),
+}));
 const table1Relations = relationships(table1, ({many}) => ({
   "todos": many({sourceField: ["id"], destField: ["list_id"], destSchema: table2}),
 }));
-export const schema = createSchema({tables: [table0, table1, table2], relationships: [table1Relations], enableLegacyQueries: false, enableLegacyMutators: false});
+export const schema = createSchema({tables: [table0, table1, table2], relationships: [table2Relations, table1Relations], enableLegacyQueries: false, enableLegacyMutators: false});
 export const definitions = {
     "Todo": {
         "name": "Todo",
@@ -102,8 +105,29 @@ export const definitions = {
             "updated": "updated_at",
             "deleted": null
         },
-        "relations": {},
-        "relationConstraints": {}
+        "relations": {
+            "list": {
+                "model": "TodoList",
+                "cardinality": "one",
+                "path": [
+                    {
+                        "source": [
+                            "list_id"
+                        ],
+                        "dest": [
+                            "id"
+                        ],
+                        "table": "todo_lists"
+                    }
+                ]
+            }
+        },
+        "relationConstraints": {
+            "list": {
+                "wheres": [],
+                "orders": []
+            }
+        }
     },
     "TodoList": {
         "name": "TodoList",

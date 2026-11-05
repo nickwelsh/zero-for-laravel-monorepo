@@ -2,11 +2,11 @@
 
 Status: accepted API contract; implementation proceeds in six stacked milestones.
 
-This is a design document, not documentation of an implemented package. The
-`examples/todos` grouping page is a feasibility spike. Its working behavior is a
-baseline to preserve, not the public API to extract unchanged. The implementation
-and stacked pull requests are authorized separately in the originating thread;
-this document does not authorize publication, merge, or deployment.
+This document records the accepted contract and release gates, not a guarantee
+that every gate has passed. The public package now replaces the `examples/todos`
+grouping spike; its consumer instructions live in `packages/table/README.md`.
+Implementation and stacked pull requests are authorized separately in the
+originating thread; this document does not authorize publication, merge, or deployment.
 
 ## 1. Outcome and boundaries
 
@@ -497,6 +497,8 @@ type CellSubmitResult =
 Generated/column types narrow the field, value and patch. `submit(change)` returns
 `Promise<CellSubmitResult>`; a normal cell patch contains only its bound field.
 Composite custom editors may declare their complete patch fields explicitly.
+Every patched field requires a column definition and its column/cell gates,
+including secondary definitions that the consumer does not render.
 Custom/display-only accessors cannot manufacture write permission. Unexpected
 transport errors are unconfirmed, not proof of rollback, and never trigger an
 automatic second write.
@@ -513,6 +515,15 @@ automatic second write.
   existence, uniqueness and business rules remain server responsibilities.
 - Pin the active editor or render a stable editor host while its draft's row
   changes group/order/filter membership. Revoked access destroys protected drafts.
+  One identity-only native query per active draft establishes row visibility
+  independently of those view constraints, retaining mandatory table scopes.
+  Unknown visibility hides moved editors and blocks writes. Empty results hide
+  protected values, but pending writes retain outcome observation through optimistic
+  disappearance. Failed or uncertain writes renew the identity query before
+  deciding whether to restore or discard the draft. The original row is never an
+  authorization fallback. `table.editingVisibility` and optional
+  `DataTable.EditingStatus` expose redacted Retry/Cancel recovery and generic hidden
+  outcomes outside virtual rows; pending writes cannot be cancelled.
   A remote value change does not overwrite a dirty draft; expose it as a conflict
   to resolve. No automatic merge or server compare-and-swap is implied.
 - Submission remains pending until authoritative acceptance, not just optimistic
@@ -543,15 +554,14 @@ A relation editor uses the shared Zero/Formbraid choice-source contract:
 - Query identity includes actor/context and search. Ignore stale results, cancel
   obsolete searches, and clear protected option caches on access loss.
 
-These are required semantics, not a claim that the installed Formbraid 0.2.0
-exports already provide them. Installed declarations inspected for this design do
-not expose `OptionSourceAdapter` / `useFieldOptions`. Before implementation,
-establish the compatible Formbraid revision/shared Zero option-source API and
-bind `editors.relation(listOptions)` to it. Do not ship a parallel table-specific
-provider. Text/select editing and the table's other APIs can land independently;
-the complete relation-editor milestone cannot pass until the shared integration
-is available. The earlier inline-query editor sketch is superseded by this shared
-source binding to avoid two relation-query lifecycles.
+The implementation uses Formbraid **0.3** and the shared
+`@nickwelsh/zero-for-laravel/react/formbraid` option source. Its optional infinite
+extension exposes `hasMore` and `loadMore` for server-declared infinite queries;
+the browser cannot broaden a fixed query. `editors.relation(listOptions)` binds
+the table editor to that source rather than creating a parallel provider. Upgrade
+the PHP and JavaScript Formbraid packages together and regenerate descriptors.
+The earlier inline-query sketch and Formbraid 0.2 compatibility gate are superseded
+by this shared source binding.
 
 ## 8. Implementation sequence and acceptance gates
 
@@ -657,12 +667,151 @@ The following are implementation gates, not permission to guess silently:
 
 ## 10. Evidence and starting points
 
+The local consumer verification on 2026-11-04 used the existing 54,750-row fixture,
+the generated Todos table descriptor, real Laravel/PostgreSQL/Zero, and a
+production-built React Compiler consumer. It established:
+
+- All 200 Active child groups and one Completed child group simultaneously
+  subscribed: 201 active leaves, four warmed leaves, 205 retained windows.
+- A 1,000-row first-leaf prefix plus its extra-row probe; 11,401 total loaded
+  rows across active/warm leaves, with 14–23 row elements rendered at 1280×900.
+- Collapsing/reopening the parent retained all 11,000 displayed rows. An offline
+  collapse/reopen also produced zero initial-loading entries while access remained valid.
+- Settled idle animation-frame intervals measured 16.7 ms median and 16.8 ms
+  p95 over 120 frames. This is not a measurement of scrolling or burst hydration.
+- Real double-click/Enter editing, local required validation, authoritative save
+  and database persistence. Relation search retained the independently resolved
+  selected label outside the searched page. Window and panel scrolling rendered
+  real rows; the panel recycled offscreen DOM.
+- Native/SQL membership matched 19 independently enumerated cases, including
+  literal wildcard characters, case, Unicode, offset/millisecond dates and an OR
+  branch that could otherwise expose another actor's or a soft-deleted row.
+
+Bulk-expansion follow-up on 2026-11-05 used the same real stack and fixture at
+1280×900, DPR 2, on the two-CPU / 4 GB orb. Each fresh browser loaded all 200 Active
+directory entries, then called public `expand()` for every child in one task.
+Each leaf requested 50 rows plus one exhaustion probe. Three completed runs on
+each build reached 200 live leaves, 10,200 loaded rows and 14 rendered row elements:
+
+- Median synchronization time: 40.15 seconds before, 12.62 seconds after.
+- Median peak largest-renderer RSS, sampled externally every 200 ms: 2.53 GB
+  before, 1.28 GB after. RSS is process resident memory, not retained JS heap.
+- Median longest task: 13.66 seconds before, 2.07 seconds after. After-run longest
+  tasks ranged from 1.38 to 2.54 seconds; burst hydration is still not smooth.
+
+The session now publishes leaf results once per microtask rather than flattening
+and notifying for every leaf result. Memoized query owners still receive native
+updates and explicit prefix-limit changes. Viewport/hover changes only publish
+when query demand changes; rendered cells reuse already-flattened row identities
+instead of recomputing every loaded primary key for each cell. None of these
+changes caps expansion, closes siblings or adds a canonical-row cache.
+
+With the first prefix grown to 1,000 rows, all 200 groups retained 11,150 loaded
+rows. A scripted 30-frame scroll sweep from 10,000 to 40,000 CSS pixels and back
+recorded a 717 ms median frame interval before the cell/viewport changes. Three
+after sweeps recorded medians of 17–24 ms and p95 intervals of 28–41 ms, with at
+most 31 rendered row elements. Only one completed baseline sweep was saved; this
+is not a three-run before/after scrolling comparison. Offline parent collapse and
+reopen retained that prefix with zero initial live-row loading transitions.
+Metadata refresh can still display the expected offline fetch error. Editing
+cancel/focus and independent warming/expansion were also rechecked.
+
+A sampling profile of the batched build attributed most transient allocations to
+native Zero row propagation through its active query connections, not retained
+table rows. The measured reduction does not establish bounded memory, production
+latency, or smooth cold hydration of hundreds of queries. Further native fan-out
+tuning or a product retention policy remains a separate decision if the remaining
+resource use is unacceptable. Failed browser launches and recording retries were
+excluded from the measurements; they did not replace a completed benchmark run.
+
+Native hydration investigation on 2026-11-05 isolated the remaining synchronous
+work without changing expansion policy. The installed `@rocicorp/zero@1.11.3`
+`memory-source.js` matched the published npm tarball; upstream `main` also retained
+the same propagation loop when inspected. The path is
+`ZeroContext.processChanges → IVMSourceBranch.advance → applyDiffs → pushAdds`.
+The existing 12 ms startup hydration slices yield between pending pipelines, not
+between incoming rows. `pushAdds` consumes each row's generator synchronously.
+Each row visits every connection, constructs change objects before filtering,
+and then reconciles every connected output, including nonmatching queries.
+
+Three fresh-browser runs per variant used the same production consumer and
+54,750-row fixture. Timing instrumentation covered native branch advancement and
+each `pushAdds` call; both variants used identical instrumentation. Every completed
+run retained 200 active leaves and 10,200 loaded rows. In each run the largest
+native add burst contained 9,996 rows with 200 connections:
+
+- Published Zero: median longest task 1,802 ms, largest add burst 1,272 ms,
+  branch advancement 1,274 ms, total synchronization 12.62 seconds.
+- Experimental early rejection of nonmatching adds/removes, before allocating
+  change wrappers: corresponding medians 1,772 ms, 1,320 ms, 1,321 ms and
+  12.78 seconds. This does not establish a browser improvement. One completed
+  experimental run took 23.28 seconds overall; it remains in the results.
+
+An isolated Node experiment using real `MemorySource` and `Take` operators,
+10,200 fixed incoming rows and 1, 20 or 200 filtered connections measured median
+propagation times of 70, 184 and 1,317 ms. At 200 connections it counted 2,040,000
+terminal reconciliation calls for 10,200 matching row pushes. Both published and
+experimental implementations passed 6,160 independently checked state comparisons
+covering limited sorted prefixes, filter membership changes, cross-group and
+split/unsplit edits, deletes/refills and source/fetch agreement. These component
+checks do not establish correctness for all native joins or transaction lifecycles.
+The allocation-only prototype was not adopted. Invalid harness attempts and one
+run overlapping a separate benchmark were discarded and rerun in isolation.
+
+Further work belongs in Zero's connection dispatch/reconciliation or transaction
+scheduling, not another table-row cache. Candidate-connection indexing and
+dirty-only reconciliation need native operator coverage before adoption. Simply
+adding `await` inside `advance` is unsafe without serializing incoming changes,
+query attachment and mutation/rebase activity, withholding commit publication,
+and preserving branch-head/error semantics. No native dependency patch, expansion
+cap or scheduling change was retained; cold hydration remains a responsiveness
+limitation, not a solved performance case.
+
+An indexed-dispatch follow-up on 2026-11-05 prototyped scalar equality buckets
+inside Zero's `MemorySource`, with all reconciliation left unchanged. The index
+uses necessary equalities from conjunctions, chooses a selective column, and
+keeps other predicates on the ordinary fallback path. Native predicates still
+decide membership. Edits visit the union of old/new buckets in original connection
+order; connecting or disconnecting invalidates the cached index. The prototype
+does not change global split-edit selection, branch advancement or publication.
+
+Three new fresh-browser runs per build used the same fixture and instrumentation,
+with no concurrent build or benchmark. All six reached 200 active leaves, 10,200
+loaded rows and 14 rendered row elements. Published Zero versus indexed pushes:
+
+- Median largest 9,996-row add burst: 1,390 → 824 ms (41% lower).
+- Median longest browser task: 1,929 → 1,367 ms (29% lower).
+- Median total synchronization: 13.07 → 12.76 seconds. The indexed build's
+  27.65-second completed outlier was retained; overall synchronization remains
+  variable, and this does not establish a meaningful end-to-end speedup.
+- Median peak largest-renderer RSS sampled every 200 ms: 1.25 → 1.28 GB.
+  No memory reduction was established. This is resident memory, not retained heap.
+
+Both builds passed 28,512 comparisons against an independent array oracle,
+including typed equality, AND/OR, null/range/text/IN fallback, old/new edit routing,
+connection insertion/removal, late output attachment, deferred generators, forks,
+sorted limits/refills and a three-level self-join with partitioned child limits.
+Deliberately omitting the old edit bucket made the oracle fail. Live prefix growth
+to 1,000 retained all 200 groups and 11,150 loaded rows; offline collapse/reopen
+produced zero initial live-row loading transitions. A title edit propagated through
+native rows and PostgreSQL, then the original fixture value was restored.
+
+The isolated 200-query equality benchmark improved, but still counted 2,040,000
+reconciliation calls for 10,200 row pushes. Non-indexable IN filters used the full
+fallback path (median 1.46 → 1.54 seconds in three Node runs), so indexing is not
+a general improvement for arbitrary queries. One failed browser launch was retried;
+no completed timing run was dropped. The compiled-JavaScript prototype and its
+reproducer are preserved as review artifacts, not an installed dependency patch.
+The normal consumer build was restored. Native TypeScript integration and the full
+upstream operator/lifecycle suite remain unverified. This improves the measured
+stall but does not make cold hydration smooth; reconciliation remains separate work.
+
 The spike established feasibility of live leaves with SQL snapshot directories,
 increasing prefixes, proactive caching, independent expansion, and window/panel
-virtualization. The latest multiple-expansion browser check exercised eight Active
+virtualization. Its earlier multiple-expansion browser check exercised eight Active
 and two Completed leaves on the large fixture, including offline cached reopening
-with zero initial-loading transitions. It did not prove this reusable API, all 200
-expanded groups, cross-engine general filter parity, or the proposed editor system.
+with zero initial-loading transitions. At that stage it did not prove the reusable
+API, all 200 expanded groups, general filter parity, or the proposed editor system.
 
 Implementation starting points:
 

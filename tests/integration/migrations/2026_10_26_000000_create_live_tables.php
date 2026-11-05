@@ -13,7 +13,7 @@ return new class extends Migration {
             $table->uuid('list_id')->nullable();
             $table->string('title');
             $table->boolean('done')->default(false);
-            $table->timestamp('completed_at')->nullable();
+            $table->timestamp('completed_at', 3)->nullable();
             $table->string('secret')->nullable();
             $table->timestamps();
             $table->softDeletes();

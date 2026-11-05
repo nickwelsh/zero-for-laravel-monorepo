@@ -35,7 +35,10 @@ come from `meta.json`. The generated reference is mounted at
 `waku.config.ts` sets the public origin to `https://docs.nickwelsh.me` with
 `/zero-for-laravel` as the base path. Change those hosting values before deployment if
 needed. The Waku request-handler patch supplied by docs-base is registered in the
-root workspace config. The site uses the root pnpm version and lockfile.
+root workspace config. The same patch caps static rendering at eight concurrent
+tasks: Waku's default of 500 exhausts memory when rendering the expanded API
+reference in a 4 GB orb. This changes build scheduling, not the generated routes.
+The site uses the root pnpm version and lockfile.
 
 ## Cloudflare Workers deployment
 

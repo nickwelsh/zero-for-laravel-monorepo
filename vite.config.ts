@@ -22,6 +22,7 @@ export default defineConfig({
             '**/resources/js/zero/generated.queries.ts',
             '**/resources/js/zero/generated.mutations.ts',
             '**/resources/js/zero/App/**',
+            '**/resources/js/zero/tables/**',
             '**/resources/js/zero/generated.files.json',
             '**/resources/js/formbraid/zero/**',
             'tests/interop/controller-api/**',
@@ -74,6 +75,7 @@ export default defineConfig({
             '**/resources/js/zero/generated.queries.ts',
             '**/resources/js/zero/generated.mutations.ts',
             '**/resources/js/zero/App/**',
+            '**/resources/js/zero/tables/**',
             'tests/interop/controller-api/**',
             '**/resources/js/formbraid/zero/**',
             '**/resources/js/actions/**',
@@ -160,6 +162,9 @@ export default defineConfig({
     },
     resolve: {
         alias: {
+            '@nickwelsh/zero-table/formbraid': fileURLToPath(
+                new URL('./packages/table/src/formbraid.tsx', import.meta.url),
+            ),
             '@nickwelsh/zero-table/react': fileURLToPath(
                 new URL('./packages/table/src/react/index.tsx', import.meta.url),
             ),

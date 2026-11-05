@@ -12,6 +12,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::post('lists/{list}/share', [ShareListController::class, 'store'])->name('lists.share');
     Route::delete('lists/{list}/share', [ShareListController::class, 'destroy'])->name('lists.unshare');
     Route::get('dashboard', [DashboardController::class, 'index'])->name('dashboard');
+    Route::inertia('grouping', 'grouping')->name('grouping');
     Route::get('lists/{list}', [TodoListController::class, 'show'])->name('lists.show');
     Route::post('lists', [TodoListController::class, 'store'])->name('lists.store');
     Route::patch('lists/{list}', [TodoListController::class, 'update'])->name('lists.update');
