@@ -1,6 +1,7 @@
 /* oxlint-disable unicorn/no-array-sort -- ES2022 support; only newly allocated arrays are sorted. */
 import { memo, useEffect, useLayoutEffect, useMemo, useSyncExternalStore, type ReactNode } from 'react';
 import { useData, useZero, type Data } from '@nickwelsh/zero-for-laravel/react';
+import { readTableMetadata } from './metadata';
 import { SessionContext, Viewport, Group, Row } from './viewport';
 import { Cell, EditingStatus } from './cell';
 export { useTableCell } from './cell';
@@ -10,7 +11,6 @@ export type { ViewportOptions } from './viewport';
 import {
     groupId,
     queryKey,
-    readMetadata,
     TableTransportError,
     validateState,
     parseEditorValue,
@@ -901,39 +901,13 @@ export class TableSession<Row, C extends Capabilities = Capabilities> {
         this.count = { ...this.count, pending: true };
         this.emit();
         try {
-            const result = await readMetadata(
+            const result = await readTableMetadata(
                 this.descriptor.capabilities,
                 this.state,
                 pending.map(({ path, after }) => ({ path, after })),
                 request.signal,
             );
             if (!this.running || epoch !== this.epoch || request.signal.aborted) return;
-            if (
-                result.version !== 1 ||
-                !Number.isSafeInteger(result.totalCount) ||
-                result.totalCount < 0 ||
-                typeof result.observedAt !== 'string' ||
-                result.directories.length !== pending.length
-            )
-                throw new Error('Invalid table metadata response.');
-            for (const [index, directory] of pending.entries()) {
-                const page = result.directories[index]!;
-                if (
-                    queryKey(page.path) !== queryKey(directory.path) ||
-                    page.groups.length > 50 ||
-                    (page.nextCursor !== null && typeof page.nextCursor !== 'string')
-                )
-                    throw new Error('Invalid table directory response.');
-                const field = this.state.groupBy[directory.path.length]!;
-                for (const group of page.groups)
-                    if (
-                        group.id !== groupId([...directory.path, { field, value: group.value }]) ||
-                        !Number.isSafeInteger(group.count) ||
-                        group.count < 0 ||
-                        typeof group.label !== 'string'
-                    )
-                        throw new Error('Invalid table group response.');
-            }
             this.count = {
                 value: result.totalCount,
                 observedAt: result.observedAt,

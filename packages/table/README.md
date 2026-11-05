@@ -11,6 +11,11 @@ Install `@nickwelsh/zero-table@^0.1.0` alongside client **^0.7.0** and regenerat
 contracts after upgrading the PHP package. The optional Formbraid bridge requires
 Formbraid **^0.3.0**; other entry points do not require Formbraid.
 
+React sessions validate metadata responses before publishing counts and groups,
+and abort obsolete requests on filter/grouping changes, refresh, or unmount.
+Recoverable failures retain stale data for manual retry; denied access clears protected data.
+The metadata loader adds no runtime dependency, automatic retries, or timeouts.
+
 ## Define capabilities once
 
 Table definitions live in the existing Laravel package. Register the class under

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vite-plus/test';
-import { useEffect } from 'react';
+import { StrictMode, useEffect } from 'react';
 import { definitions } from '../../../../tests/interop/generated';
 import {
     column,
@@ -447,6 +447,7 @@ it('rejects late metadata after identity changes and clears all protected data o
     const late = deliver;
     act(() => table.setFilter({ kind: 'condition', field: 'title', operator: 'contains', value: 'new' }));
     await waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
+    expect(fetch.mock.calls[0]![1].signal?.aborted).toBe(true);
     await act(async () => {
         late(response([{ path: [] }], 999));
     });
@@ -463,6 +464,87 @@ it('rejects late metadata after identity changes and clears all protected data o
     expect(table.items).toHaveLength(0);
     expect(table.count.value).toBeUndefined();
     expect(table.diagnostics.loadedRows).toBe(0);
+});
+
+it('aborts obsolete metadata across refresh, grouping, unmount and StrictMode remount', async () => {
+    const requests: { signal: AbortSignal; deliver: (value: Response) => void }[] = [];
+    vi.stubGlobal(
+        'fetch',
+        (_url: string, options: RequestInit) =>
+            new Promise<Response>((deliver) => requests.push({ signal: options.signal!, deliver })),
+    );
+    const screen = render(
+        <StrictMode>
+            <Harness />
+        </StrictMode>,
+    );
+    await waitFor(() => expect(requests).toHaveLength(1));
+    act(() => table.setSort([{ field: 'title', direction: 'desc' }]));
+    expect(requests[0]!.signal.aborted).toBe(false);
+    act(() => table.refreshCounts());
+    await waitFor(() => expect(requests).toHaveLength(2));
+    expect(requests[0]!.signal.aborted).toBe(true);
+    act(() => table.setGroupBy([]));
+    await waitFor(() => expect(requests).toHaveLength(3));
+    expect(requests[1]!.signal.aborted).toBe(true);
+    await act(async () => {
+        requests[0]!.deliver(response([{ path: [] }], 999));
+        requests[1]!.deliver(response([{ path: [] }], 888));
+        requests[2]!.deliver(response([], 7));
+    });
+    expect(table.count.value).toBe(7);
+    expect(table.count.error).toBeUndefined();
+    act(() => table.refreshCounts());
+    await waitFor(() => expect(requests).toHaveLength(4));
+    const oldTable = table;
+    screen.unmount();
+    expect(requests[3]!.signal.aborted).toBe(true);
+    await act(async () => requests[3]!.deliver(response([], 777)));
+    expect(oldTable.count.value).toBeUndefined();
+    expect(oldTable.items).toHaveLength(0);
+    expect(oldTable.diagnostics.metadataPending).toBe(false);
+    render(
+        <StrictMode>
+            <Harness />
+        </StrictMode>,
+    );
+    await waitFor(() => expect(requests).toHaveLength(5));
+    expect(requests[4]!.signal.aborted).toBe(false);
+    await act(async () => requests[4]!.deliver(response([{ path: [] }], 3)));
+    expect(table.count.value).toBe(3);
+});
+
+it('retains stale metadata on malformed responses and recovers only on manual retry', async () => {
+    render(<Harness />);
+    await waitFor(() => expect(table.count.value).toBe(144));
+    const malformed = vi.fn(
+        async () =>
+            new Response(
+                JSON.stringify({
+                    version: 1,
+                    requestKey: 42,
+                    observedAt: '2026-11-04T12:01:00Z',
+                    totalCount: 999,
+                    directories: [directory([])],
+                }),
+            ),
+    );
+    vi.stubGlobal('fetch', malformed);
+    act(() => table.refreshCounts());
+    await waitFor(() => expect(table.count.error?.message).toBe('Invalid table metadata response.'));
+    expect(table.count).toMatchObject({ value: 144, pending: false, stale: true });
+    expect(table.items.filter((item) => item.kind === 'group')).toMatchObject([
+        { label: 'false', count: { value: 9, stale: true } },
+        { label: 'true', count: { value: 9, stale: true } },
+    ]);
+    const error = table.items.find((item) => item.kind === 'error')!;
+    expect(error).toBeDefined();
+    expect(malformed).toHaveBeenCalledTimes(1);
+    vi.stubGlobal('fetch', async () => response([{ path: [] }], 5));
+    act(() => table.retry(error.id));
+    await waitFor(() =>
+        expect(table.count).toMatchObject({ value: 5, pending: false, stale: false, error: undefined }),
+    );
 });
 
 it('never publishes queued sibling rows after a live access denial', async () => {
