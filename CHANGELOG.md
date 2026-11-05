@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.7.0] - Unreleased
+## [0.7.0] - 2026-11-05
 
 - Add `@nickwelsh/zero-table` **0.1.0**, a headless editable table with React hooks,
   unstyled components, independent nested grouping, virtualized window/panel
@@ -83,6 +83,6 @@ Deploy generated PHP and TypeScript contracts together. Supported targets are PH
 8.3+, Laravel 12/13, PostgreSQL 15+, and React 18/19. Automatic live pages require
 Inertia Laravel 3 and `@inertiajs/react` ^3.8.0.
 
-[0.7.0]: https://github.com/nickwelsh/zero-for-laravel-monorepo/compare/v0.6.0...HEAD
+[0.7.0]: https://github.com/nickwelsh/zero-for-laravel-monorepo/releases/tag/v0.7.0
 [0.6.0]: https://github.com/nickwelsh/zero-for-laravel-monorepo/releases/tag/v0.6.0
 [0.5.0]: https://github.com/nickwelsh/zero-for-laravel-monorepo/releases/tag/v0.5.0
