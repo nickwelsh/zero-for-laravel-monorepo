@@ -4,7 +4,7 @@ packages:
   - examples/*
 minimumReleaseAgeExclude:
   - '@rocicorp/zero@1.11.3'
-  - '@nickwelsh/docs-base@1.0.1'
+  - '@nickwelsh/docs-base@1.0.2'
   - '@nickwelsh/refquill-darwin-arm64@0.1.0'
   - '@nickwelsh/refquill-fumadocs@0.1.0'
   - '@nickwelsh/refquill-linux-arm64@0.1.0'
