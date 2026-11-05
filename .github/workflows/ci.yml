@@ -96,6 +96,7 @@ jobs:
           name: example-imports
           path: examples/todos/resources/js/wayfinder
       - run: pnpm --filter @nickwelsh/zero-for-laravel build
+      - run: pnpm --filter @nickwelsh/zero-table build
       - run: pnpm check
       - run: pnpm test:integration
         if: matrix.php == '8.3' && matrix.laravel == '^13.0'

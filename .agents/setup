@@ -118,6 +118,7 @@ step composer --working-dir=packages/laravel install --no-interaction --prefer-d
 step composer --working-dir=examples/todos install --no-interaction --prefer-dist
 step pnpm install --frozen-lockfile
 step pnpm --filter @nickwelsh/zero-for-laravel build
+step pnpm --filter @nickwelsh/zero-table build
 [[ -f examples/todos/.env ]] || cp -- examples/todos/.env.example examples/todos/.env
 mkdir -p examples/todos/storage/app/zero
 step node .agents/todos-demo.mjs prepare
