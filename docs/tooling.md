@@ -142,18 +142,18 @@ Use a supervised one-off docs service with `--portal` when previewing docs in an
 
 ## Release v0.5 and later minors
 
-The Composer and client npm packages share tags; no Composer `version` field is needed.
-The optional table package has its own version and requires the matching client
-minor through its peer dependency.
+The Composer, client npm, and optional table npm packages share one version and
+release tag; no Composer `version` field is needed. The table package requires
+the matching client minor through its peer dependency.
 Before tagging, update `packages/client/package.json`, current-version docs, and
 `CHANGELOG.md`; regenerate the API and run `pnpm check`, `pnpm test:integration`,
-the example checks, and `deploy:check`. When changing the table package, update
-`packages/table/package.json` and its client peer requirement as needed. Inspect
+the example checks, and `deploy:check`. Update `packages/table/package.json` to
+the same version and its client peer requirement to `^<version>` on every release. Inspect
 both package tarballs and test their imports/types in a clean consumer outside
 the workspace, with and without optional Formbraid packages.
 Push the tested `main` commit and matching annotated `v<version>`
 tag, then publish a GitHub Release for that tag. For this release the version is
-**0.7.0**, tag **v0.7.0**, and table version **0.1.0**. Stable releases use `latest`; prerelease versions must
+**0.8.0** for all packages and the tag is **v0.8.0**. Stable releases use `latest`; prerelease versions must
 be marked as GitHub prereleases and use `next`.
 
 `Publish npm` runs reusable CI, verifies the tag/version, and calls

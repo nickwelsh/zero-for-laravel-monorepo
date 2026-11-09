@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.8.0] - 2026-11-09
+
+- Align the PHP, client, and table packages on **0.8.0** and enforce matching
+  client/table versions during release validation.
+- Add opt-in native Effect **4.0.2** schemas for generated queries and mutations.
+  Set `zero.schema_driver` to `effect` and regenerate contracts to opt in. Zod
+  remains the default; PHP registrations, wire encodings, and mutation
+  fingerprints are unchanged. Core and table runtimes do not require Effect.
+- Validate table metadata responses before publishing counts and groups, cancel
+  obsolete requests, retain stale data after recoverable failures, and clear
+  protected data after access denial. No runtime dependency, automatic retry,
+  or timeout is added.
+- Update vulnerable JavaScript and Symfony dependencies and preserve API
+  generation compatibility with a targeted TypeDoc patch.
+
+Upgrade `nickwelsh/zero-for-laravel`, `@nickwelsh/zero-for-laravel`, and the optional
+`@nickwelsh/zero-table` together to **0.8.0**, then regenerate and deploy PHP and
+TypeScript contracts together. Zero client/cache remain pinned to **1.11.3**;
+optional Formbraid packages remain on **^0.3.0**. Effect users must install Effect
+in their application. Existing Zod applications need no schema configuration change.
+
 ## [0.7.0] - 2026-11-05
 
 - Add `@nickwelsh/zero-table` **0.1.0**, a headless editable table with React hooks,
@@ -83,6 +104,7 @@ Deploy generated PHP and TypeScript contracts together. Supported targets are PH
 8.3+, Laravel 12/13, PostgreSQL 15+, and React 18/19. Automatic live pages require
 Inertia Laravel 3 and `@inertiajs/react` ^3.8.0.
 
+[0.8.0]: https://github.com/nickwelsh/zero-for-laravel-monorepo/releases/tag/v0.8.0
 [0.7.0]: https://github.com/nickwelsh/zero-for-laravel-monorepo/releases/tag/v0.7.0
 [0.6.0]: https://github.com/nickwelsh/zero-for-laravel-monorepo/releases/tag/v0.6.0
 [0.5.0]: https://github.com/nickwelsh/zero-for-laravel-monorepo/releases/tag/v0.5.0

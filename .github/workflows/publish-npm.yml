@@ -33,6 +33,10 @@ jobs:
           if (process.env.RELEASE_TAG !== `v${version}`) {
             throw new Error(`Release tag must be v${version}.`);
           }
+          const table = JSON.parse(readFileSync('packages/table/package.json', 'utf8'));
+          if (table.version !== version || table.peerDependencies['@nickwelsh/zero-for-laravel'] !== `^${version}`) {
+            throw new Error('Client and table must share a version and matching client peer requirement.');
+          }
           const prerelease = version.includes('-');
           if (prerelease !== (process.env.PRERELEASE === 'true')) {
             throw new Error('GitHub prerelease status must match the package version.');
