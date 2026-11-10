@@ -6,10 +6,12 @@ namespace ZeroForLaravel\Tests\Fixtures;
 
 use Illuminate\Database\Eloquent\Model;
 use ZeroForLaravel\Concerns\HasPolicyVisibility;
+use ZeroForLaravel\Concerns\HasZeroQueries;
 
 class Tag extends Model
 {
     use HasPolicyVisibility;
+    use HasZeroQueries;
 
     public $timestamps = false;
 

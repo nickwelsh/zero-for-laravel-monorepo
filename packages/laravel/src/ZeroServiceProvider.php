@@ -39,16 +39,36 @@ final class ZeroServiceProvider extends ServiceProvider
         $this->app->register(SurveyorServiceProvider::class);
         $this->app->register(RangerServiceProvider::class);
         $this->app->register(Permissions\PermissionServiceProvider::class);
-        $this->mergeConfigFrom(__DIR__.'/../config/zero.php', 'zero');
-        $this->app->singletonIf(Generation\Mutations\MutationSchemaDriver::class, fn (): Generation\Mutations\MutationSchemaDriver => match (config()->string('zero.schema_driver')) {
-            'zod' => new Generation\Mutations\ZodMutationSchemaDriver,
-            'effect' => new Generation\EffectSchemaDriver,
-            default => throw new LogicException('zero.schema_driver must be zod or effect.'),
+
+        $middleware = config('zero.middleware');
+        $this->replaceConfigRecursivelyFrom(__DIR__.'/../config/zero.php', 'zero');
+        if ($middleware !== null) {
+            // Middleware is an ordered list to replace, not a group of defaults.
+            config()->set('zero.middleware', $middleware);
+        }
+
+        $this->app->singletonIf(Generation\Mutations\MutationSchemaDriver::class, function (Application $app): Generation\Mutations\MutationSchemaDriver {
+            $class = config()->string('zero.generation.schema');
+            $driver = class_exists($class) ? $app->make($class) : null;
+            if (! $driver instanceof Generation\Mutations\MutationSchemaDriver) {
+                throw new LogicException('zero.generation.schema must implement '.Generation\Mutations\MutationSchemaDriver::class.'.');
+            }
+
+            return $driver;
         });
         $this->app->singletonIf(Generation\SchemaDriver::class, fn (Application $app): Generation\SchemaDriver => $app->make(Generation\Mutations\MutationSchemaDriver::class));
-        $this->app->singleton(Query\RegisteredQueries::class, fn (): Query\RegisteredQueries => Query\RegisteredQueries::load(config()->string('zero.controller_output')));
+        $this->app->singletonIf(Generation\FrontendDriver::class, function (Application $app): Generation\FrontendDriver {
+            $class = config()->string('zero.frontend.driver');
+            $driver = class_exists($class) ? $app->make($class) : null;
+            if (! $driver instanceof Generation\FrontendDriver) {
+                throw new LogicException('zero.frontend.driver must implement '.Generation\FrontendDriver::class.'.');
+            }
+
+            return $driver;
+        });
+        $this->app->singleton(Query\RegisteredQueries::class, fn (): Query\RegisteredQueries => Query\RegisteredQueries::load(config()->string('zero.generation.queries')));
         $this->app->singleton(function (): Mutation\ControllerMutationRegistry {
-            $path = config()->string('zero.mutation_output');
+            $path = config()->string('zero.generation.mutations');
             if (! is_file($path)) {
                 throw new LogicException('Missing controller mutation registrations. Run zero:generate.');
             }
@@ -142,11 +162,9 @@ final class ZeroServiceProvider extends ServiceProvider
                 Route::post('query', [ZeroController::class, 'query'])->name('zero.query');
                 Route::post('mutate', [ZeroController::class, 'mutate'])->name('zero.mutate');
             });
-            if (config()->array('zero.tables') !== []) {
-                Route::prefix(config()->string('zero.route_prefix'))->middleware(array_values(array_unique(['web', 'auth', ...$names])))->group(function (): void {
-                    Route::post('tables/{table}/metadata', Http\TableMetadataController::class)->name('zero.tables.metadata');
-                });
-            }
+            Route::prefix(config()->string('zero.route_prefix'))->middleware(array_values(array_unique(['web', 'auth', ...$names])))->group(function (): void {
+                Route::post('tables/{table}/metadata', Http\TableMetadataController::class)->name('zero.tables.metadata');
+            });
 
             if (config()->array('permissions.predictions.abilities') !== []) {
                 Route::prefix(config()->string('zero.route_prefix'))->middleware([Http\CaptureTransportCookies::class, ...config()->array('permissions.predictions.middleware', ['web', 'auth'])])->group(function (): void {

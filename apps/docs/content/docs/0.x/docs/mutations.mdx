@@ -136,6 +136,12 @@ and `effect` at `4.0.2`. Run `php artisan formbraid:init` to scaffold the
 application-owned registry and components. Register a build-only Zero producer
 instead of the scaffold's HTTP Laravel producer:
 
+```php title="config/zero.php"
+'formbraid' => [
+    'enabled' => true,
+],
+```
+
 ```ts title="resources/js/formbraid/zero.ts"
 import type { Integration } from '@formbraid/core/vite';
 
@@ -143,7 +149,7 @@ export default {
     name: 'zero',
     registry: new URL('./index.ts', import.meta.url),
     metadata: new URL('./_metadata.json', import.meta.url),
-    command: ['php', 'artisan', 'zero:formbraid'],
+    command: ['php', 'artisan', 'zero:generate'],
     watch: ['app/**/*.php', 'routes/**/*.php', 'config/zero.php', 'config/formbraid.php'],
     outputs: ['resources/js/formbraid/zero/**', 'resources/js/zero/**', 'app/Formbraid/FormField.php'],
 } satisfies Integration;
@@ -158,13 +164,19 @@ formbraid({ integrations: [zeroForms] });
 ```
 
 Vite inspects the component registry and writes metadata before running Artisan.
-`zero:formbraid` reuses Formbraid's request extraction, field/group generation,
+With `formbraid.enabled`, `zero:generate` reuses Formbraid's request extraction, field/group generation,
 component enum, and hash-owned publication. It refreshes native Zero contracts and
 the React provider, then emits definitions and callback-backed controller forms
-under `zero.formbraid_output` (default `resources/js/formbraid/zero`). Only
+under `zero.formbraid.output` (default `resources/js/formbraid/zero`). Only
 `#[ZeroMutation]` actions with one FormRequest produce forms. Parameterless actions
 export descriptors; actions with model/scalar route arguments export factories.
 There is no Zero-specific form hook or replacement `Form` component.
+
+`zero:dev` includes forms in its startup generation. `zero:generate --check` checks
+them without writing files. The explicit `zero:formbraid` command generates both
+contracts and forms even when the enable flag is off, and accepts the same
+`--check` and `--output` options. Keep the Vite integration for regeneration after
+edits and for producing component metadata before either Artisan command runs.
 
 Zero actions are native-only: do not use Formbraid's Fetch/Inertia controller
 descriptors for them. Ordinary HTTP forms may still use the Laravel producer in a
@@ -175,12 +187,30 @@ lifetime. Zero owns preparation, optimistic replay, and the durable write. The
 generated callback resolves the application's connection only at submission,
 reuses its registered bindings/preparation, and retains the authoritative result type.
 
-The default runtime comes from `zero/generated.react.ts`. For application-owned
-bindings, set `zero.formbraid_runtime` to their project-relative TypeScript module;
-export `controllerRuntime` alongside `ZeroProvider` from the same
-`createZeroBindings(projections, preparation)` result. Static descriptors require
-one active Zero session per binding; ambiguous clients are rejected rather than
-selecting another user's connection. Separate applications can use separate binding instances.
+`formbraid.runtime` is an import path, not another process to run. A generated form
+calls `controllerRuntime()` at submission to obtain the active client, registered
+actions, and ID/timestamp preparation. With `runtime` left `null`, it imports that
+function from `zero/generated.react.ts`.
+
+When mutations use custom optimistic code, the generated React module exports a
+factory instead of ready-made bindings. Call it once in an application module:
+
+```ts title="resources/js/zero/bindings.ts"
+import { createZeroBindings } from './generated.react';
+import { projections } from './optimism';
+
+export const { ZeroProvider, controllerRuntime } = createZeroBindings(projections);
+```
+
+Here `projections` contains your client-side mutation implementations. Set
+`zero.formbraid.runtime` to `'resources/js/zero/bindings.ts'` and use `ZeroProvider`
+from that same module in your application. Generated forms import its
+`controllerRuntime`, so both use the bindings with your custom optimistic code.
+Do not create a second set of bindings just for the forms.
+
+Static descriptors require one active Zero session per binding; ambiguous clients
+are rejected rather than selecting another user's connection. Separate
+applications can use separate binding instances.
 
 Initialize defaults through `<Form defaultValues={values} />`. Formbraid's own
 `useForm(store, options)` remains available when programmatic reset or instance

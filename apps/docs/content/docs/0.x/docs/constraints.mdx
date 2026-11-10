@@ -6,7 +6,7 @@ description: The checked v0.6 subset and native integration boundaries.
 - Pin Zero client and cache to **1.11.3**.
 - One upstream connection, unprefixed public tables, one model per table, unique
   model short names, and independently opted-in relationship targets. Discovery
-  uses `HasZeroQueries`, or register models explicitly in `zero.models`.
+  uses `HasZeroQueries` throughout the application's Composer PSR-4 namespaces.
 - Query construction follows native ZQL; arbitrary Eloquent SQL and arbitrary
   PHP-to-TypeScript translation are not supported. Unsupported controller code
   fails generation rather than running during analysis.
@@ -47,14 +47,14 @@ their new owners before regenerating:
 
 | Previous declaration                               | Replacement                                                                                                                                                          |
 | -------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `public static zero(): ZeroDefinition`             | Opt models in with `HasZeroQueries` or `zero.models`; use Zero scopes, column attributes, and normal Eloquent relationships.                                         |
+| `public static zero(): ZeroDefinition`             | Opt models in with `HasZeroQueries`; use Zero scopes, column attributes, and normal Eloquent relationships.                                                          |
 | `ContextField::UserId` or magic context references | Application enum case such as `App\Enums\ZeroContext::USER_ID` in supported value positions; `->value` deliberately means a literal.                                 |
 | Package `ZeroContext` runtime values               | `ResolvedContext`; keep this distinct from the application-owned context enum.                                                                                       |
 | Resolver returning an untyped context bag          | Configure `context` and `context_resolver`; one public `#[ResolvesContext(...)]` method per case with a native scalar/nullable return type.                          |
 | Implicit user context from identity                | Pass both `userID` and generated typed `context`; Laravel independently resolves trusted values.                                                                     |
 | `authorize('user_id', '=', ...)`                   | An ordinary Laravel policy with a portable Casbin owner binding and explicit `visibleTo($user)` on protected queries.                                                |
 | `authorizeRelation('memberships')`                 | Backfill existing ACLs into managed scoped grants; use the policy's `view` ability through `visibleTo($user)` on roots and related paths.                            |
-| `publicReads()`                                    | Explicit `zero.public_models` allowlisting; still review columns and write authorization.                                                                            |
+| `publicReads()`                                    | Declare `#[ZeroPublic]` on each intentionally public model; still review columns and write authorization.                                                            |
 | Mandatory `enforceServerScope(...)`                | Ordinary policies and explicit visibility for authorization; checked Zero global scopes for portable business constraints.                                           |
 | `serverFill` / `fillFromContext`                   | `withAttributes([...])` creation defaults; use `asConditions: false` for defaults that must not filter reads. These are overridable, not immutable field protection. |
 | `relations('todos')` metadata                      | Supported Eloquent relationship methods between opted-in models; targets and required keys remain explicit.                                                          |

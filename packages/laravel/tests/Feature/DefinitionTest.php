@@ -19,6 +19,7 @@ use ZeroForLaravel\ResolvedContext;
 use ZeroForLaravel\Tests\Fixtures\OwnerPermissions;
 use ZeroForLaravel\Tests\Fixtures\OwnerUser;
 use ZeroForLaravel\Tests\Fixtures\Task;
+use ZeroForLaravel\Tests\Fixtures\VisibleTask;
 use ZeroForLaravel\Tests\OwnerTestCase as TestCase;
 
 uses(TestCase::class);
@@ -58,8 +59,8 @@ test('a protected query requires an explicit trusted actor and rejects context s
 });
 
 test('public reads cannot be used to bypass a bound private resource', function (): void {
-    config(['zero.public_models' => [Task::class]]);
-    new ModelRegistry([Task::class]);
+    config(['permissions.resources.'.VisibleTask::class => config('permissions.resources.'.Task::class)]);
+    new ModelRegistry([VisibleTask::class]);
 })->throws(LogicException::class, 'never both');
 
 test('scalar ownership decisions use managed grants and fresh database identities', function (): void {

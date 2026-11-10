@@ -8,8 +8,10 @@ controller-declared live queries and controller mutations. It consumes the local
 - Zero cache: <https://zero.todos.test> (local port 4858)
 - Owners create, rename, delete, and share lists with registered users.
 - Every reader can add, edit, complete, and delete todos.
-- Create-list and add-todo forms use Formbraid 0.3. Vite generates request
-  definitions and native Zero controller descriptors under `resources/js/formbraid/zero`.
+- Create-list and add-todo forms use Formbraid 0.3. With `formbraid.enabled`,
+  `zero:generate` and `zero:dev` startup generate request definitions and native
+  Zero controller descriptors under `resources/js/formbraid/zero`. Vite produces
+  the component metadata and reruns generation after edits.
   Create-list renders `<Form form={store} />`; add-todo uses Formbraid's optional
   `useForm` instance API to clear accepted drafts without erasing newer edits.
   Its destination-list combobox searches a PHP-declared Zero option source and
@@ -193,8 +195,8 @@ is ownership metadata for display, not an authorization fallback.
 
 `TodoList` and `Todo` use `HasPolicyVisibility`. Dashboard list roots and related
 todos explicitly call `visibleTo($input->user())`; filters and pagination apply
-after visibility. `zero.models` explicitly allows only these two models, with no
-public models. User/auth columns, legacy membership rows, raw permission rules
+after visibility. These two models use `HasZeroQueries` and are discovered without
+a config list. Neither declares public reads. User/auth columns, legacy membership rows, raw permission rules
 and projection facts are not part of the browser contract. FormRequests and
 transactional controller Gates both check destination-list access before moving
 a todo, so an earlier request check cannot outlive revocation.

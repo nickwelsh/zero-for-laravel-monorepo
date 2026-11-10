@@ -6,71 +6,20 @@ namespace ZeroForLaravel\Metadata;
 
 use Illuminate\Database\Eloquent\Model;
 use LogicException;
-use RecursiveDirectoryIterator;
-use RecursiveIteratorIterator;
 use ReflectionClass;
-use SplFileInfo;
 use ZeroForLaravel\Concerns\HasZeroQueries;
+use ZeroForLaravel\Support\ApplicationClasses;
 
-final class ModelDiscovery
+final readonly class ModelDiscovery
 {
+    public function __construct(private ApplicationClasses $classes) {}
+
     /** @return list<class-string<Model>> */
     public function registered(): array
     {
-        $models = config()->array('zero.models');
-        if (! array_is_list($models)) {
-            throw new LogicException('Zero models must be a list of Eloquent model classes.');
-        }
-
-        $classes = [];
-        foreach ($models as $model) {
-            if (! is_string($model) || ! is_subclass_of($model, Model::class)) {
-                throw new LogicException('Zero models must be a list of Eloquent model classes.');
-            }
-
-            $classes[] = $model;
-        }
-
-        if ($classes === []) {
-            $roots = config()->array('zero.discovery');
-            if ($roots === []) {
-                $roots = [['path' => app_path('Models'), 'namespace' => app()->getNamespace().'Models']];
-            }
-
-            foreach ($roots as $root) {
-                if (! is_array($root) || ! is_string($root['path'] ?? null) || ! is_string($root['namespace'] ?? null)) {
-                    throw new LogicException('Zero discovery roots require a path and namespace.');
-                }
-
-                $classes = [...$classes, ...$this->discover($root['path'], $root['namespace'])];
-            }
-        }
-
-        return array_values(array_unique($classes));
-    }
-
-    /**
-     * @return list<class-string<Model>>
-     */
-    public function discover(string $directory, string $namespace): array
-    {
-        if (! is_dir($directory)) {
-            return [];
-        }
-
-        $classes = [];
-        foreach (new RecursiveIteratorIterator(new RecursiveDirectoryIterator($directory)) as $file) {
-            if (! $file instanceof SplFileInfo || ! $file->isFile() || $file->getExtension() !== 'php') {
-                continue;
-            }
-
-            $relative = substr($file->getPathname(), strlen(rtrim($directory, '/')) + 1, -4);
-            $class = rtrim($namespace, '\\').'\\'.str_replace('/', '\\', $relative);
-            if (! class_exists($class) || ! is_subclass_of($class, Model::class)) {
-                continue;
-            }
-
-            if ((new ReflectionClass($class))->isAbstract()) {
+        $models = [];
+        foreach ($this->classes->all() as $class) {
+            if (! is_subclass_of($class, Model::class) || (new ReflectionClass($class))->isAbstract()) {
                 continue;
             }
 
@@ -79,12 +28,10 @@ final class ModelDiscovery
             }
 
             if (in_array(HasZeroQueries::class, class_uses_recursive($class), true)) {
-                $classes[] = $class;
+                $models[] = $class;
             }
         }
 
-        sort($classes);
-
-        return $classes;
+        return $models;
     }
 }

@@ -14,7 +14,7 @@ final class LocalEnvironment
 {
     public function connection(): Connection
     {
-        $classes = (new ModelDiscovery)->registered();
+        $classes = resolve(ModelDiscovery::class)->registered();
 
         return $classes === [] ? DB::connection() : (new $classes[0])->getConnection();
     }

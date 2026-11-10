@@ -18,8 +18,8 @@ may remove the scope normally. Protected Zero paths still require a visibility
 decision after removal. Global scoping also affects route binding (hidden rows
 produce 404 before Gates) and bulk writes; it is not separate write authorization.
 
-Schema publication uses an explicit `zero.models` allowlist or `HasZeroQueries`
-discovery. Public models also require `zero.public_models`; a missing permission
+Schema publication uses `HasZeroQueries` discovery in the application's Composer
+namespaces. Public models require `#[ZeroPublic]` on the class; a missing permission
 binding never makes a model public. Creation defaults use `withAttributes()` with
 typed application context; explicit creation attributes win, and defaults never
 stamp updates or authorize writes. Scout search uses `zeroSearch()` or explicit

@@ -13,6 +13,7 @@ use LogicException;
 use ZeroForLaravel\Attributes\ZeroColumns;
 use ZeroForLaravel\Attributes\ZeroExclude;
 use ZeroForLaravel\Attributes\ZeroIncludeColumns;
+use ZeroForLaravel\Attributes\ZeroPublic;
 use ZeroForLaravel\Concerns\HasPolicyVisibility;
 use ZeroForLaravel\Concerns\HasZeroQueries;
 use ZeroForLaravel\Generation\TypeScriptGenerator;
@@ -26,14 +27,6 @@ use ZeroForLaravel\Tests\Fixtures\ZeroContext;
 use ZeroForLaravel\Tests\OwnerTestCase as TestCase;
 
 uses(TestCase::class);
-
-beforeEach(function (): void {
-    config(['zero.public_models' => [VisibleTask::class, HiddenVisibleTask::class, ExcludedVisibleTask::class,
-        ExplicitVisibleTask::class, IncludedVisibleTask::class, IncludedExcludedVisibleTask::class,
-        BoundedVisibleTask::class, VirtualVisibleTask::class, EmptyVisibleTask::class,
-        MissingVisibleKey::class, MissingVisibleTimestamp::class, MissingVisibleDeletedAt::class,
-        MissingVisibleFill::class, MissingVisibleRelationKey::class]]);
-});
 
 test('visible columns restrict metadata, writable inputs and the generated client schema', function (): void {
     $registry = new ModelRegistry([VisibleTask::class]);
@@ -109,22 +102,27 @@ class ReadOnlyOwnerTask extends Model
     protected $hidden = ['secret', 'user_id'];
 }
 
+#[ZeroPublic]
 class HiddenVisibleTask extends VisibleTask
 {
     protected $hidden = ['title'];
 }
 
 #[ZeroExclude(['title'])]
+#[ZeroPublic]
 class ExcludedVisibleTask extends VisibleTask {}
 
 #[ZeroColumns(['id', 'secret'])]
+#[ZeroPublic]
 class ExplicitVisibleTask extends VisibleTask {}
 
 #[ZeroIncludeColumns(['secret'])]
+#[ZeroPublic]
 class IncludedVisibleTask extends VisibleTask {}
 
 #[ZeroExclude(['title', 'secret'])]
 #[ZeroIncludeColumns(['title', 'secret'])]
+#[ZeroPublic]
 class IncludedExcludedVisibleTask extends VisibleTask
 {
     protected $hidden = ['title', 'secret'];
@@ -132,33 +130,40 @@ class IncludedExcludedVisibleTask extends VisibleTask
 
 #[ZeroColumns(['id'])]
 #[ZeroIncludeColumns(['title', 'secret'])]
+#[ZeroPublic]
 class BoundedVisibleTask extends VisibleTask {}
 
+#[ZeroPublic]
 class VirtualVisibleTask extends VisibleTask
 {
     protected $visible = ['id', 'title', 'display_title', 'list'];
 }
 
+#[ZeroPublic]
 class EmptyVisibleTask extends VisibleTask
 {
     protected $visible = [];
 }
 
+#[ZeroPublic]
 class MissingVisibleKey extends VisibleTask
 {
     protected $visible = ['title'];
 }
 
+#[ZeroPublic]
 class MissingVisibleTimestamp extends VisibleTask
 {
     public $timestamps = true;
 }
 
+#[ZeroPublic]
 class MissingVisibleDeletedAt extends VisibleTask
 {
     use SoftDeletes;
 }
 
+#[ZeroPublic]
 class MissingVisibleFill extends VisibleTask
 {
     use HasZeroQueries;
@@ -171,6 +176,7 @@ class MissingVisibleFill extends VisibleTask
     }
 }
 
+#[ZeroPublic]
 class MissingVisibleRelationKey extends VisibleTask
 {
     /** @return BelongsTo<MissingVisibleRelationKey, $this> */

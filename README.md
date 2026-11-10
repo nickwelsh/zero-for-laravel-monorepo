@@ -87,9 +87,9 @@ The portable compiler supports ACL, global/domain RBAC and a typed ABAC subset;
 unsupported policies fail explicitly. A supported policy `before()` admin override
 stays live without bypassing caller filters. There is no auth-dependent global scope.
 
-List participating models in `zero.models`, or use trait-based discovery. Every protected root,
+Models using `HasZeroQueries` are discovered in the application's Composer namespaces. Every protected root,
 related selection and existence path needs `visibleTo()` or a supported captured
-instance Gate. `zero.public_models` opts into intentionally public reads. Creation
+instance Gate. Declare `#[ZeroPublic]` on an intentionally public model. Creation
 defaults use `withAttributes()` and typed application context; explicit creation
 attributes override defaults. Defaults are not write authorization or update stamps.
 Use checked `#[ZeroScope]` methods for local Zero scopes and `ZeroGlobalScope` for
@@ -176,7 +176,7 @@ Applications using Wayfinder `dev-next` can opt into
 emit precise live-query prop types. Run `zero:generate` before `wayfinder:generate`.
 Only registered Zero props are customized; shared and ordinary props stay with
 Wayfinder, without duplicate declarations or global overrides. The controller
-module root is configurable with `zero.wayfinder_import` (default `@/zero`).
+module root is configurable with `zero.wayfinder.module` (default `@/zero`).
 
 Install `createInertiaAdapter(bindings)` from the `/inertia` export in your
 `createInertiaApp` resolver and call `livePages.wrap(module.default, page)`.

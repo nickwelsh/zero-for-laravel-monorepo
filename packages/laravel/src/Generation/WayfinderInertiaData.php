@@ -29,7 +29,7 @@ final class WayfinderInertiaData extends InertiaData
                     continue;
                 }
 
-                $module = rtrim(config()->string('zero.wayfinder_import'), '/').'/'.str_replace('\\', '/', $controller);
+                $module = rtrim(config()->string('zero.wayfinder.module'), '/').'/'.str_replace('\\', '/', $controller);
                 $reference = 'typeof import('.json_encode($module, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES).')['.json_encode($method, JSON_THROW_ON_ERROR).']['.json_encode($query->prop, JSON_THROW_ON_ERROR).']';
                 $this->liveTypes[$query->prop] = 'import("@nickwelsh/zero-for-laravel/react").QueryData<'.$reference.'>';
             }

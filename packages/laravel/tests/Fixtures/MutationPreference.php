@@ -6,11 +6,13 @@ namespace ZeroForLaravel\Tests\Fixtures;
 
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Model;
+use ZeroForLaravel\Attributes\ZeroPublic;
 
 /** @property string $id
  * @property bool $subscribed
  * @property string $note
  */
+#[ZeroPublic]
 final class MutationPreference extends Model
 {
     use HasUuids;

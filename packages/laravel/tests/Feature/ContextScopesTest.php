@@ -11,6 +11,7 @@ use Inertia\Response;
 use LogicException;
 use PhpParser\ParserFactory;
 use ZeroForLaravel\Attributes\ZeroMutation;
+use ZeroForLaravel\Attributes\ZeroPublic;
 use ZeroForLaravel\Attributes\ZeroScope;
 use ZeroForLaravel\Attributes\ZeroScopedBy;
 use ZeroForLaravel\Concerns\HasZeroQueries;
@@ -28,10 +29,6 @@ use ZeroForLaravel\Tests\Fixtures\ZeroContext;
 use ZeroForLaravel\Tests\TestCase;
 
 uses(TestCase::class);
-
-beforeEach(function (): void {
-    config(['zero.public_models' => [ScopedTodo::class, InheritedDefaultTodo::class]]);
-});
 
 test('local scopes mutate aliases, group boolean branches and keep nested defaults off the root', function (): void {
     $registry = new ModelRegistry([ScopedTodo::class]);
@@ -155,6 +152,7 @@ class OwnershipScope implements ZeroGlobalScope
  * @method static ZeroQuery named(string $name)
  */
 #[ZeroScopedBy([OwnershipScope::class])]
+#[ZeroPublic]
 class ScopedTodo extends Model
 {
     use HasUuids, HasZeroQueries;
@@ -237,6 +235,7 @@ class ParentDefaultTodo extends Model
 }
 
 #[ZeroScopedBy([ChildDefaultScope::class])]
+#[ZeroPublic]
 class InheritedDefaultTodo extends ParentDefaultTodo {}
 
 class ChildDefaultScope implements ZeroGlobalScope

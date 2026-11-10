@@ -11,6 +11,7 @@ use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
 use LogicException;
 use ZeroForLaravel\Attributes\ZeroExclude;
+use ZeroForLaravel\Attributes\ZeroPublic;
 use ZeroForLaravel\Context\ContextReference;
 use ZeroForLaravel\Metadata\ModelRegistry;
 use ZeroForLaravel\Mutation\Mutation;
@@ -24,10 +25,7 @@ use ZeroForLaravel\Tests\OwnerTestCase as TestCase;
 
 uses(TestCase::class);
 
-beforeEach(function (): void {
-    config(['zero.public_models' => [Calendar::class, WrongKeyTask::class, ExcludedTask::class, InvalidRelationTask::class, HiddenRelationTask::class, CastTask::class]]);
-});
-
+#[ZeroPublic]
 class ExternalTask extends Model
 {
     protected $table = 'tasks';
@@ -44,7 +42,6 @@ class ExternalTask extends Model
 }
 
 test('external publication and mutation metadata need no model definition and relationships are collected on demand', function (): void {
-    config(['zero.public_models' => [ExternalTask::class]]);
     $registry = new ModelRegistry([ExternalTask::class]);
     $task = $registry->get('ExternalTask');
     expect((new ZeroQuery($task, $registry))->pendingAttributes())->toBe([]);
@@ -89,9 +86,11 @@ test('resolves one column plan and separate public mutation inputs', function ()
     $this->assertSame('one', $relation['cardinality']);
 });
 
-test('reads fail closed without an explicit visibility declaration', function (): void {
-    new ModelRegistry([UnprotectedTask::class]);
-})->throws(LogicException::class, 'explicit zero.public_models');
+test('reads fail closed without a visibility declaration on the model itself', function (): void {
+    foreach ([UnprotectedTask::class, InheritedPublicTask::class] as $class) {
+        expect(fn (): ModelRegistry => new ModelRegistry([$class]))->toThrow(LogicException::class, '#[ZeroPublic]');
+    }
+});
 
 test('hidden relation keys are not silently republished', function (): void {
     $registry = new ModelRegistry([HiddenRelationTask::class, TaskList::class, Tag::class, Comment::class]);
@@ -105,6 +104,7 @@ test('exclusions are additive to eloquent hidden columns', function (): void {
     $this->assertArrayNotHasKey('completed_at', $task->columns);
 });
 
+#[ZeroPublic]
 class Calendar extends Model
 {
     public $timestamps = false;
@@ -115,6 +115,7 @@ class Calendar extends Model
     }
 }
 
+#[ZeroPublic]
 class WrongKeyTask extends Task
 {
     protected $primaryKey = 'title';
@@ -125,12 +126,16 @@ class UnprotectedTask extends Model
     protected $table = 'tasks';
 }
 
+class InheritedPublicTask extends ExternalTask {}
+
+#[ZeroPublic]
 class HiddenRelationTask extends Task
 {
     protected $hidden = ['secret', 'list_id'];
 }
 
 #[ZeroExclude(['completed_at'])]
+#[ZeroPublic]
 class ExcludedTask extends Model
 {
     protected $table = 'tasks';
@@ -138,6 +143,7 @@ class ExcludedTask extends Model
     protected $hidden = ['secret'];
 }
 
+#[ZeroPublic]
 class InvalidRelationTask extends Task
 {
     public function invalidRelation(): string
@@ -146,6 +152,7 @@ class InvalidRelationTask extends Task
     }
 }
 
+#[ZeroPublic]
 class InvalidDefinitionTask extends Model
 {
     protected $table = 'tasks';
@@ -157,10 +164,10 @@ class InvalidDefinitionTask extends Model
 }
 
 test('legacy model definitions are rejected regardless of return type', function (): void {
-    config(['zero.public_models' => [InvalidDefinitionTask::class]]);
     new ModelRegistry([InvalidDefinitionTask::class]);
 })->throws(LogicException::class, 'legacy zero()/ZeroDefinition is unsupported');
 
+#[ZeroPublic]
 class ParentDependentTask extends Task
 {
     /** @return HasMany<Comment, $this> */
@@ -170,6 +177,7 @@ class ParentDependentTask extends Task
     }
 }
 
+#[ZeroPublic]
 class ParentAccessorTask extends Task
 {
     /** @return HasMany<Comment, $this> */
@@ -180,7 +188,6 @@ class ParentAccessorTask extends Task
 }
 
 test('collected relationships reject parent values instead of freezing a blank instance', function (): void {
-    config(['zero.public_models' => [ParentDependentTask::class, ParentAccessorTask::class]]);
     foreach ([ParentDependentTask::class, ParentAccessorTask::class] as $class) {
         $registry = new ModelRegistry([$class, Comment::class]);
         $parent = $registry->get(class_basename($class));
@@ -201,6 +208,7 @@ enum CastStatus: string
     case Published = 'published';
 }
 
+#[ZeroPublic]
 class CastTask extends Task
 {
     protected $fillable = ['user_id', 'title', 'options', 'status', 'completed_at', 'scheduled_at'];

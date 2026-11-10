@@ -64,13 +64,8 @@ final class TodosTable
 }
 ```
 
-Register explicitly in `config/zero.php`:
-
-```php
-'tables' => [
-    'todos' => App\Tables\TodosTable::class,
-],
-```
+Zero discovers this `TodosTable` class in the application's Composer PSR-4
+namespaces and generates the `todos` descriptor. No configuration entry is needed.
 
 `TableContext` exposes the server-resolved actor and declared application context;
 it is not constructed from client identity arguments. Generation treats it as a

@@ -309,7 +309,7 @@ a browser prediction as authorization for reads, writes or watch registration.
 ## Migrating the previous API
 
 Remove model `zero()` methods and `ZeroDefinition` imports. Move publication to
-`zero.models` or trait discovery, deliberate public reads to `zero.public_models`,
+`HasZeroQueries` discovery, deliberate public reads to `#[ZeroPublic]` on each model,
 creation defaults to `withAttributes()` with typed application context, and search
 to `zeroSearch()` or the registered search integration. Defaults do not enforce
 ownership: explicit creation attributes override defaults, and updates are not stamped.

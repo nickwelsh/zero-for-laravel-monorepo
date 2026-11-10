@@ -84,7 +84,7 @@ and includes the live prop's loading, error, and pagination API. It describes pr
 **after the Inertia live adapter has injected them**, not raw server page JSON.
 Continue to install `createInertiaAdapter` in the resolver.
 
-`zero.wayfinder_import` defaults to `@/zero`. Set it to the TypeScript module root
+`zero.wayfinder.module` defaults to `@/zero`. Set it to the TypeScript module root
 containing your generated controller modules if you use another alias or directory.
 Relative module roots resolve from Wayfinder's generated `types.d.ts`, not from
 your PHP configuration file. Regenerate Zero whenever declarations change, and use

@@ -25,6 +25,10 @@ use ZeroForLaravel\Attributes\ZeroMutation;
 use ZeroForLaravel\Inertia\ZeroInertiaServiceProvider;
 use ZeroForLaravel\Permissions\Casbin;
 use ZeroForLaravel\Permissions\VisibleToCurrentUser;
+use ZeroForLaravel\Tables\AllowedFilter;
+use ZeroForLaravel\Tables\AllowedGroup;
+use ZeroForLaravel\Tables\Table;
+use ZeroForLaravel\Tables\TableContext;
 use ZeroForLaravel\Tests\Fixtures\Comment;
 use ZeroForLaravel\Tests\Fixtures\ContextResolver;
 use ZeroForLaravel\Tests\Fixtures\ControllerMutationRequest;
@@ -35,10 +39,6 @@ use ZeroForLaravel\Tests\Fixtures\Task;
 use ZeroForLaravel\Tests\Fixtures\TaskList;
 use ZeroForLaravel\Tests\Fixtures\ZeroContext;
 use ZeroForLaravel\ZeroServiceProvider;
-use ZeroForLaravel\Tables\AllowedFilter;
-use ZeroForLaravel\Tables\AllowedGroup;
-use ZeroForLaravel\Tables\Table;
-use ZeroForLaravel\Tables\TableContext;
 
 // Access checks reload this configured model rather than trusting the request's
 // deliberately incomplete identity. Eloquent must not coerce alice/bob to ints.
@@ -100,7 +100,7 @@ class FixtureReads
     }
 }
 
-class FixtureTable
+class TasksTable
 {
     public function definition(TableContext $context): Table
     {
@@ -157,13 +157,11 @@ $app->afterBootstrapping(LoadConfiguration::class, function ($app) use ($root) {
             'username' => getenv('ZERO_TEST_PG_USER') ?: 'postgres', 'password' => getenv('ZERO_TEST_PG_PASSWORD') ?: '',
             'charset' => 'utf8', 'prefix' => '', 'search_path' => 'public', 'sslmode' => 'prefer',
         ],
-        'zero.models' => [Task::class, TaskList::class, Tag::class, Comment::class],
-        'zero.tables' => ['tasks' => FixtureTable::class],
         'zero.context' => ZeroContext::class,
         'zero.context_resolver' => ContextResolver::class,
         'zero.middleware' => [FixtureIdentity::class], 'zero.api_key' => getenv('ZERO_API_KEY'),
         'zero.app_id' => getenv('ZERO_APP_ID'), 'zero.upstream_schema' => getenv('ZERO_APP_ID').'_0',
-        'zero.publication' => getenv('ZERO_APP_PUBLICATIONS'), 'zero.output' => $root.'/generated.ts',
+        'zero.publication' => getenv('ZERO_APP_PUBLICATIONS'), 'zero.generation.output' => $root.'/generated.ts',
         'zero.dev.port' => (int) getenv('ZERO_PORT'), 'zero.dev.replica' => $root.'/replica.db',
         'zero.sync_publication_on_migrate' => true, 'zero.route_prefix' => 'callbacks/zero',
     ]);
@@ -171,6 +169,9 @@ $app->afterBootstrapping(LoadConfiguration::class, function ($app) use ($root) {
 ini_set('error_log', $root.'/php.log');
 $kernel = $app->make(PHP_SAPI === 'cli' ? Illuminate\Contracts\Console\Kernel::class : Kernel::class);
 $kernel->bootstrap();
+app()->instance(ZeroForLaravel\Support\ApplicationClasses::class, new ZeroForLaravel\Tests\Fixtures\DiscoveredClasses([
+    Task::class, TaskList::class, Tag::class, Comment::class, TasksTable::class,
+]));
 OwnerPermissions::configure();
 config(['permissions.subject.class' => FixtureUser::class]);
 Task::addGlobalScope(new VisibleToCurrentUser);

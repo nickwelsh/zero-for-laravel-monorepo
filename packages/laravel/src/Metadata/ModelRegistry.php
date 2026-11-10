@@ -266,14 +266,14 @@ final class ModelRegistry
         }
 
         $this->connectionName = $connection;
-        $public = in_array($class, config()->array('zero.public_models', []), true);
+        $public = (new ReflectionClass($class))->getAttributes(Attributes\ZeroPublic::class) !== [];
         $policy = array_key_exists($class, config()->array('permissions.resources', []));
         if ($public && $policy) {
             throw new LogicException("{$name}: choose public reads or a permission binding, never both.");
         }
 
         if (! $public && ! $policy) {
-            throw new LogicException("{$name}: declare an explicit zero.public_models entry or permissions.resources binding.");
+            throw new LogicException("{$name}: add a permissions.resources binding for protected reads, or #[ZeroPublic] for intentionally public reads.");
         }
 
         if (method_exists($class, 'zero')) {
@@ -408,7 +408,7 @@ final class ModelRegistry
             $targetName = (new ReflectionClass($relation->getRelated()))->getShortName();
             $target = $this->models[$targetName] ?? null;
             if ($target === null || $target->class !== $relation->getRelated()::class) {
-                throw new LogicException('Unknown Zero model for relationship '.$metadata->name.'.'.$name.'. Register its target explicitly or enable discovery.');
+                throw new LogicException('Unknown Zero model for relationship '.$metadata->name.'.'.$name.'. Add HasZeroQueries to its target model.');
             }
 
             // Eloquent constraints cannot silently disappear when exported to Zero.

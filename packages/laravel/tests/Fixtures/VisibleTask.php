@@ -5,8 +5,10 @@ declare(strict_types=1);
 namespace ZeroForLaravel\Tests\Fixtures;
 
 use Illuminate\Database\Eloquent\Model;
+use ZeroForLaravel\Attributes\ZeroPublic;
 use ZeroForLaravel\Concerns\HasZeroQueries;
 
+#[ZeroPublic]
 class VisibleTask extends Model
 {
     use HasZeroQueries;

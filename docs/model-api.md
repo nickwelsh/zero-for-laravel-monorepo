@@ -14,8 +14,8 @@ supported captured instance Gate can protect its bound resource and descendants.
 Related targets must be registered. Caller filters remain outside the admin OR.
 
 There is no `ZeroDefinition`, model `zero()` method, implicit visibility global scope,
-or PHP-only server-scope escape hatch. `zero.models` or trait discovery selects publication;
-`zero.public_models` explicitly selects public reads. Database bindings live in
+or PHP-only server-scope escape hatch. `HasZeroQueries` discovery selects publication;
+`#[ZeroPublic]` on the model explicitly selects public reads. Database bindings live in
 `permissions.resources`; normal Laravel discovery resolves policies. Unsupported
 hooks, scopes or matchers fail instead of weakening a query. See
 [the authorization guide](../apps/docs/content/docs/0.x/docs/authorization.mdx).

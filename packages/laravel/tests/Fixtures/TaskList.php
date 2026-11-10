@@ -7,10 +7,12 @@ namespace ZeroForLaravel\Tests\Fixtures;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use ZeroForLaravel\Concerns\HasPolicyVisibility;
+use ZeroForLaravel\Concerns\HasZeroQueries;
 
 class TaskList extends Model
 {
     use HasPolicyVisibility;
+    use HasZeroQueries;
 
     public $timestamps = false;
 

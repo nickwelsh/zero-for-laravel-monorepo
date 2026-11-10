@@ -1,7 +1,7 @@
 # Zero Table
 
 Headless tables for native Zero rows and authorized Laravel snapshot group counts.
-Register a fluent table definition with `zero.tables`, run `zero:generate`, and
+Define a `TasksTable` class with a typed `definition()` method, run `zero:generate`, and
 import its generated descriptor. The React-free root exports descriptor types,
 query lowering, filter validation and stable identities. `/react` owns sessions
 and subscriptions using Zero for Laravel's existing authorization-aware `useData`.
@@ -18,8 +18,10 @@ The metadata loader adds no runtime dependency, automatic retries, or timeouts.
 
 ## Define capabilities once
 
-Table definitions live in the existing Laravel package. Register the class under
-`tables.tasks` in `config/zero.php`, then run `php artisan zero:generate`.
+Table definitions live in your application's Composer PSR-4 namespaces. Zero
+discovers concrete `*Table` classes whose public `definition()` returns `Table`.
+`TasksTable` generates `tables/tasks.ts`; no config registration is needed.
+Run `php artisan zero:generate` after adding or changing a definition.
 
 ```php
 public function definition(TableContext $context): Table

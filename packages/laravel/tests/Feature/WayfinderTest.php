@@ -21,9 +21,9 @@ test('Wayfinder owns page declarations while registered Zero props infer their l
     expect(resolve(InertiaData::class)::class)->toBe(InertiaData::class);
     app()->register(WayfinderServiceProvider::class);
     config([
-        'zero.controller_output' => $directory.'/queries.php',
-        'zero.mutation_output' => $directory.'/mutations.php',
-        'zero.wayfinder_import' => '@custom/contracts',
+        'zero.generation.queries' => $directory.'/queries.php',
+        'zero.generation.mutations' => $directory.'/mutations.php',
+        'zero.wayfinder.module' => '@custom/contracts',
         'wayfinder.cache.enabled' => false,
         'wayfinder.cache.directory' => $directory.'/cache',
         'wayfinder.generate.models' => false,

@@ -23,6 +23,6 @@ final class ZeroInertiaServiceProvider extends ServiceProvider
         $this->app->afterResolving(FormRequest::class, function (FormRequest $form): void {
             request()->attributes->set('zero.form.'.$form::class, $form);
         });
-        $this->app->singleton(RegisteredQueries::class, fn (): RegisteredQueries => RegisteredQueries::load(config()->string('zero.controller_output')));
+        $this->app->singleton(RegisteredQueries::class, fn (): RegisteredQueries => RegisteredQueries::load(config()->string('zero.generation.queries')));
     }
 }

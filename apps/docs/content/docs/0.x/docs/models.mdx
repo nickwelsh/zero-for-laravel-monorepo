@@ -28,15 +28,16 @@ class Task extends Model
 }
 ```
 
-Register participating models and relationship targets in `zero.models`, or discover
-models using `HasZeroQueries` from configured roots when that allowlist is empty.
+Add `HasZeroQueries` to participating models and relationship targets. Zero discovers
+them in the application's Composer PSR-4 namespaces without configuration lists.
 Relationships used by supported queries are discovered from ordinary Eloquent
 methods; no `zero()` method or `ZeroDefinition` is needed. Use
 `Task::zeroQuery()->visibleTo($request->user())` for protected reads, and scope related
 paths explicitly. The corresponding REST query is `Task::query()->visibleTo($user)`.
 See [authorization](./authorization.mdx) for policies, Casbin and the portable subset.
-Intentionally public models opt into `zero.public_models`. Missing permissions
-never imply public access. Read visibility never grants write permission.
+Intentionally public models declare `#[ZeroForLaravel\Attributes\ZeroPublic]` on
+the model itself. The attribute is not inherited. Missing permissions never imply
+public access, and read visibility never grants write permission.
 
 ## Columns and privacy
 

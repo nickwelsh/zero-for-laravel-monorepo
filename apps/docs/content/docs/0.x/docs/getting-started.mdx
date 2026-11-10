@@ -33,11 +33,11 @@ resolver, then set both `context` and `context_resolver` in `config/zero.php`.
 Follow the [typed context setup](./configuration.mdx#typed-context-and-resolver);
 generation reflects signatures rather than executing resolver methods.
 
-Opt models in with `HasZeroQueries` discovery or an explicit `zero.models` list.
+Opt models in with `HasZeroQueries`; their Composer namespaces are discovered automatically.
 Define column allowlists and supported Eloquent relationships. Protect private
 models with ordinary Laravel policies, `HasPolicyVisibility`, and explicit
 `visibleTo($request->user())` on each protected query path. Public models must be
-listed deliberately in `zero.public_models`. See
+marked deliberately with `#[ZeroForLaravel\Attributes\ZeroPublic]`. See
 [policy bindings and managed grants](./authorization.mdx#configure-bindings-and-managed-grants)
 for RBAC/ABAC setup and transactional sharing. Zero global scopes remain useful
 for business constraints and creation defaults; they do not replace visibility.

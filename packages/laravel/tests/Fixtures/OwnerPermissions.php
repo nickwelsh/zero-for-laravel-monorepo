@@ -29,7 +29,6 @@ final class OwnerPermissions
             'permissions.subject.prefix' => 'user:',
             'permissions.subject.attributes' => [],
             'permissions.denied_status' => 403,
-            'zero.public_models' => [...config()->array('zero.public_models', []), VisibleTask::class, MutationPreference::class],
         ]);
         $resources = [];
         foreach ($classes as $class) {
@@ -40,9 +39,6 @@ final class OwnerPermissions
         }
 
         config(['permissions.resources' => $resources]);
-        if (config()->array('zero.models', []) === []) {
-            config(['zero.models' => $classes]);
-        }
     }
 
     /** Install actual grants for scalar Gates, and maintained projections on PostgreSQL. */

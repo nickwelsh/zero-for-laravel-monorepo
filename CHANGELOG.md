@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+- Discover participating models and table definitions in the application's
+  Composer PSR-4 namespaces by default, with optional class and glob selections.
+  Public reads now require
+  `#[ZeroPublic]` on each model instead of `zero.public_models`; missing permission
+  bindings still fail generation.
+- Group generation, frontend, Wayfinder, and Formbraid settings and document them
+  with Laravel-style configuration comments. Schema and frontend drivers are
+  container-resolved classes. Detect React automatically from `package.json`.
+  See the [configuration migration guide](apps/docs/content/docs/0.x/docs/configuration.mdx#migrating-the-previous-configuration)
+  before regenerating existing applications.
+- Enable `formbraid.enabled` to include forms in normal generation, read-only
+  contract checks, and local cache startup. Keep `zero:formbraid` as an explicit
+  generation command and document the application-owned runtime module.
+
 ## [0.8.0] - 2026-11-09
 
 - Align the PHP, client, and table packages on **0.8.0** and enforce matching

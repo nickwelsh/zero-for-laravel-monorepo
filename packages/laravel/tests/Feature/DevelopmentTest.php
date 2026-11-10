@@ -29,7 +29,7 @@ abstract class DevelopmentTestCase extends PostgresTestCase
         app()->setBasePath($this->fixture);
         app()->instance('env', 'local');
 
-        config()->set('zero.output', $this->fixture.'/generated.ts');
+        config()->set('zero.generation.output', $this->fixture.'/generated.ts');
         config()->set('zero.dev.replica', $this->fixture.'/replica.db');
 
         $socket = stream_socket_server('tcp://0.0.0.0:0');
@@ -70,7 +70,6 @@ abstract class DevelopmentTestCase extends PostgresTestCase
     protected function defineEnvironment($app): void
     {
         parent::defineEnvironment($app);
-        $app['config']->set('zero.models', $this->models());
         $app['config']->set('zero.api_key', 'private-fixture-key');
         $app['config']->set('zero.publication', 'laravel_zero_test_publication');
         $app['config']->set('zero.app_id', 'fixture');
@@ -107,11 +106,25 @@ test('startup encodes PostgreSQL credentials, respects callback prefixes and for
     expect($local->environment(DB::connection())['ZERO_QUERY_URL'])->toBe('https://application.test/query');
     config()->set('zero.route_prefix', 'callbacks/private-zero');
     expect($local->redact($env['ZERO_UPSTREAM_DB'].' '.$env['ZERO_QUERY_API_KEY'], $env))->not->toContain('private-fixture-key', 'postgresql://');
+    File::put($this->fixture.'/composer.json', json_encode(['autoload' => ['psr-4' => ['App\\' => 'app/']]], JSON_THROW_ON_ERROR));
+    File::put($this->fixture.'/metadata.json', json_encode([
+        'version' => 1, 'inputs' => [], 'fields' => ['Input' => ['props' => (object) []]],
+        'components' => (object) [], 'groups' => (object) [],
+    ], JSON_THROW_ON_ERROR));
+    config(['zero.formbraid.enabled' => true, 'zero.formbraid.output' => 'forms',
+        'formbraid.metadata' => 'metadata.json', 'formbraid.component_enum' => 'app/Formbraid/DevStartupFields.php']);
     Process::fake(['*' => Process::result(output: 'cache stopped', exitCode: 7)]);
-    expect(Artisan::call('zero:dev'))->toBe(7);
+    expect(Artisan::call('zero:dev'))->toBe(7, Artisan::output());
     expect(is_file($this->fixture.'/generated.ts'))->toBeTrue();
+    expect(is_file($this->fixture.'/generated.react.ts'))->toBeTrue();
+    expect(is_file($this->fixture.'/forms/.formbraid-manifest.json'))->toBeTrue();
     expect(is_file($this->fixture.'/replica.db.owner.json'))->toBeTrue();
     Process::assertRan(fn (PendingProcess $process): bool => $process->environment['ZERO_QUERY_URL'] === $env['ZERO_QUERY_URL'] && $process->environment['ZERO_MUTATE_API_KEY'] === 'private-fixture-key');
+
+    config(['formbraid.metadata' => 'missing.json']);
+    expect(Artisan::call('zero:dev'))->toBe(1);
+    expect(Artisan::output())->toContain('missing.json');
+    Process::assertRanTimes(fn (PendingProcess $process): bool => $process->environment['ZERO_QUERY_URL'] === $env['ZERO_QUERY_URL'], 1);
 });
 
 test('occupied ports fail without starting or killing a process', function (): void {

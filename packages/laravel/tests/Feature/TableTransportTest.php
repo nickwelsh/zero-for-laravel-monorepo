@@ -21,12 +21,14 @@ use ZeroForLaravel\Metadata\ModelRegistry;
 use ZeroForLaravel\Query\QueryCompiler;
 use ZeroForLaravel\Query\RegisteredQueries;
 use ZeroForLaravel\ResolvedContext;
+use ZeroForLaravel\Support\ApplicationClasses;
 use ZeroForLaravel\Tables\Metadata;
 use ZeroForLaravel\Tables\RegisteredTableQuery;
 use ZeroForLaravel\Tables\Table;
 use ZeroForLaravel\Tables\TableContext;
 use ZeroForLaravel\Tables\TableRegistry;
 use ZeroForLaravel\Tests\Fixtures\Comment;
+use ZeroForLaravel\Tests\Fixtures\DiscoveredClasses;
 use ZeroForLaravel\Tests\Fixtures\Tag;
 use ZeroForLaravel\Tests\Fixtures\Task;
 use ZeroForLaravel\Tests\Fixtures\TaskList;
@@ -44,7 +46,7 @@ class TableTransportTestCase extends OwnerPostgresTestCase
     protected function defineEnvironment($app): void
     {
         parent::defineEnvironment($app);
-        $app['config']->set('zero.tables', ['tasks' => TasksTable::class]);
+        $app->instance(ApplicationClasses::class, new DiscoveredClasses([...$this->models(), TasksTable::class]));
         $app['config']->set('zero.middleware', [TableScopeMiddleware::class]);
     }
 }
@@ -71,7 +73,7 @@ final class UnsafeTable
 
 beforeEach(function (): void {
     app()->instance(ModelRegistry::class, new ModelRegistry([Task::class, TaskList::class, Tag::class, Comment::class]));
-    config(['zero.tables.tasks' => TasksTable::class, 'zero.route_prefix' => 'zero', 'app.key' => 'base64:'.base64_encode(random_bytes(32))]);
+    config(['zero.route_prefix' => 'zero', 'app.key' => 'base64:'.base64_encode(random_bytes(32))]);
     Route::post('/table-metadata/{table}', TableMetadataController::class);
     for ($i = 1; $i <= 53; $i++) {
         $id = sprintf('00000000-0000-4000-8000-%012d', $i);

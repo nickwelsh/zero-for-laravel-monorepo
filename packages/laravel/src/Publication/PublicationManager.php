@@ -24,7 +24,7 @@ final readonly class PublicationManager
             return;
         }
 
-        $classes = (new ModelDiscovery)->registered();
+        $classes = resolve(ModelDiscovery::class)->registered();
         if ($classes === [] || (new $classes[0])->getConnection()->getName() !== $db->getName()) {
             return;
         }

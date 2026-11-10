@@ -7,11 +7,15 @@ namespace ZeroForLaravel\Console;
 use Illuminate\Console\Command;
 use Illuminate\Filesystem\Filesystem;
 use LogicException;
+use Throwable;
 use ZeroForLaravel\Generation\ControllerDiscovery;
 use ZeroForLaravel\Generation\ControllerQueryGenerator;
+use ZeroForLaravel\Generation\FormbraidGenerator;
+use ZeroForLaravel\Generation\FrontendDriver;
 use ZeroForLaravel\Generation\Mutations\ControllerMutationGenerator;
 use ZeroForLaravel\Generation\Mutations\MutationProgram;
 use ZeroForLaravel\Generation\PublicApiGenerator;
+use ZeroForLaravel\Generation\ReactFrontendDriver;
 use ZeroForLaravel\Generation\TableGenerator;
 use ZeroForLaravel\Generation\TypeScriptGenerator;
 use ZeroForLaravel\Metadata\ModelRegistry;
@@ -19,13 +23,13 @@ use ZeroForLaravel\Tables\TableRegistry;
 
 final class GenerateCommand extends Command
 {
-    protected $signature = 'zero:generate {--output= : Generated TypeScript path} {--react : Generate a sibling React provider} {--check : Fail if output is missing or out of date}';
+    protected $signature = 'zero:generate {--output= : Generated TypeScript path} {--react : Generate a sibling React provider} {--formbraid : Include Formbraid forms regardless of configuration} {--check : Fail if output is missing or out of date}';
 
     protected $description = 'Generate coordinated Zero schemas, controller queries, page types, and mutations';
 
     public function handle(ModelRegistry $registry, TypeScriptGenerator $generator, ControllerDiscovery $controllers, ControllerQueryGenerator $queries, Filesystem $files): int
     {
-        $path = $this->option('output') ?: config()->string('zero.output');
+        $path = $this->option('output') ?: config()->string('zero.generation.output');
         if (! is_string($path)) {
             $this->error('Expected a string output.');
 
@@ -42,9 +46,9 @@ final class GenerateCommand extends Command
         $outputs = [
             $path => $source,
             dirname($path).'/'.$base.'.queries.ts' => $queries->typescript($definitions, './'.$base),
-            config()->string('zero.controller_output') => $queries->php($definitions, $tables),
+            config()->string('zero.generation.queries') => $queries->php($definitions, $tables),
             dirname($path).'/'.$base.'.mutations.ts' => $mutationGenerator->typescript($mutations),
-            config()->string('zero.mutation_output') => $mutationGenerator->php($mutations),
+            config()->string('zero.generation.mutations') => $mutationGenerator->php($mutations),
         ];
         $public = (new PublicApiGenerator)->generate($mutations, $definitions, $base)
             + (new TableGenerator)->typescript($tables, '../'.$base);
@@ -75,11 +79,30 @@ final class GenerateCommand extends Command
         }
 
         $outputs[$manifest] = json_encode(array_keys($public), JSON_THROW_ON_ERROR | JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES)."\n";
-        $react = $this->option('react') || config()->boolean('zero.react');
+        $formbraid = $this->option('formbraid') || config()->boolean('zero.formbraid.enabled');
+        $frontend = $this->option('react') || $formbraid ? resolve(ReactFrontendDriver::class) : resolve(FrontendDriver::class);
+        $custom = array_filter($mutations, fn (MutationProgram $mutation): bool => $mutation->optimism === 'custom') !== [];
+        foreach ($frontend->files($base, $custom) as $relative => $content) {
+            $outputs[dirname($path).'/'.$relative] = $content;
+        }
+
+        $configuration = $frontend->configuration();
         $config = dirname($path).'/zero.config.ts';
-        if ($react) {
-            $custom = array_filter($mutations, fn (MutationProgram $mutation): bool => $mutation->optimism === 'custom') !== [];
-            $outputs[dirname($path).'/'.$base.'.react.ts'] = $generator->generateReact('./'.$base, './zero.config', './'.$base.'.mutations', $custom);
+
+        if ($formbraid) {
+            try {
+                foreach (resolve(FormbraidGenerator::class)->generate($path, (bool) $this->option('check')) as $diagnostic) {
+                    $this->warn($diagnostic);
+                }
+            } catch (Throwable $throwable) {
+                $this->error($throwable->getMessage());
+
+                return self::FAILURE;
+            }
+
+            if (! $this->option('check')) {
+                $this->info('Generated Formbraid definitions and Zero controller forms.');
+            }
         }
 
         if ($this->option('check')) {
@@ -99,8 +122,8 @@ final class GenerateCommand extends Command
                 return self::FAILURE;
             }
 
-            if ($react && ! $files->exists($config)) {
-                $this->error('Missing zero.config.ts connection options. Run zero:generate --react.');
+            if ($configuration !== null && ! $files->exists($config)) {
+                $this->error('Missing zero.config.ts connection options. Run zero:generate.');
 
                 return self::FAILURE;
             }
@@ -118,8 +141,8 @@ final class GenerateCommand extends Command
 
         $files->delete($stale);
 
-        if ($react && ! $files->exists($config)) {
-            $files->replace($config, "import type {ProviderOptions} from '@nickwelsh/zero-for-laravel/react';\n\n// Public connection options only; never put the cache API key here.\nexport const options = {cacheURL: 'http://localhost:4848'} satisfies ProviderOptions;\n");
+        if ($configuration !== null && ! $files->exists($config)) {
+            $files->replace($config, $configuration);
             $this->info("Created {$config}. Configure your public cache URL here; this file will not be overwritten.");
         }
 

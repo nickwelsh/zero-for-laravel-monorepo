@@ -16,14 +16,16 @@ The source defaults live in
 
 | Key                           | Default                              | Purpose                                                                                           |
 | ----------------------------- | ------------------------------------ | ------------------------------------------------------------------------------------------------- |
-| `models`                      | `[]`                                 | Discover concrete models using `HasZeroQueries`, or explicitly list participating models.         |
-| `public_models`               | `[]`                                 | Explicitly public read models; publication alone never grants read access.                        |
-| `discovery`                   | `[]`                                 | Optional discovery roots with `path` and `namespace`; used when `models` is empty.                |
-| `output`                      | `resources/js/zero/generated.ts`     | Generated schema, metadata, and plain row types; query/mutation modules are written alongside it. |
-| `controller_output`           | `bootstrap/zero-queries.php`         | Authoritative controller query registrations.                                                     |
-| `mutation_output`             | `bootstrap/zero-mutations.php`       | Authoritative controller mutation registrations.                                                  |
-| `react`                       | `false`                              | Also generate the React wrapper and check it for drift.                                           |
-| `wayfinder_import`            | `@/zero`                             | TypeScript module root for the opt-in Wayfinder page converter; not a filesystem path.            |
+| `discovery`                   | `'auto'`                             | Discover application models and tables, or select an explicit list of classes and globs.          |
+| `generation.output`           | `resources/js/zero/generated.ts`     | Generated schema, metadata, and row types; query/mutation modules are written alongside it.       |
+| `generation.queries`          | `bootstrap/zero-queries.php`         | Authoritative controller query registrations.                                                     |
+| `generation.mutations`        | `bootstrap/zero-mutations.php`       | Authoritative controller mutation registrations.                                                  |
+| `generation.schema`           | `ZodMutationSchemaDriver::class`     | Container-resolved validator driver for both queries and mutations.                               |
+| `frontend.driver`             | `AutoDetectFrontendDriver::class`    | Detect React from package.json, or resolve a custom `FrontendDriver` class.                       |
+| `wayfinder.module`            | `@/zero`                             | TypeScript import root for generated controller modules used by Wayfinder's Inertia page helpers. |
+| `formbraid.enabled`           | `false`                              | Include React form generation in `zero:generate`, `--check`, and `zero:dev` startup.              |
+| `formbraid.output`            | `resources/js/formbraid/zero`        | Project-relative output directory for `zero:formbraid`.                                           |
+| `formbraid.runtime`           | `null`                               | Project-relative module exporting application-owned `controllerRuntime` bindings.                 |
 | `sync_publication_on_migrate` | `false`                              | Synchronize the dedicated publication after successful PostgreSQL `up` migration batches.         |
 | `publication`                 | `ZERO_PUBLICATION` or `laravel_zero` | Dedicated PostgreSQL publication managed by the package.                                          |
 | `app_id`                      | `ZERO_APP_ID` or `zero`              | Application identity shared with Zero cache.                                                      |
@@ -34,7 +36,7 @@ The source defaults live in
 | `context`                     | `App\Enums\ZeroContext::class`       | Application-owned string-backed enum declaring context fields.                                    |
 | `context_resolver`            | `App\Zero\ResolveZeroContext::class` | One public attributed resolver method per enum case.                                              |
 
-Register relationship targets even if they expose no top-level queries or writes.
+Add `HasZeroQueries` to relationship targets even if they expose no top-level queries or writes.
 Choose the middleware and guard appropriate to your application. Session
 configuration needs the cookie-forwarding and CSRF setup in
 [generation and replication](./replication.mdx).
@@ -106,9 +108,16 @@ do not require deleting the Zero replica.
 
 ## Client settings
 
-`zero:generate --react` creates an editable `zero.config.ts` beside generated
-contracts once. Set its public `cacheURL` and optional query/mutation URLs.
-Regeneration preserves that configuration.
+`zero:generate` detects React in either `dependencies` or `devDependencies` in the
+application's `package.json`. It generates the React provider and creates an editable
+`zero.config.ts` beside the contracts once. Set its public `cacheURL` and optional
+query/mutation URLs. Regeneration preserves that configuration. The `--react` flag
+remains a one-off shortcut to select the React driver explicitly.
+
+Without a frontend dependency, generation produces only framework-independent
+contracts. Vue, Svelte, and ambiguous multi-framework applications require an
+explicit custom driver until built-in integrations exist; generation reports the
+unsupported selection rather than silently emitting a React provider.
 
 The generated provider accepts the native user identity, trusted-context values
 for local behavior, and optional token `auth`. Laravel independently resolves the
@@ -123,20 +132,117 @@ separate client queue. The [API reference](/docs/0.x/api) lists the binding type
 fields and `history: 'replace' | 'push'`. Neither enables server visits or exposes
 route/context fields as filters. See [editable live inputs](./react.mdx#editable-live-inputs).
 
-## Modular model registration
+## Application discovery
 
-Use an explicit `zero.models` allowlist for models from modules:
+With `discovery` set to `'auto'`, Zero scans the application's production Composer `autoload.psr-4` namespaces,
+including multiple directories and modular namespaces. It does not scan dependency
+packages or `autoload-dev`. Concrete Eloquent models using `HasZeroQueries` are
+included automatically, wherever they live within those namespaces.
+
+To replace automatic selection, supply a list of classes and globs. Entries are
+combined and deduplicated; an empty list selects nothing. Class names can select
+any autoloadable class. Namespace wildcards and file globs select classes within
+the application's production PSR-4 mappings, not dependencies or `autoload-dev`.
 
 ```php
-'models' => [App\Models\Task::class, Modules\Tasks\Models\Label::class],
+'discovery' => [
+    App\Models\User::class,
+    'App\\Billing\\*',
+    'app/Tables/**/*.php',
+],
 ```
 
-When `models` is empty, discovery finds concrete models using `HasZeroQueries`
-under `app/Models`, or configured `discovery` roots. Discovery does not make a
-model's reads public: require a permission binding or explicit `public_models` entry.
-Explicit visibility, required keys, `$visible` replication allowlists, and override
-precedence remain enforced. No modular-framework dependency is required.
-Use `zero:exposure` to inspect the resulting columns and permissions.
+File paths may be project-relative or absolute, including paths built with
+`app_path()`. In file globs, `*` matches one directory level and `**` includes nested
+directories. Explicit selections still follow the model and table conventions
+below; selecting a model does not bypass authorization or discover its relationships
+automatically. Include each participating relationship target in the selection.
+
+Table classes are discovered in the same namespaces. A concrete class named
+`TasksTable` with a public, non-static `definition()` returning
+`ZeroForLaravel\Tables\Table` becomes the `tasks` descriptor. Multiword names use
+kebab case: `ArchivedTasksTable` becomes `archived-tasks`. Duplicate names fail
+generation rather than choosing one definition. Definitions are inspected without
+invoking their application methods.
+
+Discovery selects replication metadata, not read permissions. Protected models
+require a `permissions.resources` binding and a policy. For intentionally public
+reads, add `#[ZeroForLaravel\Attributes\ZeroPublic]` directly to the model. This
+attribute is not inherited and cannot coexist with a permission binding. Column
+visibility and mutation authorization still apply. Use `zero:exposure` to inspect
+the resulting columns and permissions.
+
+## Formbraid generation
+
+Set `formbraid.enabled` to `true` to generate React form definitions alongside the
+normal contracts. `zero:generate --check` checks forms and their ownership manifest
+without writing files. `zero:dev` generates them before starting the cache and stops
+if generation fails. This is a startup step, not a file watcher; use Formbraid's
+Vite integration to regenerate after edits. Its component metadata must exist
+before Artisan runs. See [Formbraid setup](./mutations.mdx#formbraid-03).
+
+`zero:formbraid` remains an explicit way to generate contracts and forms even when
+the flag is disabled. Both commands accept `--check` and `--output`. The Formbraid
+integration currently generates the React provider as well as form descriptors.
+
+`formbraid.runtime` is the project-relative TypeScript file from which generated
+forms import `controllerRuntime`. That function supplies the active Zero client,
+registered mutation actions, and ID/timestamp preparation used when submitting a
+form. It does not start a process or configure a server.
+
+Leave it `null` when you use the standard generated bindings. If you supply custom
+optimistic code, create the bindings once in your own module and export both
+`ZeroProvider` and `controllerRuntime` from that result. Point `formbraid.runtime`
+to that module so forms use the same client and custom mutation bindings as the
+rest of your application. See the [binding example](./mutations.mdx#formbraid-03).
+
+## Custom generation drivers
+
+Schema drivers implement `ZeroForLaravel\Generation\Mutations\MutationSchemaDriver`,
+which includes the query `SchemaDriver` contract. Laravel resolves the configured
+class and its constructor dependencies; both query and mutation generators use
+that instance. To use the built-in Effect 4 implementation:
+
+```php
+'generation' => [
+    'schema' => ZeroForLaravel\Generation\EffectSchemaDriver::class,
+],
+```
+
+Frontend drivers implement `ZeroForLaravel\Generation\FrontendDriver`. The
+`files(string $base, bool $custom): array` method returns generated filenames and
+their contents relative to `generation.output`. `$custom` indicates whether any
+mutation needs application-owned optimistic projections. `configuration(): ?string`
+returns initial contents for `zero.config.ts`, or `null` when it is not needed.
+Generation never overwrites an existing connection configuration, and `--check`
+checks each generated file for drift.
+
+```php
+'frontend' => [
+    'driver' => App\Zero\FrontendDriver::class,
+],
+```
+
+Partial groups retain package defaults. For example, changing `generation.output`
+does not require repeating the driver or PHP output paths. Middleware lists replace
+the default list entirely, including when the configured list is empty.
+
+## Migrating the previous configuration
+
+Remove `models`, `tables`, and `public_models` from `config/zero.php`. Replace the
+previous `discovery` group with `'auto'`, or an explicit list of classes and globs.
+Add `HasZeroQueries` to each participating model, including relationship targets.
+Name table definitions after their intended descriptor, such as `TasksTable` for
+`tasks`. Add `#[ZeroPublic]` to each deliberately public model; a missing policy
+binding still does not grant public reads.
+
+Move `output`, `controller_output`, and `mutation_output` to `generation.output`,
+`generation.queries`, and `generation.mutations`. Replace the `schema_driver`
+string with a class in `generation.schema`. Remove the `react` boolean to use
+automatic detection, or set `frontend.driver` to an implementation class.
+Move `wayfinder_import` to `wayfinder.module`, and `formbraid_output` and
+`formbraid_runtime` to `formbraid.output` and `formbraid.runtime`.
+Regenerate contracts and deploy the PHP and TypeScript files together.
 
 ## Permission settings
 

@@ -130,7 +130,7 @@ test('deleting a list cascades its todos and removes managed grants', function (
     $this->assertDatabaseCount('permission_rules', 0);
 });
 
-test('ordinary discovered policies compile for both explicit resource models', function () {
+test('ordinary discovered policies compile for both resource models', function () {
     $compiler = new PolicyCompiler;
     foreach ([TodoList::class, Todo::class] as $class) {
         expect($compiler->compile($class)->action)->toBe('view');
@@ -138,7 +138,7 @@ test('ordinary discovered policies compile for both explicit resource models', f
     }
 
     expect(array_values(array_map(fn ($model) => $model->class, app(ModelRegistry::class)->all())))
-        ->toBe([TodoList::class, Todo::class]);
+        ->toEqualCanonicalizing([TodoList::class, Todo::class]);
 });
 
 test('unsharing revokes list and todo access without affecting owner or other lists', function () {

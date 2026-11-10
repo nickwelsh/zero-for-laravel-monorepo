@@ -16,7 +16,6 @@ abstract class HttpTestCase extends OwnerTestCase
     protected function defineEnvironment($app): void
     {
         parent::defineEnvironment($app);
-        $app['config']->set('zero.models', $this->models());
         $app['config']->set('zero.api_key', 'private-test-secret');
         $app['config']->set('zero.middleware', []);
     }

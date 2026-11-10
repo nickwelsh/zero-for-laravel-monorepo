@@ -14,13 +14,20 @@ use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Schema;
 use RuntimeException;
+use ZeroForLaravel\Attributes\ZeroPublic;
+use ZeroForLaravel\Concerns\HasZeroQueries;
 use ZeroForLaravel\Metadata\ModelRegistry;
 use ZeroForLaravel\Publication\PublicationManager;
+use ZeroForLaravel\Support\ApplicationClasses;
+use ZeroForLaravel\Tests\Fixtures\DiscoveredClasses;
 use ZeroForLaravel\Tests\PostgresTestCase;
 use ZeroForLaravel\ZeroServiceProvider;
 
+#[ZeroPublic]
 class MigrationRecord extends Model
 {
+    use HasZeroQueries;
+
     protected $table = 'tasks';
 
     protected $connection = 'testing';
@@ -56,8 +63,7 @@ abstract class MigrationPublicationTestCase extends PostgresTestCase
     protected function defineEnvironment($app): void
     {
         parent::defineEnvironment($app);
-        $app['config']->set('zero.models', [MigrationRecord::class]);
-        $app['config']->set('zero.public_models', [MigrationRecord::class]);
+        $app->instance(ApplicationClasses::class, new DiscoveredClasses([MigrationRecord::class]));
         $app['config']->set('zero.publication', 'laravel_zero_test_publication');
         $app['config']->set('zero.sync_publication_on_migrate', true);
     }

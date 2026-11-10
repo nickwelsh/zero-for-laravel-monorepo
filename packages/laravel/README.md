@@ -30,7 +30,7 @@ in CI. Keep the cache API key server-side and independently authenticate end use
 ## Optional Effect schemas
 
 Zod remains the default generated validator. Applications using Effect 4 can set
-`'schema_driver' => 'effect'` in `config/zero.php`, install `effect` in their
+`generation.schema` to `ZeroForLaravel\Generation\EffectSchemaDriver::class` in `config/zero.php`, install `effect` in their
 JavaScript application, and rerun `php artisan zero:generate`. The Effect driver
 is tested with Effect **4.0.2**; it does not require Formbraid or a Formbraid upgrade.
 
