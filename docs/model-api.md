@@ -177,6 +177,59 @@ Use `InferLiveQueryInputs`, `InferLiveQueryOptions`, and React's `QueryData<type
 index.lists>` to derive types without a global namespace. The opt-in Wayfinder
 integration uses `QueryData` in its own generated page declarations.
 
+### Instant visits and query preloading
+
+`zero:generate` exports `navigation` alongside the query bindings. Configure one
+adapter and export its `Link` for use throughout the app:
+
+```ts
+// resources/js/zero/inertia.ts
+import { createInertiaAdapter } from '@nickwelsh/zero-for-laravel/inertia';
+import { bindings, navigation } from './generated.queries';
+
+export const livePages = createInertiaAdapter(bindings, { navigation });
+export const Link = livePages.Link;
+```
+
+Use this same adapter's `wrap` in `createInertiaApp`'s component resolver. Links
+inside the Zero provider can preload the destination's declared live props:
+
+```tsx
+import { Link } from '@/zero/inertia';
+import { show } from '@/wayfinder/routes/lists';
+
+<Link href={show.withComponent(list.id)} instant preload>
+    {list.name}
+</Link>;
+```
+
+`preload` warms native Zero queries after 75 ms of hover or keyboard focus. It does
+not request a Laravel page. Inertia's separate `prefetch` prop retains its normal
+HTTP-response caching behavior; use both props to warm both caches. Standard
+Inertia props, callbacks, and refs pass through to its `Link`.
+
+The adapter supplies generated bindings through Inertia's `pageProps` callback
+for the instant shell, preserving shared props and any supplied `pageProps`.
+Laravel's response then replaces the speculative bindings. Protected props still
+require fresh authorization checks; preloading is not permission to display rows.
+
+Preloads deduplicate within the active Zero session, expire after 30 seconds, and
+retain at most 32 queries per adapter/session. Unmount, identity changes, rejection,
+and adapter disposal release speculative queries. Hover exit before the debounce
+or blur cancels pending work. No active Zero client means no preload.
+
+Generation supports ordinary scalar route parameters, backed enums, primary-key
+model binding, and string FormRequest fields without custom normalization hooks.
+Custom bindings, route constraints, scoped models, server-normalized inputs,
+ambiguous routes, and links with nonempty `data` wait for authoritative metadata;
+their generated live props render loading with finite input options preserved in
+the meantime. Input values and setters wait for authoritative arguments. Only same-origin GET
+links with a known destination component participate. Query preloading covers
+declared page live props, not arbitrary hooks inside child components. Pages must
+also provide their own loading behavior for ordinary non-live props.
+
+### Controller mutations
+
 `useControllerMutation(action, routeArguments)` exposes local application,
 authoritative acceptance, validation fields, and committed-result decoding errors.
 Await its call for authoritative data. Identity changes and unmounts stop stale UI

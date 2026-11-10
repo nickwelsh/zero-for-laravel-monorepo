@@ -13,6 +13,7 @@ use LogicException;
 use ZeroForLaravel\Generation\ControllerDiscovery;
 use ZeroForLaravel\Generation\ControllerQueryCompiler;
 use ZeroForLaravel\Generation\ControllerQueryGenerator;
+use ZeroForLaravel\Generation\NavigationGenerator;
 use ZeroForLaravel\Generation\RequestContract;
 use ZeroForLaravel\Generation\ZodSchemaDriver;
 use ZeroForLaravel\Metadata\ModelRegistry;
@@ -29,6 +30,41 @@ uses(TestCase::class);
 beforeEach(function (): void {
     $alice = (new User)->setKeyType('string')->forceFill(['id' => 'alice']);
     request()->setUserResolver(fn () => $alice);
+});
+
+test('navigation generation preserves real route identities and only resolves known input codecs', function (): void {
+    /** @var TestCase $this */
+    app()->register(SurveyorServiceProvider::class);
+    app()->instance(ModelRegistry::class, new ModelRegistry($this->models()));
+
+    $route = Route::get('/tasks/{label}', [QueryController::class, 'index'])->name('tasks.index');
+    Route::get('/alternate/{label?}', [QueryController::class, 'index'])->defaults('label', 'default');
+    Route::get('/constrained/{label}', [QueryController::class, 'index'])->where('label', '[a-z]+');
+    Route::get('/search', [QueryController::class, 'search']);
+    Route::get('/dated', [QueryController::class, 'dated']);
+    Route::get('/choices', [QueryController::class, 'choices']);
+    Route::get('/tasks/create', fn (): string => 'Not a live page');
+    $definitions = array_values(array_column(resolve(ControllerDiscovery::class)->queries(), 'query'));
+    $source = (new NavigationGenerator)->typescript($definitions);
+    $routes = json_decode(substr($source, strlen('export const navigation = '), -strlen(" as const;\n")), true, flags: JSON_THROW_ON_ERROR);
+    if (! is_array($routes)) {
+        throw new LogicException('Expected generated navigation routes.');
+    }
+
+    $byPattern = array_column($routes, null, 'pattern');
+    $index = $byPattern['^/tasks/(?<label>[^/]+)$'];
+    expect(data_get($index, 'component'))->toBe('tasks/index')
+        ->and(data_get($index, 'bindings.tasks.parameters'))->toBe(['title' => ['route' => 'label', 'type' => 'string']])
+        ->and(data_get($index, 'route'))->toBe(\ZeroForLaravel\Http\ControllerRouteDispatcher::identity($route))
+        ->and(data_get($byPattern['^/alternate(?:/(?<label>[^/]+))?$'], 'defaults'))->toBe(['label' => 'default'])
+        ->and(data_get($byPattern['^/constrained/(?<label>.*)$'], 'bindings.tasks.parameters'))->toBeNull()
+        ->and(data_get($byPattern['^/search$'], 'bindings.tasks.parameters'))->toBe(['input' => ['query' => ['title']]])
+        ->and(data_get($byPattern['^/dated$'], 'bindings.tasks.parameters'))->toBeNull()
+        ->and(data_get($byPattern['^/choices$'], 'bindings.tasks.parameters'))->toBeNull()
+        ->and(data_get($byPattern['^/choices$'], 'bindings.tasks.options'))->toBe([
+            'direction' => ['asc', 'desc'], 'priority' => [2, 7], 'status' => ['active', 'completed'],
+        ])
+        ->and(data_get($byPattern['^/tasks/create$'], 'component'))->toBeNull();
 });
 
 test('finite FormRequest choices generate literal unions and runtime options without requiring optional fields', function (): void {

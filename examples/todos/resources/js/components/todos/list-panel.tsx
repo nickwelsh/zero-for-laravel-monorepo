@@ -1,5 +1,6 @@
 import { useControllerMutation } from '@nickwelsh/zero-for-laravel/react';
-import { Link } from '@inertiajs/react';
+import { Link } from '@/zero/inertia';
+import { show } from '@/wayfinder/routes/lists';
 import { Pencil, Trash2 } from 'lucide-react';
 import { useState } from 'react';
 import { toast } from 'sonner';
@@ -38,7 +39,7 @@ export function ListPanel({ list, userId }: { list: ListRow; userId: number }) {
             <header className="flex items-start justify-between gap-3">
                 <div>
                     <h2 className="text-xl font-semibold">
-                        <Link href={`/lists/${list.id}`} className="hover:underline">
+                        <Link href={show.withComponent(list.id)} instant preload className="hover:underline">
                             {list.name}
                         </Link>
                     </h2>

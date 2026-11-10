@@ -1,4 +1,5 @@
-import { Head, Link } from '@inertiajs/react';
+import { Head } from '@inertiajs/react';
+import { Link } from '@/zero/inertia';
 import type { Data } from '@nickwelsh/zero-for-laravel/react';
 import { dashboard } from '@/wayfinder/routes';
 import type { TodoListRow } from '@/zero/generated';
@@ -19,7 +20,7 @@ function ListDetails({ list }: { list: TodoListRow | undefined }) {
     return (
         <main className="space-y-6 p-6">
             <Head title={list.name} />
-            <Link href={dashboard()} className="underline">
+            <Link href={dashboard.withComponent()} instant preload className="underline">
                 Back to lists
             </Link>
             <h1 className="text-2xl font-semibold">{list.name}</h1>

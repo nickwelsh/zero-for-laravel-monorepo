@@ -1,27 +1,15 @@
-import { createInertiaApp, router } from '@inertiajs/react';
-import { createInertiaAdapter } from '@nickwelsh/zero-for-laravel/inertia';
+import { createInertiaApp } from '@inertiajs/react';
 import type { ComponentType } from 'react';
-import { toast } from 'sonner';
 import { Toaster } from '@/components/ui/sonner';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { initializeTheme } from '@/hooks/use-appearance';
 import AppLayout from '@/layouts/app-layout';
 import AuthLayout from '@/layouts/auth-layout';
 import SettingsLayout from '@/layouts/settings/layout';
-import { bindings } from '@/zero/generated.queries';
-import { dashboard } from '@/wayfinder/routes';
+import { livePages } from '@/zero/inertia';
 
 const appName = import.meta.env.VITE_APP_NAME || 'Laravel';
 const pages = import.meta.glob<{ default: ComponentType }>('./pages/**/*.tsx');
-const livePages = createInertiaAdapter(bindings, {
-    url: { dashboard: { lists: { status: 'status' } } },
-    access: {
-        onRevoked: () => {
-            router.visit(dashboard().url);
-            toast.error('This list is no longer available.');
-        },
-    },
-});
 
 void createInertiaApp({
     title: (title) => (title ? `${title} - ${appName}` : appName),

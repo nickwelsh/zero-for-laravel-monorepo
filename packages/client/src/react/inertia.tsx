@@ -13,12 +13,10 @@ import { object, selectionKey } from '../validation';
 import { useData, QueryAccessError, type Data, type ReadSelection, type QueryInputs } from './data';
 import { StartingZero } from './provider';
 import { AccessBoundary, type AccessOptions } from './access';
+import { createNavigationLink, type NavigationRoute, type PageBinding } from './inertia-navigation';
+export type { NavigationRoute, ZeroLinkProps } from './inertia-navigation';
 
-interface Binding {
-    query: string;
-    args: Record<string, unknown>;
-    access?: { status: 403 | 404 };
-}
+type Binding = PageBinding;
 interface Metadata {
     version: 1;
     mode: 'replace' | 'patch';
@@ -30,6 +28,7 @@ interface TransportPage {
 }
 type BindingFactories = Record<string, (args: never) => ReadSelection>;
 export interface InertiaInputOptions {
+    navigation?: readonly NavigationRoute[];
     /** Component name -> live prop -> input field -> URL query parameter. Scalars only. */
     url?: Record<string, Record<string, Record<string, string>>>;
     history?: 'replace' | 'push';
@@ -60,10 +59,23 @@ function metadata(input: unknown): Metadata {
             if (typeof binding.query !== 'string') throw new Error('Invalid live query binding.');
             const access = binding.access === undefined ? undefined : object(binding.access, 'access');
             if (access && access.status !== 403 && access.status !== 404) throw new Error('Invalid access contract.');
+            const inputOptions = Object.fromEntries(
+                Object.entries(object(binding.options ?? {}, 'options')).map(([field, choices]) => {
+                    if (
+                        !Array.isArray(choices) ||
+                        choices.some((choice) => typeof choice !== 'string' && typeof choice !== 'number')
+                    )
+                        throw new Error('Invalid input options.');
+                    return [field, choices as (string | number)[]];
+                }),
+            );
             bindings[prop] = {
                 query: binding.query,
                 args: object(binding.args, 'args'),
                 ...(access ? { access: { status: access.status as 403 | 404 } } : {}),
+                ...(binding.pending === true
+                    ? { pending: true, one: binding.one === true, options: inputOptions }
+                    : {}),
             };
         }
     }
@@ -205,7 +217,7 @@ function InputSubscription({
 const noop = () => {};
 const defaultAccess: AccessOptions = {};
 
-function loading(selection: ReadSelection): Data<unknown> {
+function loading(selection: Pick<ReadSelection, 'one'>): Data<unknown> {
     return {
         data: selection.one ? undefined : [],
         status: 'loading',
@@ -233,6 +245,7 @@ function loading(selection: ReadSelection): Data<unknown> {
 
 /** Install once before createInertiaApp; wrap components in its resolve callback. */
 export function createInertiaAdapter(factories: BindingFactories, options: InertiaInputOptions = {}) {
+    const navigation = createNavigationLink(factories, options.navigation ?? []);
     let current: TransportPage | undefined;
     let pendingURL: URL | undefined;
     const pendingURLs = new Set<string>();
@@ -252,7 +265,11 @@ export function createInertiaAdapter(factories: BindingFactories, options: Inert
                   }),
               ];
     return {
-        dispose: () => dispose.forEach((unsubscribe) => unsubscribe()),
+        Link: navigation.Link,
+        dispose: () => {
+            navigation.dispose();
+            dispose.forEach((unsubscribe) => unsubscribe());
+        },
         wrap<P extends object>(Component: ComponentType<P>, page?: TransportPage): ComponentType<P> {
             if (page) {
                 normalizePage(page, current);
@@ -281,6 +298,15 @@ export function createInertiaAdapter(factories: BindingFactories, options: Inert
                     const [prop, binding] = entry;
                     if (Object.hasOwn(effective, prop))
                         throw new Error(`Ordinary prop ${prop} collides with a live binding.`);
+                    if (binding.pending) {
+                        return render(index + 1, {
+                            ...effective,
+                            [prop]: {
+                                ...loading({ one: binding.one ?? false }),
+                                inputs: { values: {}, options: binding.options ?? {}, set: noop, reset: noop },
+                            },
+                        });
+                    }
                     if (!Object.hasOwn(factories, binding.query))
                         throw new Error('Unknown Zero query contract. Reload the application.');
                     const factory = factories[binding.query] as (args: unknown) => ReadSelection;

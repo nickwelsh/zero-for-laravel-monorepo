@@ -14,6 +14,7 @@ use ZeroForLaravel\Generation\FormbraidGenerator;
 use ZeroForLaravel\Generation\FrontendDriver;
 use ZeroForLaravel\Generation\Mutations\ControllerMutationGenerator;
 use ZeroForLaravel\Generation\Mutations\MutationProgram;
+use ZeroForLaravel\Generation\NavigationGenerator;
 use ZeroForLaravel\Generation\PublicApiGenerator;
 use ZeroForLaravel\Generation\ReactFrontendDriver;
 use ZeroForLaravel\Generation\TableGenerator;
@@ -45,7 +46,7 @@ final class GenerateCommand extends Command
         $base = pathinfo($path, PATHINFO_FILENAME);
         $outputs = [
             $path => $source,
-            dirname($path).'/'.$base.'.queries.ts' => $queries->typescript($definitions, './'.$base),
+            dirname($path).'/'.$base.'.queries.ts' => $queries->typescript($definitions, './'.$base).(new NavigationGenerator)->typescript($definitions),
             config()->string('zero.generation.queries') => $queries->php($definitions, $tables),
             dirname($path).'/'.$base.'.mutations.ts' => $mutationGenerator->typescript($mutations),
             config()->string('zero.generation.mutations') => $mutationGenerator->php($mutations),
