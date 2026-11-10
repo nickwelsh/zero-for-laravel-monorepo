@@ -4,7 +4,7 @@ Controller-first live queries and mutations for [Rocicorp Zero](https://zero.roc
 Laravel owns validation, binding, authorization, and authoritative writes. Zero owns
 replication, subscriptions, optimistic transactions, replay, and mutation outcomes.
 
-**v0.8.0** provides controller-first queries and mutations. Install matching versions of
+**v0.9.0** provides controller-first queries and mutations. Install matching versions of
 `nickwelsh/zero-for-laravel`, `@nickwelsh/zero-for-laravel`, and the optional
 `@nickwelsh/zero-table`. Both the Zero client
 and zero-cache must use **1.11.3**. PHP 8.3+, Laravel 12/13, PostgreSQL 15+ with
@@ -12,8 +12,8 @@ logical replication, and React 18/19 are supported targets. Automatic live page
 props require Inertia 3 (the React adapter requires `@inertiajs/react` ^3.8.0).
 
 ```sh
-composer require nickwelsh/zero-for-laravel:^0.8.0
-pnpm add @nickwelsh/zero-for-laravel@^0.8.0 @rocicorp/zero@1.11.3
+composer require nickwelsh/zero-for-laravel:^0.9.0
+pnpm add @nickwelsh/zero-for-laravel@^0.9.0 @rocicorp/zero@1.11.3
 ```
 
 The [shared todos example](examples/todos/README.md) is a complete application with
@@ -21,10 +21,10 @@ authentication, shared/private lists, controller mutations, and live Inertia pro
 The [query design](docs/QUERY_DESIGN.md) and [mutation design](docs/MUTATION_DESIGN.md)
 record the architecture and acceptance requirements.
 
-For editable grouped data grids, add `@nickwelsh/zero-table@^0.8.0`. Its
+For editable grouped data grids, add `@nickwelsh/zero-table@^0.9.0`. Its
 [consumer guide](packages/table/README.md) covers fluent Laravel capabilities,
 React hooks and unstyled components, infinite loading, snapshot group counts,
-and optional Formbraid 0.3 editors. The table package requires client **^0.8.0**;
+and optional Formbraid 0.3 editors. The table package requires client **^0.9.0**;
 ordinary Zero applications do not depend on it.
 
 ## Declare live props in controllers

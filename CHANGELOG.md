@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## [0.9.0] - 2026-11-10
 
 - Discover participating models and table definitions in the application's
   Composer PSR-4 namespaces by default, with optional class and glob selections.
@@ -15,6 +15,18 @@
 - Enable `formbraid.enabled` to include forms in normal generation, read-only
   contract checks, and local cache startup. Keep `zero:formbraid` as an explicit
   generation command and document the application-owned runtime module.
+- Add generated Inertia navigation bindings and opt-in `Link preload` for native
+  Zero page queries on hover or keyboard focus, separate from Inertia HTTP
+  prefetch. Support instant page shells with conservative route/input inference;
+  Laravel's response supplies authoritative bindings and authorization remains
+  required. Preloads are bounded, session-scoped, and released on identity changes.
+
+Upgrade `nickwelsh/zero-for-laravel`, `@nickwelsh/zero-for-laravel`, and the optional
+`@nickwelsh/zero-table` together to **0.9.0**. Migrate the previous configuration,
+mark public models with `#[ZeroPublic]`, then regenerate and deploy PHP and
+TypeScript contracts together. Zero client/cache remain pinned to **1.11.3**;
+optional Formbraid packages remain on **^0.3.0**. Inertia query preloading is opt-in
+through the generated `@/zero/inertia` module.
 
 ## [0.8.0] - 2026-11-09
 
@@ -120,6 +132,7 @@ Deploy generated PHP and TypeScript contracts together. Supported targets are PH
 8.3+, Laravel 12/13, PostgreSQL 15+, and React 18/19. Automatic live pages require
 Inertia Laravel 3 and `@inertiajs/react` ^3.8.0.
 
+[0.9.0]: https://github.com/nickwelsh/zero-for-laravel-monorepo/releases/tag/v0.9.0
 [0.8.0]: https://github.com/nickwelsh/zero-for-laravel-monorepo/releases/tag/v0.8.0
 [0.7.0]: https://github.com/nickwelsh/zero-for-laravel-monorepo/releases/tag/v0.7.0
 [0.6.0]: https://github.com/nickwelsh/zero-for-laravel-monorepo/releases/tag/v0.6.0

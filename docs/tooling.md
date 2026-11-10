@@ -153,7 +153,7 @@ both package tarballs and test their imports/types in a clean consumer outside
 the workspace, with and without optional Formbraid packages.
 Push the tested `main` commit and matching annotated `v<version>`
 tag, then publish a GitHub Release for that tag. For this release the version is
-**0.8.0** for all packages and the tag is **v0.8.0**. Stable releases use `latest`; prerelease versions must
+**0.9.0** for all packages and the tag is **v0.9.0**. Stable releases use `latest`; prerelease versions must
 be marked as GitHub prereleases and use `next`.
 
 `Publish npm` runs reusable CI, verifies the tag/version, and calls
