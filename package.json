@@ -37,7 +37,7 @@
         "@formbraid/core": "0.3.0",
         "@formbraid/react": "0.3.0",
         "@inertiajs/react": "^3.8.0",
-        "@rocicorp/zero": "1.11.3",
+        "@rocicorp/zero": "1.11.4",
         "@testing-library/react": "^16.3.0",
         "@types/node": "^26.6.5",
         "@types/react": "^19.0.0",
