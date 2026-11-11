@@ -7,13 +7,13 @@ replication, subscriptions, optimistic transactions, replay, and mutation outcom
 **v0.9.0** provides controller-first queries and mutations. Install matching versions of
 `nickwelsh/zero-for-laravel`, `@nickwelsh/zero-for-laravel`, and the optional
 `@nickwelsh/zero-table`. Both the Zero client
-and zero-cache must use **1.11.3**. PHP 8.3+, Laravel 12/13, PostgreSQL 15+ with
+and zero-cache must use **1.11.4**. PHP 8.3+, Laravel 12/13, PostgreSQL 15+ with
 logical replication, and React 18/19 are supported targets. Automatic live page
 props require Inertia 3 (the React adapter requires `@inertiajs/react` ^3.8.0).
 
 ```sh
 composer require nickwelsh/zero-for-laravel:^0.9.0
-pnpm add @nickwelsh/zero-for-laravel@^0.9.0 @rocicorp/zero@1.11.3
+pnpm add @nickwelsh/zero-for-laravel@^0.9.0 @rocicorp/zero@1.11.4
 ```
 
 The [shared todos example](examples/todos/README.md) is a complete application with

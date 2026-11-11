@@ -24,7 +24,7 @@ abstract class DevelopmentTestCase extends PostgresTestCase
         parent::setUp();
         $this->fixture = sys_get_temp_dir().'/zero-dev-'.bin2hex(random_bytes(8));
         File::ensureDirectoryExists($this->fixture.'/node_modules/@rocicorp/zero/out/zero/src');
-        File::put($this->fixture.'/node_modules/@rocicorp/zero/package.json', '{"version":"1.11.3"}');
+        File::put($this->fixture.'/node_modules/@rocicorp/zero/package.json', '{"version":"1.11.4"}');
         File::put($this->fixture.'/node_modules/@rocicorp/zero/out/zero/src/cli.js', '// fixture binary');
         app()->setBasePath($this->fixture);
         app()->instance('env', 'local');
@@ -56,7 +56,7 @@ abstract class DevelopmentTestCase extends PostgresTestCase
         $local = new LocalEnvironment;
         $db = DB::connection();
         File::put($local->replica().'.owner.json', json_encode([
-            'version' => '1.11.3', 'workspace' => realpath(base_path()), 'app' => 'fixture',
+            'version' => '1.11.4', 'workspace' => realpath(base_path()), 'app' => 'fixture',
             'database' => $db->getDatabaseName(), 'host' => $db->getConfig('host'), 'port' => $db->getConfig('port'),
             'replica' => $local->replica(),
         ], JSON_THROW_ON_ERROR));

@@ -3,7 +3,7 @@
     "root": "version",
     "version": {
         "status": "latest",
-        "badges": ["v0.5.0", "Zero 1.11.3"]
+        "badges": ["v0.5.0", "Zero 1.11.4"]
     },
     "pages": ["index", "docs", "api"]
 }
