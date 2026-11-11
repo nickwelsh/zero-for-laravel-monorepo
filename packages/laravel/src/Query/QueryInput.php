@@ -55,6 +55,51 @@ final class QueryInput
         }
     }
 
+    /** Strict wire shapes; FormRequest still owns authoritative rules and authorization. */
+    public static function validateRequest(ValueContract $contract, mixed $value, string $path): void
+    {
+        if ($value === null && $contract->nullable) {
+            return;
+        }
+
+        if ($contract->kind === 'object') {
+            $values = Input::object($value, $path);
+            Input::keys($values, array_keys($contract->fields), $path);
+            foreach ($contract->fields as $name => $field) {
+                if (! array_key_exists($name, $values)) {
+                    if ($field->optional) {
+                        continue;
+                    }
+
+                    Input::fail($path.'.'.$name, 'Missing query input.');
+                }
+
+                self::validateRequest($field, $values[$name], $path.'.'.$name);
+            }
+
+            return;
+        }
+
+        if ($contract->kind === 'list' && is_array($value) && array_is_list($value)) {
+            foreach ($value as $index => $item) {
+                self::validateRequest($contract->members[0], $item, $path.'.'.$index);
+            }
+
+            return;
+        }
+
+        $valid = match ($contract->kind) {
+            'string', 'date', 'dateOnly' => is_string($value),
+            'int' => is_int($value) && abs($value) <= 9007199254740991,
+            'number' => (is_int($value) || is_float($value)) && is_finite((float) $value),
+            'bool' => is_bool($value),
+            default => false,
+        };
+        if (! $valid) {
+            Input::fail($path, 'Invalid query input type.');
+        }
+    }
+
     public static function bound(string $type, mixed $value): mixed
     {
         if (str_starts_with($type, 'model:')) {

@@ -1,10 +1,11 @@
 ---
-title: Controller queries
-description: Compose mutable Zero queries, scopes, includes, and parent filters alongside Inertia props.
+title: Queries
+description: Declare live Inertia props or route-free query classes and execute typed queries through Zero.
 ---
 
 Add `ZeroForLaravel\Concerns\HasZeroQueries` to participating models. Declare
-queries in registered controller actions, not in browser-authored model selections:
+queries in registered Inertia controller actions or standalone query classes,
+not in browser-authored model selections:
 
 ```php
 public function index(): \Inertia\Response
@@ -44,6 +45,80 @@ injects its live value into the component; ordinary props remain ordinary props.
 Generation supports a checked PHP subset around query declarations. Unknown calls,
 unsupported control flow, or ambiguous output fail with source diagnostics. It
 does not run arbitrary controllers to guess what queries they might return.
+
+## Standalone query classes
+
+Use a query class for reads owned by frontend components rather than an Inertia
+page: search dialogs, pickers, detail panels, or one-shot reads. No route is
+registered, and these queries do not appear in `route:list`.
+
+```php
+namespace App\Zero\Queries;
+
+use App\Http\Requests\SearchTasksRequest;
+use App\Models\Task;
+use ZeroForLaravel\Query\ZeroQuery;
+
+final class TaskQueries
+{
+    public function search(SearchTasksRequest $input): ZeroQuery
+    {
+        $validated = $input->validated();
+
+        return Task::zeroQuery()
+            ->visibleTo($input->user())
+            ->where('title', 'LIKE', '%'.$validated['title'].'%')
+            ->orderBy('title', 'asc')
+            ->orderBy('id', 'asc')
+            ->limit(20);
+    }
+}
+```
+
+`SearchTasksRequest` declares `title` as a required string and owns authorization.
+Run `php artisan zero:generate` as usual. Public instance methods with an explicit,
+non-nullable `ZeroQuery` return type are discovered in the application's production
+Composer PSR-4 namespaces, including modules. `App\Zero\Queries` is a convention,
+not a required location or class suffix. No base class or attribute is needed.
+Static and nonpublic methods are not exported; abstract classes are not registered.
+The existing `zero.discovery` selection applies to query classes as well as models
+and tables, so include them when replacing automatic discovery with a list.
+
+Generated modules mirror the PHP namespace and export each query as a callable
+with a `.live()` selection:
+
+```tsx
+import { search } from '@/zero/App/Zero/Queries/TaskQueries';
+import { useData } from '@nickwelsh/zero-for-laravel/react';
+
+// One-shot native rows, waiting for server-confirmed results.
+const rows = await zero.run(search({ input: { title: term } }), { type: 'complete' });
+
+// Inside a React component: decoded live rows while the dialog is open.
+const tasks = useData(search.live({ input: { title: term } }), { enabled: isOpen });
+```
+
+Native `useQuery`, `zero.materialize`, and `zero.preload` also accept the callable's
+request. `InferQueryInput`, `InferQueryResult`, and `InferLiveQueryResult` infer the
+same contracts as page queries. Includes, scopes, singular results, infinite
+windows, and cursor pagination use the same checked query compiler.
+
+Standalone reads use the existing Zero transport, not a new HTTP endpoint. They
+require an authenticated Zero identity and use the endpoint's configured middleware.
+Every server invocation runs its FormRequest's preparation, authorization, and
+validation against that query's inputs, isolated from other queries in the batch.
+Inputs must already match the validated canonical values used by generated ZQL;
+normalization that changes them is rejected rather than silently diverging from
+the browser. Public date inputs are `Date` objects, encoded before transport.
+
+There is no page route middleware, route model binding, or route context. Accept
+resource IDs as validated inputs and authorize them in the FormRequest; protected
+row selections still require `visibleTo()` or their automatic visibility scope.
+Route-dependent FormRequests must be adapted before reuse. Supported required
+scalar and backed-enum parameters are also accepted directly; an ordinary
+`Illuminate\Http\Request` parameter can supply the authenticated actor but is not
+browser input. Unsupported guards, service calls, or control flow fail generation.
+Neither generation nor a query transform instantiates or executes the query class.
 
 ## Mutable query composition
 

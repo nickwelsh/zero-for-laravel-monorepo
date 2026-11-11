@@ -45,6 +45,6 @@ final readonly class RegisteredQueries
     /** @return array<string, RegisteredQuery> */
     public function forAction(string $action): array
     {
-        return array_filter($this->queries, fn (RegisteredQuery|RegisteredOptionQuery|RegisteredTableQuery $query): bool => $query instanceof RegisteredQuery && $query->action === ltrim($action, '\\'));
+        return array_filter($this->queries, fn (RegisteredQuery|RegisteredOptionQuery|RegisteredTableQuery $query): bool => $query instanceof RegisteredQuery && ! $query->standalone && $query->action === ltrim($action, '\\'));
     }
 }

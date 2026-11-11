@@ -26,6 +26,7 @@ use ZeroForLaravel\Support\ApplicationClasses;
 use ZeroForLaravel\Tables\Table;
 use ZeroForLaravel\Tests\Fixtures\ControllerMutationController;
 use ZeroForLaravel\Tests\Fixtures\Module\OutsideTask;
+use ZeroForLaravel\Tests\Fixtures\Module\TaskQueries;
 use ZeroForLaravel\Tests\Fixtures\QueryController;
 use ZeroForLaravel\Tests\Fixtures\Task;
 use ZeroForLaravel\Tests\Fixtures\TasksTable;
@@ -149,9 +150,10 @@ test('generation owns named controller modules and removes only stale generated 
     /** @var HttpTestCase $this */
     $directory = sys_get_temp_dir().'/zero-public-'.uniqid();
     config(['zero.generation.queries' => $directory.'/queries.php', 'zero.generation.mutations' => $directory.'/mutations.php']);
-    $this->discover([...$this->models(), TasksTable::class]);
+    $this->discover([...$this->models(), TasksTable::class, TaskQueries::class]);
     Route::post('/write', [ControllerMutationController::class, 'store']);
     Route::get('/tasks/{title}', [QueryController::class, 'index']);
+    $routes = Route::getRoutes()->getRoutes();
     $options = ['--output' => $directory.'/generated.ts'];
     try {
         expect(Artisan::call('zero:generate', $options))->toBe(0);
@@ -159,6 +161,13 @@ test('generation owns named controller modules and removes only stale generated 
         expect(File::get($controller))->toContain(' as store}', ' as StoreInput', '../../../generated.mutations');
         expect(File::get($directory.'/ZeroForLaravel/Tests/Fixtures/QueryController.ts'))->toContain(' as index}', '.request()', 'live: liveQueries');
         expect(File::get($directory.'/tables/tasks.ts'))->toContain('applyTableQuery', '../generated');
+        $standalone = $directory.'/ZeroForLaravel/Tests/Fixtures/Module/TaskQueries.ts';
+        expect(File::get($standalone))->toContain('export const search = Object.assign(', 'export const detail = Object.assign(', 'live: liveQueries');
+        expect(File::get($standalone))->not->toContain('export const helper');
+        expect(Route::getRoutes()->getRoutes())->toBe($routes);
+        $registrations = \ZeroForLaravel\Query\RegisteredQueries::load($directory.'/queries.php');
+        expect($registrations->forAction(TaskQueries::class.'@search'))->toBe([]);
+        expect(array_filter($registrations->all(), fn (\ZeroForLaravel\Query\RegisteredQuery|\ZeroForLaravel\Query\RegisteredOptionQuery|\ZeroForLaravel\Tables\RegisteredTableQuery $query): bool => $query instanceof \ZeroForLaravel\Query\RegisteredQuery && $query->standalone))->toHaveCount(5);
         expect(File::exists($directory.'/pages.d.ts'))->toBeFalse();
         expect(Artisan::call('zero:generate', [...$options, '--check' => true]))->toBe(0, Artisan::output());
         File::put($directory.'/handwritten.ts', 'export const keep = true;');
@@ -168,6 +177,7 @@ test('generation owns named controller modules and removes only stale generated 
         expect(File::exists($controller))->toBeTrue();
         expect(Artisan::call('zero:generate', $options))->toBe(0);
         expect(File::exists($controller))->toBeFalse();
+        expect(File::exists($standalone))->toBeFalse();
         expect(File::exists($directory.'/tables/tasks.ts'))->toBeFalse();
         expect(File::get($directory.'/handwritten.ts'))->toBe('export const keep = true;');
         expect(Artisan::call('zero:generate', [...$options, '--check' => true]))->toBe(0);
@@ -343,6 +353,7 @@ test('Composer namespaces discover nested models and tables without configuratio
     File::put($directory.'/app/Other/OtherTask.php', '<?php namespace '.$namespace.'\\Other; #[\\ZeroForLaravel\\Attributes\\ZeroPublic] class OtherTask extends \\ZeroForLaravel\\Tests\\Fixtures\\VisibleTask { protected $table = "lists"; protected $visible = ["id", "name"]; protected $fillable = ["name"]; }');
     File::put($directory.'/dev/DevTask.php', '<?php namespace '.$namespace.'\\Dev; class DevTask extends \\ZeroForLaravel\\Tests\\Fixtures\\VisibleTask {}');
     File::put($directory.'/app/Domain/TasksTable.php', '<?php namespace '.$namespace.'\\Domain; use '.Table::class.'; class TasksTable { public function definition(): Table { return Table::for(NestedTask::class)->allowedSorts(["title"]); } }');
+    File::put($directory.'/app/Domain/ReadTasks.php', '<?php namespace '.$namespace.'\\Domain; class ReadTasks { public function all(): \\ZeroForLaravel\\Query\\ZeroQuery { return NestedTask::zeroQuery()->orderBy("title", "asc")->limit(5); } }');
     $loader->addPsr4($namespace.'\\', $directory.'/app');
     $loader->addPsr4($namespace.'\\Dev\\', $directory.'/dev');
     $loader->register();
@@ -358,6 +369,7 @@ test('Composer namespaces discover nested models and tables without configuratio
         expect(File::get($directory.'/generated.ts'))->toContain('NestedTaskRow');
         expect(File::get($directory.'/generated.ts'))->not->toContain('AbstractTaskRow', 'UnpublishedRow', 'DevTaskRow');
         expect(File::get($directory.'/tables/tasks.ts'))->toContain('applyTableQuery');
+        expect(File::get($directory.'/'.$namespace.'/Domain/ReadTasks.ts'))->toContain('export const all = Object.assign(');
         expect(File::exists($directory.'/generated.react.ts'))->toBeFalse();
         expect(Artisan::call('zero:generate', ['--check' => true]))->toBe(0, Artisan::output());
 

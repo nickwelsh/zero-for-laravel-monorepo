@@ -7,12 +7,15 @@ namespace ZeroForLaravel\Query;
 use Closure;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Route;
+use Illuminate\Support\Facades\Facade;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Str;
 use LogicException;
 use PhpParser\ParserFactory;
+use Symfony\Component\HttpFoundation\InputBag;
 use ZeroForLaravel\Context\ContextDefinition;
 use ZeroForLaravel\Generation\ControllerQueryCompiler;
 use ZeroForLaravel\Generation\Mutations\ValueContract;
@@ -40,6 +43,7 @@ final readonly class RegisteredQuery
         public array $inputContracts = [],
         public array $guards = [],
         public ?string $contract = null,
+        public bool $standalone = false,
     ) {}
 
     public function assertCurrent(): void
@@ -51,7 +55,7 @@ final readonly class RegisteredQuery
         [$class, $method] = explode('@', $this->action, 2);
         $compiler = new ControllerQueryCompiler((new ParserFactory)->createForHostVersion(), resolve(ModelRegistry::class));
         foreach ($compiler->compile($class, $method) as $query) {
-            if ($query->prop === $this->prop && $query->name() === $this->contract) {
+            if ($query->prop === $this->prop && $query->standalone === $this->standalone && $query->name() === $this->contract) {
                 return;
             }
         }
@@ -108,6 +112,10 @@ final readonly class RegisteredQuery
     /** @return array<string, mixed> */
     public function invoke(mixed $arguments, ResolvedContext $identity, QueryCompiler $compiler): array
     {
+        if ($this->standalone) {
+            return $this->invokeStandalone($arguments, $identity, $compiler);
+        }
+
         $wire = Input::object($arguments, 'args');
         $args = $wire;
         unset($args['__route'], $args['__routeArgs'], $args['__window'], $args['__cursor'], $args['__generation']);
@@ -158,5 +166,61 @@ final readonly class RegisteredQuery
 
             return $compiler->compileDeclaration($this->declaration($wire), $context, $guards, serving: true);
         });
+    }
+
+    /** @return array<string, mixed> */
+    private function invokeStandalone(mixed $arguments, ResolvedContext $identity, QueryCompiler $compiler): array
+    {
+        $wire = Input::object($arguments, 'args');
+        Input::keys($wire, [...array_keys($this->parameters), '__window', '__cursor', '__generation'], 'args');
+        $this->assertCurrent();
+        $input = [];
+        foreach ($this->parameters as $name => $type) {
+            QueryInput::validate($type, $wire[$name] ?? null, $name);
+            if (str_starts_with($type, 'request:')) {
+                QueryInput::validateRequest($this->inputContracts[$name], $wire[$name], 'args.'.$name);
+                // Laravel represents nested JSON objects as associative arrays.
+                $input = Input::object(json_decode(json_encode($wire[$name], JSON_THROW_ON_ERROR), true, flags: JSON_THROW_ON_ERROR), 'args.'.$name);
+                $wire[$name] = $input;
+            }
+        }
+
+        // FormRequest hooks and injected Request dependencies see only this read's
+        // business input, never the enclosing batched Zero transform envelope.
+        $parent = resolve(Request::class);
+        $request = $parent->duplicate(query: [], request: $input, attributes: []);
+        $request->setJson(new InputBag($input));
+        $request->setRouteResolver(static fn (): ?Route => null);
+
+        app()->instance('request', $request);
+        Facade::clearResolvedInstance('request');
+        try {
+            foreach ($this->parameters as $name => $type) {
+                if (str_starts_with($type, 'request:')) {
+                    $class = substr($type, 8);
+                    $form = resolve($class);
+                    if (! $form instanceof FormRequest) {
+                        throw new LogicException('Expected a standalone FormRequest contract.');
+                    }
+
+                    $validated = Input::object($this->inputContracts[$name]->encodeValidated($form->validated()), 'validated');
+                    ksort($validated);
+                    ksort($input);
+                    if ($validated !== $input) {
+                        Input::fail('args.'.$name, 'Query arguments differ from the validated inputs.');
+                    }
+                }
+            }
+
+            $context = ContextDefinition::configured()->resolve($request);
+            if ($context->userId() === null || $context->userId() !== $identity->userId()) {
+                throw new AuthorizationException('Query identity differs from the authenticated Zero identity.');
+            }
+
+            return $compiler->compileDeclaration($this->declaration($wire), $context, serving: true);
+        } finally {
+            app()->instance('request', $parent);
+            Facade::clearResolvedInstance('request');
+        }
     }
 }

@@ -33,13 +33,14 @@ final readonly class ControllerQuery
         public array $ordinary = [],
         public array $guards = [],
         public ?array $optionSource = null,
+        public bool $standalone = false,
     ) {}
 
     public function name(): string
     {
         // A single registry key: dots and slashes have native path semantics.
         // Never reuse a registration across changed construction, input, or model contracts.
-        return 'q_'.hash('sha256', $this->action."\0".$this->prop."\0".$this->php()."\0".$this->schemaFingerprint."\0".json_encode([$this->parameters, $this->guards], JSON_THROW_ON_ERROR));
+        return 'q_'.hash('sha256', $this->action."\0".$this->prop."\0".$this->php()."\0".$this->schemaFingerprint."\0".json_encode([$this->parameters, $this->guards], JSON_THROW_ON_ERROR).($this->standalone ? "\0standalone-v1" : ''));
     }
 
     public function php(): string

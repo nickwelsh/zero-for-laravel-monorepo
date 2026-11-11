@@ -206,6 +206,12 @@ final class ControllerQueryCompiler
     public function compile(string $controller, string $method): array
     {
         $reflection = new ReflectionMethod($controller, $method);
+        $returnType = $reflection->getReturnType();
+        $standalone = $returnType instanceof ReflectionNamedType && $returnType->getName() === ZeroQuery::class;
+        if ($standalone && (! $reflection->isPublic() || $reflection->isStatic() || $returnType->allowsNull())) {
+            throw new LogicException($controller.'@'.$method.': standalone queries require a public instance method returning ZeroQuery.');
+        }
+
         $this->file = $reflection->getFileName() ?: throw new LogicException('Controller source is unavailable.');
         $this->action = ltrim($controller, '\\').'@'.$method;
         $this->prop = '*';
@@ -225,7 +231,7 @@ final class ControllerQueryCompiler
         $declaration = (new NodeFinder)->findFirst($node->stmts, fn (Node $candidate): bool => $candidate instanceof Expr\StaticCall && $candidate->class instanceof Name && $candidate->name instanceof Identifier && ($candidate->name->name === 'zeroQuery' || class_exists($candidate->class->toString()) && ScopeRegistry::local($candidate->class->toString(), $candidate->name->name) instanceof ReflectionMethod));
         $boundModels = array_filter($reflection->getParameters(), fn (ReflectionParameter $parameter): bool => $parameter->getType() instanceof ReflectionNamedType && is_subclass_of($parameter->getType()->getName(), Model::class));
         $render = (new NodeFinder)->findFirst($node->stmts, fn (Node $candidate): bool => $candidate instanceof Expr\StaticCall && $candidate->class instanceof Name && $candidate->class->toString() === Inertia::class && $candidate->name instanceof Identifier && $candidate->name->name === 'render');
-        if (! $declaration instanceof Node && ($boundModels === [] || ! $render instanceof Node)) {
+        if (! $standalone && ! $declaration instanceof Node && ($boundModels === [] || ! $render instanceof Node)) {
             return [];
         }
 
@@ -245,6 +251,10 @@ final class ControllerQueryCompiler
             $matches = array_values(array_filter($this->models->all(), fn (ModelMetadata $model): bool => $model->class === $type));
             $model = $matches[0] ?? null;
             if ($model !== null) {
+                if ($standalone) {
+                    $this->unsupported($parameter, 'Standalone queries have no route model binding. Pass a validated resource ID instead.');
+                }
+
                 $parameters[$name] = 'model:'.$type;
                 $variables[$name] = new QueryExpression('bound', $name, model: $model, type: 'query', singular: true);
             } elseif ($type === Request::class) {
@@ -270,13 +280,25 @@ final class ControllerQueryCompiler
 
         $statements = $node->stmts;
         $return = array_pop($statements);
-        if (! $return instanceof Stmt\Return_ || ! $return->expr instanceof Expr\StaticCall || ! $return->expr->class instanceof Name || $return->expr->class->toString() !== Inertia::class || ! $return->expr->name instanceof Identifier || $return->expr->name->name !== 'render') {
-            $this->unsupported($node, 'Expected one final Inertia::render response.');
-        }
+        if ($standalone) {
+            if (! $return instanceof Stmt\Return_ || ! $return->expr instanceof Expr) {
+                $this->unsupported($node, 'Expected one final ZeroQuery return.');
+            }
 
-        $args = $return->expr->getArgs();
-        if (count($args) !== 2 || ! $args[0]->value instanceof Scalar\String_ || ! $args[1]->value instanceof Expr\Array_) {
-            $this->unsupported($return, 'Expected a literal component name and named prop array.');
+            $component = '';
+            $items = [new Node\ArrayItem($return->expr, new Scalar\String_('query'))];
+        } else {
+            if (! $return instanceof Stmt\Return_ || ! $return->expr instanceof Expr\StaticCall || ! $return->expr->class instanceof Name || $return->expr->class->toString() !== Inertia::class || ! $return->expr->name instanceof Identifier || $return->expr->name->name !== 'render') {
+                $this->unsupported($node, 'Expected one final Inertia::render response.');
+            }
+
+            $args = $return->expr->getArgs();
+            if (count($args) !== 2 || ! $args[0]->value instanceof Scalar\String_ || ! $args[1]->value instanceof Expr\Array_) {
+                $this->unsupported($return, 'Expected a literal component name and named prop array.');
+            }
+
+            $component = $args[0]->value->value;
+            $items = $args[1]->value->items;
         }
 
         $variables = $this->statements($statements, $variables);
@@ -300,13 +322,17 @@ final class ControllerQueryCompiler
         ], JSON_THROW_ON_ERROR));
         $props = [];
         $ordinary = [];
-        foreach ($args[1]->value->items as $item) {
+        foreach ($items as $item) {
             if ($item === null || $item->unpack || ! $item->key instanceof Scalar\String_) {
                 $this->unsupported($return, 'Response props must have explicit string keys.');
             }
 
             $this->prop = $item->key->value;
             $expression = $this->expression($item->value, $variables)->snapshot();
+            if ($standalone && ($expression->type !== 'query' || ! $expression->model instanceof ModelMetadata)) {
+                $this->unsupported($item, 'Standalone queries must return a ZeroQuery declaration.');
+            }
+
             if ($expression->kind === 'bound' && $expression->model?->policyVisibility) {
                 $guard = array_values(array_filter($this->guards, fn (array $guard): bool => $guard['parameter'] === $expression->value))[0] ?? null;
                 if ($guard === null) {
@@ -333,7 +359,7 @@ final class ControllerQueryCompiler
         foreach ($props as $prop => [$expression, $line]) {
             if ($expression->model instanceof ModelMetadata) {
                 $fingerprint = hash('sha256', $schemaFingerprint.json_encode($this->dependencies($expression), JSON_THROW_ON_ERROR));
-                $queries[] = new ControllerQuery($this->action, $args[0]->value->value, $prop, $parameters, $expression, $this->file, $line, $fingerprint, $ordinary, $this->guards);
+                $queries[] = new ControllerQuery($this->action, $component, $prop, $parameters, $expression, $this->file, $line, $fingerprint, $ordinary, $this->guards, standalone: $standalone);
             }
         }
 

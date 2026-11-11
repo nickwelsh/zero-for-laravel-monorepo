@@ -32,6 +32,7 @@ use ZeroForLaravel\Tables\TableContext;
 use ZeroForLaravel\Tests\Fixtures\Comment;
 use ZeroForLaravel\Tests\Fixtures\ContextResolver;
 use ZeroForLaravel\Tests\Fixtures\ControllerMutationRequest;
+use ZeroForLaravel\Tests\Fixtures\Module\TaskQueries;
 use ZeroForLaravel\Tests\Fixtures\OwnerPermissions;
 use ZeroForLaravel\Tests\Fixtures\QueryController;
 use ZeroForLaravel\Tests\Fixtures\Tag;
@@ -170,7 +171,7 @@ ini_set('error_log', $root.'/php.log');
 $kernel = $app->make(PHP_SAPI === 'cli' ? Illuminate\Contracts\Console\Kernel::class : Kernel::class);
 $kernel->bootstrap();
 app()->instance(ZeroForLaravel\Support\ApplicationClasses::class, new ZeroForLaravel\Tests\Fixtures\DiscoveredClasses([
-    Task::class, TaskList::class, Tag::class, Comment::class, TasksTable::class,
+    Task::class, TaskList::class, Tag::class, Comment::class, TasksTable::class, TaskQueries::class,
 ]));
 OwnerPermissions::configure();
 config(['permissions.subject.class' => FixtureUser::class]);

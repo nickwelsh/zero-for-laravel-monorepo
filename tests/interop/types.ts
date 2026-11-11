@@ -8,11 +8,13 @@ import type {
 import { useControllerMutation } from '@nickwelsh/zero-for-laravel/react';
 import { createControllerForm, type ControllerFormRuntime } from '@nickwelsh/zero-for-laravel/formbraid';
 import { defineForm } from '@formbraid/core';
-import type { Schema } from '@rocicorp/zero';
+import type { Schema, Zero } from '@rocicorp/zero';
 import type { ClientContext } from '@nickwelsh/zero-for-laravel';
 import type { choices } from './controller-api/ZeroForLaravel/Tests/Fixtures/QueryController';
 import { index, show, dated } from './controller-api/ZeroForLaravel/Tests/Fixtures/QueryController';
 import { store } from './controller-api/ZeroForLaravel/Tests/Fixtures/ControllerMutationController';
+import { search, detail } from './controller-api/ZeroForLaravel/Tests/Fixtures/Module/TaskQueries';
+import type { schema, Context } from './generated';
 import tasks from './table.generated';
 import { useDataTable } from '@nickwelsh/zero-table/react';
 import { column, editors, type CellChange } from '@nickwelsh/zero-table';
@@ -22,8 +24,8 @@ function useContracts() {
     const result = useData(index.tasks.live({ title: 'Hello' }));
     const rows: InferLiveQueryResult<typeof index.tasks> = result.data;
     const date: Date | null | undefined = rows[0]?.completed_at;
-    const detail = useData(show.task.live({ task: 'id' }));
-    const title: string | undefined = detail.data?.title;
+    const selected = useData(show.task.live({ task: 'id' }));
+    const title: string | undefined = selected.data?.title;
     const save = useControllerMutation(store);
     const input: InferMutationInput<typeof store> = { title: 'Hello' };
     const saved: Promise<{ id: string }> = save(input);
@@ -41,6 +43,23 @@ function useContracts() {
 function immutableRows(rows: InferLiveQueryResult<typeof index.tasks>) {
     // @ts-expect-error generated rows are readonly
     rows[0]!.title = 'Changed';
+}
+
+function useStandaloneContracts(zero: Zero<typeof schema, undefined, Context>) {
+    const input: InferQueryInput<typeof search> = { input: { title: 'Hello' } };
+    const rows: Promise<InferQueryResult<typeof search>> = zero.run(search(input), { type: 'complete' });
+    const view = zero.materialize(detail({ id: 'a' }));
+    const preload = zero.preload(search(input));
+    const live = useData(search.live(input), { enabled: false });
+    const decoded: InferLiveQueryResult<typeof search> = live.data;
+    const date: Date | null | undefined = decoded[0]?.completed_at;
+    // @ts-expect-error standalone queries have no route selectors
+    search({ input: {}, __route: 'forged' });
+    // @ts-expect-error scalar query arguments retain their declared types
+    detail({ id: 42 });
+    // @ts-expect-error trusted identity is not a query input
+    search({ input: { title: 'Hello', user_id: 'bob' } });
+    return { rows, view, preload, date };
 }
 
 function formContract(runtime: () => ControllerFormRuntime<Schema, ClientContext>) {

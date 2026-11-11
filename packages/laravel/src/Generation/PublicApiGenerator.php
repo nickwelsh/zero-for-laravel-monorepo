@@ -55,13 +55,19 @@ final class PublicApiGenerator
 
             $path = implode('/', $segments).'.ts';
             if (! isset($queryActions[$path])) {
+                $queryActions[$path] = [];
                 $import = (count($segments) === 1 ? './' : str_repeat('../', count($segments) - 1)).$base.'.queries';
                 $controllers[$path] ??= [self::HEADER];
                 $controllers[$path][] = 'import {actions as liveQueries} from '.json_encode($import, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES).';';
             }
 
             $action = json_encode($query->action.'.'.$query->prop, JSON_THROW_ON_ERROR);
-            $queryActions[$path][$method][] = '['.json_encode($query->prop, JSON_THROW_ON_ERROR).']: Object.assign((input: Parameters<typeof liveQueries['.$action.']>[0]) => liveQueries['.$action.'](input).request(), {live: liveQueries['.$action.']})';
+            $callable = 'Object.assign((input: Parameters<typeof liveQueries['.$action.']>[0]) => liveQueries['.$action.'](input).request(), {live: liveQueries['.$action.']})';
+            if ($query->standalone) {
+                $controllers[$path][] = 'export const '.$method.' = '.$callable.';';
+            } else {
+                $queryActions[$path][$method][] = '['.json_encode($query->prop, JSON_THROW_ON_ERROR).']: '.$callable;
+            }
         }
 
         foreach ($queryActions as $path => $methods) {

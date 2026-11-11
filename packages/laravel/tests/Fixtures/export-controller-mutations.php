@@ -23,6 +23,7 @@ use ZeroForLaravel\Metadata\ModelRegistry;
 use ZeroForLaravel\Tests\Fixtures\ChoiceQueryRequest;
 use ZeroForLaravel\Tests\Fixtures\ControllerMutationController;
 use ZeroForLaravel\Tests\Fixtures\DateQueryRequest;
+use ZeroForLaravel\Tests\Fixtures\Module\TaskQueries;
 use ZeroForLaravel\Tests\Fixtures\MutationPreference;
 use ZeroForLaravel\Tests\Fixtures\PreferenceMutationController;
 use ZeroForLaravel\Tests\Fixtures\QueryController;
@@ -161,6 +162,10 @@ $fixture = new class('export') extends TestCase
         if ($mode === 'public') {
             $queryCompiler = new ControllerQueryCompiler((new ParserFactory)->createForNewestSupportedVersion(), new ModelRegistry($this->models()));
             $queries = [...$queryCompiler->compile(QueryController::class, 'index'), ...$queryCompiler->compile(QueryController::class, 'show'), ...$queryCompiler->compile(QueryController::class, 'dated'), ...$queryCompiler->compile(QueryController::class, 'choices')];
+            foreach (['search', 'dated', 'window', 'pages', 'detail'] as $method) {
+                array_push($queries, ...$queryCompiler->compile(TaskQueries::class, $method));
+            }
+
             $files = (new PublicApiGenerator)->generate($programs, $queries, 'generated');
             $files['generated.mutations.ts'] = $driver === 'zod' ? "export * from '../../../packages/client/src/controller-mutation.fixture';\n" : (new ControllerMutationGenerator($schemas))->typescript($programs);
             $files['generated.queries.ts'] = (new ControllerQueryGenerator($schemas))->typescript($queries, '../generated');

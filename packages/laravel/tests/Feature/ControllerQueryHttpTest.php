@@ -6,11 +6,13 @@ namespace ZeroForLaravel\Tests\Feature;
 
 use Closure;
 use Illuminate\Foundation\Auth\User;
+use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Middleware\SubstituteBindings;
 use Illuminate\Support\Facades\Route;
 use LogicException;
 use Symfony\Component\HttpFoundation\Response;
+use ZeroForLaravel\Generation\ControllerDiscovery;
 use ZeroForLaravel\Generation\ControllerQueryCompiler;
 use ZeroForLaravel\Generation\ControllerQueryGenerator;
 use ZeroForLaravel\Generation\Mutations\ControllerMutationCompiler;
@@ -22,12 +24,160 @@ use ZeroForLaravel\Query\RegisteredQuery;
 use ZeroForLaravel\Query\ZeroQuery;
 use ZeroForLaravel\Tests\Fixtures\ControllerMutationController;
 use ZeroForLaravel\Tests\Fixtures\DateQueryRequest;
+use ZeroForLaravel\Tests\Fixtures\Module\TaskQueries;
 use ZeroForLaravel\Tests\Fixtures\OwnerUser;
 use ZeroForLaravel\Tests\Fixtures\QueryController;
 use ZeroForLaravel\Tests\Fixtures\Task;
 use ZeroForLaravel\Tests\ProtectedHttpTestCase as HttpTestCase;
 
 uses(HttpTestCase::class);
+
+test('standalone queries authorize and validate each native invocation without registering routes', function (): void {
+    /** @var HttpTestCase $this */
+    $this->discover([...$this->models(), TaskQueries::class]);
+    $routes = Route::getRoutes()->getRoutes();
+    $definitions = array_values(array_column(resolve(ControllerDiscovery::class)->queries(), 'query'));
+    $registrations = eval(substr(resolve(ControllerQueryGenerator::class)->php($definitions), 5));
+    if (! is_array($registrations)) {
+        throw new LogicException('Expected generated registrations.');
+    }
+
+    foreach ($registrations as $name => $registration) {
+        if (! is_string($name) || ! $registration instanceof RegisteredQuery) {
+            throw new LogicException('Expected a standalone query registration.');
+        }
+    }
+
+    app()->instance(RegisteredQueries::class, new RegisteredQueries($registrations));
+    $names = array_column($definitions, null, 'action');
+    $name = $names[TaskQueries::class.'@search']->name();
+    expect(Route::getRoutes()->getRoutes())->toBe($routes);
+    $this->actingAs(OwnerUser::findOrFail('alice'))->withHeader('X-Api-Key', 'private-test-secret');
+    $variants = [
+        ['input' => (object) []], ['input' => ['title' => null]], ['input' => ['title' => '0']], ['input' => ['title' => 'second']],
+        ['input' => ['title' => false]], ['input' => ['title' => str_repeat('x', 256)]],
+        ['input' => ['title' => '0', 'user_id' => 'bob']], ['input' => [], '__route' => 'forged'],
+        ['input' => [], '__generation' => 'forged'], ['input' => [], '__window' => 40], [],
+    ];
+    $batch = array_map(fn (array $args, int $index): array => ['id' => (string) $index, 'name' => $name, 'args' => [$args]], $variants, array_keys($variants));
+    $response = $this->postJson('/zero/query', ['transform', $batch])->assertOk();
+    foreach (range(0, 3) as $index) {
+        $response->assertJsonMissingPath('queries.'.$index.'.error')->assertJsonPath('queries.'.$index.'.ast.limit', 20);
+    }
+
+    expect(json_encode($response->json('queries.2.ast'), JSON_THROW_ON_ERROR))->toContain('%0%', 'user:alice', 'permission_index');
+    expect(json_encode($response->json('queries.3.ast'), JSON_THROW_ON_ERROR))->toContain('%second%');
+    foreach (range(4, 10) as $index) {
+        $response->assertJsonPath('queries.'.$index.'.error', 'parse');
+    }
+
+    expect(Route::currentRouteName())->toBe('zero.query');
+    $this->actingAs(OwnerUser::findOrFail('bob'))->postJson('/zero/query', ['transform', [$batch[2]]])
+        ->assertOk()->assertJsonPath('queries.0.details.status', 403);
+    $detail = ['id' => 'detail', 'name' => $names[TaskQueries::class.'@detail']->name(), 'args' => [['id' => 'task-a']]];
+    $response = $this->postJson('/zero/query', ['transform', [$detail]])->assertOk()->assertJsonMissingPath('queries.0.error');
+    expect(json_encode($response->json('queries.0.ast'), JSON_THROW_ON_ERROR))->toContain('user:bob', 'task-a');
+    expect(Task::count())->toBe(0);
+});
+
+test('standalone native reads preserve dates, live windows and cursor pages', function (): void {
+    /** @var HttpTestCase $this */
+    $this->discover([...$this->models(), TaskQueries::class]);
+    $definitions = array_values(array_column(resolve(ControllerDiscovery::class)->queries(), 'query'));
+    $registrations = eval(substr(resolve(ControllerQueryGenerator::class)->php($definitions), 5));
+    if (! is_array($registrations)) {
+        throw new LogicException('Expected generated registrations.');
+    }
+
+    foreach ($registrations as $name => $registration) {
+        if (! is_string($name) || ! $registration instanceof RegisteredQuery) {
+            throw new LogicException('Expected a standalone query registration.');
+        }
+    }
+
+    app()->instance(RegisteredQueries::class, new RegisteredQueries($registrations));
+    $names = array_column($definitions, null, 'action');
+    $this->actingAs(OwnerUser::findOrFail('alice'))->withHeader('X-Api-Key', 'private-test-secret');
+    $cases = [
+        ['dated', ['input' => ['after' => '2023-11-14T22:13:20.123Z']]],
+        ['dated', ['input' => ['after' => '2023-11-14']]],
+        ['window', ['__window' => 7]], ['window', ['__window' => 0]],
+        ['pages', ['__cursor' => ['title' => 'Cursor', 'id' => 'task-a']]],
+        ['pages', ['__cursor' => ['id' => 'task-a']]],
+    ];
+    $batch = array_map(fn (array $case, int $index): array => ['id' => (string) $index, 'name' => $names[TaskQueries::class.'@'.$case[0]]->name(), 'args' => [$case[1]]], $cases, array_keys($cases));
+    $response = $this->postJson('/zero/query', ['transform', $batch])->assertOk()
+        ->assertJsonMissingPath('queries.0.error')->assertJsonPath('queries.1.error', 'parse')
+        ->assertJsonPath('queries.2.ast.limit', 7)->assertJsonPath('queries.3.error', 'parse')
+        ->assertJsonPath('queries.4.ast.limit', 3)->assertJsonPath('queries.4.ast.start.row', ['title' => 'Cursor', 'id' => 'task-a'])
+        ->assertJsonPath('queries.5.error', 'parse');
+    expect(json_encode($response->json('queries.0.ast'), JSON_THROW_ON_ERROR))->toContain('1700000000123');
+});
+
+test('standalone FormRequest hooks receive isolated Laravel input including nested objects', function (): void {
+    /** @var HttpTestCase $this */
+    $definition = resolve(ControllerQueryCompiler::class)->compile(HookedQueries::class, 'all')[0];
+    $registrations = eval(substr(resolve(ControllerQueryGenerator::class)->php([$definition]), 5));
+    if (! is_array($registrations) || ! ($registrations[$definition->name()] ?? null) instanceof RegisteredQuery) {
+        throw new LogicException('Expected a generated standalone registration.');
+    }
+
+    app()->instance(RegisteredQueries::class, new RegisteredQueries([$definition->name() => $registrations[$definition->name()]]));
+    $this->actingAs(OwnerUser::findOrFail('alice'))->withHeader('X-Api-Key', 'private-test-secret');
+    $valid = ['title' => 'Valid', 'filter' => ['group' => 'work'], 'ids' => ['a', 'b']];
+    $cases = [$valid, [...$valid, 'title' => 'forbidden'], [...$valid, 'title' => 'blocked'],
+        [...$valid, 'title' => '  Valid  '], [...$valid, 'filter' => ['group' => 'work', 'extra' => true]],
+        [...$valid, 'ids' => [false]], $valid];
+    $batch = array_map(fn (array $input, int $index): array => ['id' => (string) $index, 'name' => $definition->name(), 'args' => [['input' => $input]]], $cases, array_keys($cases));
+    $this->postJson('/zero/query?title=forbidden&user_id=bob', ['transform', $batch])->assertOk()
+        ->assertJsonMissingPath('queries.0.error')->assertJsonPath('queries.1.details.status', 403)
+        ->assertJsonPath('queries.2.error', 'parse')->assertJsonPath('queries.3.error', 'parse')
+        ->assertJsonPath('queries.4.error', 'parse')->assertJsonPath('queries.5.error', 'parse')
+        ->assertJsonMissingPath('queries.6.error');
+    expect(Route::currentRouteName())->toBe('zero.query');
+});
+
+final class HookedQueries
+{
+    public function all(HookedQueryRequest $input): ZeroQuery
+    {
+        return Task::zeroQuery()->visibleTo($input->user());
+    }
+}
+
+final class HookedQueryRequest extends FormRequest
+{
+    public function authorize(Request $request): bool
+    {
+        return $this->user()?->getAuthIdentifier() === 'alice'
+            && $this->route() === null && $request->route() === null
+            && $request->all() === $this->all()
+            && $this->input('title') !== 'forbidden';
+    }
+
+    /** @return array<string, list<string>> */
+    public function rules(): array
+    {
+        return ['title' => ['required', 'string'], 'filter' => ['required', 'array'],
+            'filter.group' => ['required', 'string'], 'ids' => ['required', 'array', 'list'], 'ids.*' => ['required', 'string']];
+    }
+
+    public function withValidator(\Illuminate\Contracts\Validation\Validator $validator): void
+    {
+        $validator->after(function (\Illuminate\Contracts\Validation\Validator $validator): void {
+            if ($this->input('title') === 'blocked') {
+                $validator->errors()->add('title', 'Blocked by a validation hook.');
+            }
+        });
+    }
+
+    protected function prepareForValidation(): void
+    {
+        if (is_string($this->input('title'))) {
+            $this->merge(['title' => trim($this->input('title'))]);
+        }
+    }
+}
 
 test('option reads validate their own arguments and reauthorize context without executing mutation hooks', function (): void {
     /** @var HttpTestCase $this */

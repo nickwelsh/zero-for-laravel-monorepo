@@ -41,13 +41,13 @@ final readonly class ControllerQueryGenerator
                 }
             }
 
-            $lines[] = '  '.json_encode($query->name(), JSON_THROW_ON_ERROR).': '.$this->schemas->object($query->parameters, $cursor, contracts: $query->optionContracts(), routed: $query->optionSource === null, window: $query->expression->kind === 'infinite').',';
+            $lines[] = '  '.json_encode($query->name(), JSON_THROW_ON_ERROR).': '.$this->schemas->object($query->parameters, $cursor, contracts: $query->optionContracts(), routed: $query->optionSource === null && ! $query->standalone, window: $query->expression->kind === 'infinite').',';
         }
 
         $lines[] = '};';
         $lines[] = 'export const publicInputs = {';
         foreach ($queries as $query) {
-            $lines[] = '  '.json_encode($query->name(), JSON_THROW_ON_ERROR).': '.$this->schemas->object($query->parameters, public: true, contracts: $query->optionContracts(), routed: $query->optionSource === null).',';
+            $lines[] = '  '.json_encode($query->name(), JSON_THROW_ON_ERROR).': '.$this->schemas->object($query->parameters, public: true, contracts: $query->optionContracts(), routed: $query->optionSource === null && ! $query->standalone).',';
         }
 
         $lines[] = '};';
@@ -121,7 +121,7 @@ final readonly class ControllerQueryGenerator
             $lines[] = '    '.var_export($query->name(), true).' => new \\ZeroForLaravel\\Query\\RegisteredQuery('.implode(', ', [
                 var_export($query->action, true), var_export($query->component, true), var_export($query->prop, true),
                 var_export($query->parameters, true), $query->php(), '['.implode(', ', $contracts).']', var_export($query->guards, true), var_export($query->name(), true),
-            ]).'),';
+            ]).($query->standalone ? ', standalone: true' : '').'),';
         }
 
         foreach ($tables as $table) {

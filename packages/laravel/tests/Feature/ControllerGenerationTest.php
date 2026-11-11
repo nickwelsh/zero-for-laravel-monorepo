@@ -23,6 +23,7 @@ use ZeroForLaravel\Query\ZeroQuery;
 use ZeroForLaravel\ResolvedContext;
 use ZeroForLaravel\Tests\Fixtures\ChoiceQueryRequest;
 use ZeroForLaravel\Tests\Fixtures\QueryController;
+use ZeroForLaravel\Tests\Fixtures\Task;
 use ZeroForLaravel\Tests\OwnerTestCase as TestCase;
 
 uses(TestCase::class);
@@ -147,3 +148,33 @@ test('registered controller queries preserve input branches without executing th
     expect(fn () => resolve(ControllerQueryCompiler::class)->compile(QueryController::class, 'unsafeNullable'))
         ->toThrow(LogicException::class, 'Concatenation requires strings without implicit coercion');
 });
+
+test('standalone query declarations reject implicit binding and unrepresented guards', function (): void {
+    /** @var TestCase $this */
+    app()->register(SurveyorServiceProvider::class);
+    app()->instance(ModelRegistry::class, new ModelRegistry($this->models()));
+    foreach (['bound' => 'no route model binding', 'unsafe' => 'Statement or guard cannot be represented', 'nullable' => 'public instance method returning ZeroQuery'] as $method => $message) {
+        expect(fn () => resolve(ControllerQueryCompiler::class)->compile(InvalidStandaloneQueries::class, $method))
+            ->toThrow(LogicException::class, $message);
+    }
+});
+
+final class InvalidStandaloneQueries
+{
+    public function bound(Task $task): ZeroQuery
+    {
+        return Task::zeroQuery()->where('id', $task->id);
+    }
+
+    public function unsafe(): ZeroQuery
+    {
+        abort_unless(auth()->check(), 403);
+
+        return Task::zeroQuery();
+    }
+
+    public function nullable(bool $empty): ?ZeroQuery
+    {
+        return $empty ? null : Task::zeroQuery();
+    }
+}

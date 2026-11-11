@@ -35,7 +35,7 @@ final class NavigationGenerator
             $bindings = [];
             $component = null;
             foreach ($queries as $query) {
-                if ($query->optionSource !== null || ltrim($query->action, '\\') !== $action) {
+                if ($query->standalone || $query->optionSource !== null || ltrim($query->action, '\\') !== $action) {
                     continue;
                 }
 

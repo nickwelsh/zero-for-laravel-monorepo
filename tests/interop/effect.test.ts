@@ -13,6 +13,7 @@ import { MutationResultError, validationFields } from '../../packages/client/src
 import { schema, definitions, type Context } from './generated';
 import type * as MutationController from './controller-api/ZeroForLaravel/Tests/Fixtures/ControllerMutationController';
 import type * as QueryController from './controller-api/ZeroForLaravel/Tests/Fixtures/QueryController';
+import type * as TaskQueries from './controller-api/ZeroForLaravel/Tests/Fixtures/Module/TaskQueries';
 import type * as MutationBindings from '../../packages/client/src/controller-mutation.fixture';
 
 // Execute the actual PHP output without maintaining a duplicate generated fixture tree.
@@ -47,6 +48,7 @@ function load(path: string): unknown {
 }
 const actions = load('ZeroForLaravel/Tests/Fixtures/ControllerMutationController.ts') as typeof MutationController;
 const queries = load('ZeroForLaravel/Tests/Fixtures/QueryController.ts') as typeof QueryController;
+const standalone = load('ZeroForLaravel/Tests/Fixtures/Module/TaskQueries.ts') as typeof TaskQueries;
 const { createControllerMutationBindings } = load('generated.mutations.ts') as typeof MutationBindings;
 const projections = { [actions.projected.action]: async () => ({ pending: true }) };
 
@@ -106,6 +108,10 @@ it('executes generated Effect mutations and queries on native Zero without chang
         expect(id).toBe(request.args.prepared.ids.s0);
         expect((await zero.run(Zero.createBuilder(schema).tasks.where('id', id).one()))?.title).toBe('Effect task');
         expect((await zero.run(queries.index.tasks({ title: 'Effect task' }))).map((row) => row.id)).toEqual([id]);
+        expect((await zero.run(standalone.search({ input: { title: 'Effect' } }))).map((row) => row.id)).toEqual([id]);
+        expect((await zero.run(standalone.detail({ id })))?.title).toBe('Effect task');
+        const forged = { input: {}, __route: 'forged' };
+        expect(() => standalone.search(forged)).toThrow();
         const dated = queries.dated.tasks({ input: { after: new Date('2024-02-29T12:34:56.123Z') } });
         expect(dated.args).toEqual({ input: { after: '2024-02-29T12:34:56.123Z' } });
         expect(await zero.run(dated)).toEqual([]);

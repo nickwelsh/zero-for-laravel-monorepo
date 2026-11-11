@@ -13,6 +13,14 @@ PHP registrations, native ZQL/mutators, validation schemas, result codecs, and
 named controller modules. Laravel retains real binding, middleware, FormRequests, Gates, and Eloquent.
 Zero retains replication, optimistic replay, ordering, and durable mutation results.
 
+For component-owned reads, put public methods returning
+`ZeroForLaravel\Query\ZeroQuery` in ordinary application classes such as
+`App\Zero\Queries\TaskQueries`. `zero:generate` discovers them through Composer
+without route registration and exports callable queries with `.live()` bindings.
+Use `zero.run(search(input))`, native `useQuery`, or `useData(search.live(input))`.
+Standalone reads validate and authorize their own FormRequest through the existing
+Zero endpoint; they do not inherit page middleware or route model binding.
+
 Zero does not generate global page types. Optionally register
 `ZeroForLaravel\WayfinderServiceProvider` with Wayfinder `dev-next` to specialize
 its own generated live props; run Zero generation before Wayfinder generation.

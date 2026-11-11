@@ -30,6 +30,7 @@ import { useData, type Data } from '../../packages/client/src/react/data';
 import { liveQuery, withQueryInputs } from '../../packages/client/src/live-query';
 import { createInertiaAdapter } from '../../packages/client/src/react/inertia';
 import type { index, show } from '../interop/controller-api/ZeroForLaravel/Tests/Fixtures/QueryController';
+import type * as TaskQueries from '../interop/controller-api/ZeroForLaravel/Tests/Fixtures/Module/TaskQueries';
 import { expect, it, vi } from 'vite-plus/test';
 import { schema as fixtureSchema, definitions, type Context } from '../interop/generated';
 import {
@@ -231,6 +232,19 @@ it.skipIf(!enabled)(
                 },
             };
             runInNewContext(compiled, { require: (specifier: string) => modules[specifier], module });
+            const standalone = { exports: {} as typeof TaskQueries };
+            runInNewContext(
+                execFileSync(
+                    'node_modules/.bin/esbuild',
+                    [
+                        join(root, 'ZeroForLaravel/Tests/Fixtures/Module/TaskQueries.ts'),
+                        '--format=cjs',
+                        '--target=es2022',
+                    ],
+                    { encoding: 'utf8' },
+                ),
+                { require: () => module.exports, module: standalone },
+            );
             const tableModule = { exports: {} as { default: TableDescriptor<{ id: string; title: string }> } };
             runInNewContext(
                 execFileSync(
@@ -423,6 +437,17 @@ it.skipIf(!enabled)(
             }
             try {
                 await until(() => complete && result.length === 2, 'Authorized query never completed');
+                expect(
+                    (await zero.run(standalone.exports.search({ input: {} }), { type: 'complete' })).map(
+                        (row) => row.id,
+                    ),
+                ).toEqual([third, alice]);
+                expect(
+                    (await zero.run(standalone.exports.search({ input: { title: 'Init' } }), { type: 'complete' })).map(
+                        (row) => row.id,
+                    ),
+                ).toEqual([alice]);
+                expect(await zero.run(standalone.exports.detail({ id: bob }), { type: 'complete' })).toBeUndefined();
                 // Exercise generated table queries on the real synchronized Zero
                 // client, not a second invocation of the SQL compiler. Expected
                 // membership is enumerated independently for asymmetric inputs.

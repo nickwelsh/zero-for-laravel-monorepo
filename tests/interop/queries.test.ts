@@ -16,6 +16,48 @@ import {
 import { schema, definitions } from './generated';
 import { liveQuery, withQueryInputs } from '../../packages/client/src/live-query';
 import { dated } from './controller-api/ZeroForLaravel/Tests/Fixtures/QueryController';
+import {
+    search,
+    dated as standaloneDated,
+    detail,
+    window as liveWindow,
+    pages,
+} from './controller-api/ZeroForLaravel/Tests/Fixtures/Module/TaskQueries';
+
+it('executes standalone query exports with native ZQL, decoded selections and pagination', () => {
+    const base = createBuilder(schema).tasks.where('deleted_at', 'IS', null);
+    const ctx = { user_id: 'alice' };
+    for (const title of [undefined, null, '', '0', 'search']) {
+        const request = search({ input: title === undefined ? {} : { title } });
+        const expected = (title ? base.where('title', 'LIKE', `%${title}%`) : base)
+            .orderBy('title', 'desc')
+            .orderBy('id', 'asc')
+            .limit(20);
+        expect(asQueryInternals(request.query.fn({ args: request.args, ctx })).ast).toEqual(
+            asQueryInternals(expected).ast,
+        );
+    }
+    const selected = search.live({ input: { title: '0' } });
+    expect(selected.decode([{ id: 'a', title: '0', completed_at: 1700000000123 }])).toEqual([
+        { id: 'a', title: '0', completed_at: new Date('2023-11-14T22:13:20.123Z') },
+    ]);
+    expect(selected.input.apply({ title: 'new' })).toEqual({ input: { title: 'new' } });
+    expect(() => search({ input: { title: 'x'.repeat(256) } })).toThrow();
+    const forged = { input: {}, __route: 'forged' };
+    expect(() => search(forged)).toThrow();
+    const datedRequest = standaloneDated({ input: { after: new Date('2023-11-14T22:13:20.123Z') } });
+    expect(datedRequest.args).toEqual({ input: { after: '2023-11-14T22:13:20.123Z' } });
+    const window = liveWindow.live({}).limit(7).request() as ReturnType<typeof liveWindow>;
+    expect(asQueryInternals(window.query.fn({ args: window.args, ctx })).ast).toEqual(
+        asQueryInternals(base.orderBy('title', 'desc').orderBy('id', 'asc').limit(7)).ast,
+    );
+    const cursor = { title: 'Cursor', id: 'a' };
+    const page = pages.live({}).page(cursor).request() as ReturnType<typeof pages>;
+    expect(asQueryInternals(page.query.fn({ args: page.args, ctx })).ast).toEqual(
+        asQueryInternals(base.orderBy('title', 'desc').orderBy('id', 'asc').limit(3).start(cursor)).ast,
+    );
+    expect(detail.live({ id: 'a' }).decode({ id: 'a', title: 'Detail' })).toEqual({ id: 'a', title: 'Detail' });
+});
 
 it('executes both generated controller definitions with empty, zero-string, and ordinary inputs', () => {
     const zql = createBuilder(schema);

@@ -17,6 +17,8 @@ return [
     | Zero discovers models using HasZeroQueries in your application's Composer
     | PSR-4 namespaces, including modules. Table classes ending in Table with a
     | public definition() returning Table are discovered in those namespaces.
+    | Public instance methods returning ZeroQuery are standalone query exports;
+    | they need no routes. This discovery selection includes their classes too.
     |
     | Leave discovery set to auto, or replace it with a list of class names and
     | globs. Globs may match namespaces or PHP paths relative to your project.

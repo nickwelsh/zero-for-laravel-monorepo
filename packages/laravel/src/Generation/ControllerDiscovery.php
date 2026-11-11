@@ -7,13 +7,17 @@ namespace ZeroForLaravel\Generation;
 use Closure;
 use Laravel\Ranger\Components\Route;
 use LogicException;
+use ReflectionClass;
 use ReflectionMethod;
+use ReflectionNamedType;
 use ZeroForLaravel\Attributes\ZeroMutation;
+use ZeroForLaravel\Query\ZeroQuery;
+use ZeroForLaravel\Support\ApplicationClasses;
 
 /** Ranger owns registered route discovery; the checked compiler owns live declarations. */
 final readonly class ControllerDiscovery
 {
-    public function __construct(private ControllerQueryCompiler $compiler) {}
+    public function __construct(private ControllerQueryCompiler $compiler, private ApplicationClasses $classes) {}
 
     /** @return array<string, array{query: ControllerQuery, routes: list<Route>}> */
     public function queries(): array
@@ -33,6 +37,26 @@ final readonly class ControllerDiscovery
                 $queries[$name]['routes'][] = $route;
             }
         });
+
+        foreach ($this->classes->all() as $class) {
+            $reflection = new ReflectionClass($class);
+            if ($reflection->isAbstract()) {
+                continue;
+            }
+
+            foreach ($reflection->getMethods(ReflectionMethod::IS_PUBLIC) as $method) {
+                $type = $method->getReturnType();
+                if ($method->isStatic() || ! $type instanceof ReflectionNamedType || $type->getName() !== ZeroQuery::class) {
+                    continue;
+                }
+
+                $action = $class.'@'.$method->name;
+                foreach ($actions[$action] ??= $this->compiler->compile($class, $method->name) as $query) {
+                    $queries[$query->name()] ??= ['query' => $query, 'routes' => []];
+                }
+            }
+        }
+
         ksort($queries);
 
         return $queries;
