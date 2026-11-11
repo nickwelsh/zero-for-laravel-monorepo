@@ -8,14 +8,13 @@ export function useSearchRefresh(endpoint: string | undefined, index: string, re
         }
         const revisionURL = endpoint;
         const controller = new AbortController();
-        let revision: string | undefined;
-        let pending = false;
+        const poll: { revision: string | undefined; pending: boolean } = { revision: undefined, pending: false };
         const active = () => !controller.signal.aborted && !document.hidden;
         async function check() {
-            if (!active() || pending) {
+            if (!active() || poll.pending) {
                 return;
             }
-            pending = true;
+            poll.pending = true;
             try {
                 const url = new URL(revisionURL, globalThis.location.origin);
                 url.searchParams.set('index', index);
@@ -34,15 +33,15 @@ export function useSearchRefresh(endpoint: string | undefined, index: string, re
                     result !== null &&
                     'revision' in result &&
                     typeof result.revision === 'string' &&
-                    result.revision !== revision
+                    result.revision !== poll.revision
                 ) {
-                    revision = result.revision;
+                    poll.revision = result.revision;
                     refresh();
                 }
             } catch {
                 // A failed poll must not hide existing results. The next poll retries.
             } finally {
-                pending = false;
+                poll.pending = false;
             }
         }
         function checkRevision() {

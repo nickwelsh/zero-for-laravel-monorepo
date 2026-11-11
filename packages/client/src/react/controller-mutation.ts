@@ -45,8 +45,7 @@ export function useControllerMutation<Input, Result, S extends Schema, C extends
     }, [current]);
     const submit = async (input: Input): Promise<Result> => {
         const version = ++current.version;
-        let locallyApplied = false;
-        let completed = false;
+        const progress = { locallyApplied: false, completed: false };
         const update = (state: ControllerMutationState) => {
             if (current.mounted && identity.current === current && current.version === version)
                 setSnapshot({ identity: current, state });
@@ -64,29 +63,29 @@ export function useControllerMutation<Input, Result, S extends Schema, C extends
             const call = zero.mutate(action.prepare(parsed, route, { ...registered.preparation, ...preparation }));
             void call.client.then(
                 (result) => {
-                    if (!completed && result.type === 'success') {
-                        locallyApplied = true;
-                        update({ ...idle, status: 'pending', locallyApplied });
+                    if (!progress.completed && result.type === 'success') {
+                        progress.locallyApplied = true;
+                        update({ ...idle, status: 'pending', locallyApplied: progress.locallyApplied });
                     }
                     return undefined;
                 },
                 () => {},
             );
             const raw = await completeMutation(call);
-            completed = true;
+            progress.completed = true;
             let result: Result;
             try {
                 result = binding.serverResultSchema.parse(raw);
             } catch (error) {
                 throw new MutationResultError(error);
             }
-            update({ ...idle, status: 'success', locallyApplied });
+            update({ ...idle, status: 'success', locallyApplied: progress.locallyApplied });
             return result;
         } catch (error) {
-            completed = true;
+            progress.completed = true;
             update({
                 status: error instanceof MutationResultError ? 'result-error' : 'failure',
-                locallyApplied,
+                locallyApplied: progress.locallyApplied,
                 error: error instanceof Error ? error : new Error(String(error)),
                 fields: validationFields(error),
             });
