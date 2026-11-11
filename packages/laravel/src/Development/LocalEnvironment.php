@@ -70,12 +70,12 @@ final class LocalEnvironment
         $node = (new ExecutableFinder)->find(config()->string('zero.dev.node', 'node'));
         $package = base_path('node_modules/@rocicorp/zero/package.json');
         if ($node === null || ! is_file($package)) {
-            throw new LogicException('Install Node.js and @rocicorp/zero 1.11.3 in this application before running zero:dev.');
+            throw new LogicException('Install Node.js and @rocicorp/zero 1.11.4 in this application before running zero:dev.');
         }
 
         $metadata = json_decode((string) file_get_contents($package), true, flags: JSON_THROW_ON_ERROR);
-        if (! is_array($metadata) || ($metadata['version'] ?? null) !== '1.11.3') {
-            throw new LogicException('This package supports @rocicorp/zero 1.11.3.');
+        if (! is_array($metadata) || ($metadata['version'] ?? null) !== '1.11.4') {
+            throw new LogicException('This package supports @rocicorp/zero 1.11.4.');
         }
 
         $cli = dirname($package).'/out/zero/src/cli.js';

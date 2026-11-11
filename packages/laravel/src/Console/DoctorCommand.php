@@ -27,9 +27,9 @@ final class DoctorCommand extends Command
         };
         try {
             $local->binary();
-            $check('Zero binary', 'OK', '1.11.3 installed');
+            $check('Zero binary', 'OK', '1.11.4 installed');
         } catch (Throwable) {
-            $check('Zero binary', 'FAIL', 'Install Node.js and @rocicorp/zero 1.11.3 in the application.');
+            $check('Zero binary', 'FAIL', 'Install Node.js and @rocicorp/zero 1.11.4 in the application.');
         }
 
         try {
