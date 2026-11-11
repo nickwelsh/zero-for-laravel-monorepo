@@ -2,7 +2,12 @@ import { defineConfig } from 'vite-plus';
 
 export default defineConfig({
     pack: {
-        entry: { index: 'src/index.ts', 'react/index': 'src/react/index.tsx', formbraid: 'src/formbraid.tsx' },
+        entry: {
+            index: 'src/index.ts',
+            'react/index': 'src/react/index.tsx',
+            inertia: 'src/inertia.ts',
+            formbraid: 'src/formbraid.tsx',
+        },
         format: ['esm'],
         dts: true,
         clean: true,
@@ -10,6 +15,7 @@ export default defineConfig({
             neverBundle: [
                 '@formbraid/core',
                 '@formbraid/react',
+                '@inertiajs/react',
                 '@nickwelsh/zero-for-laravel/react/formbraid',
                 '@tanstack/react-virtual',
                 '@nickwelsh/zero-for-laravel',

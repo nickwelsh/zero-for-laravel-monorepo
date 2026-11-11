@@ -2,6 +2,8 @@
 import { memo, useEffect, useLayoutEffect, useMemo, useSyncExternalStore, type ReactNode } from 'react';
 import { useData, useZero, type Data } from '@nickwelsh/zero-for-laravel/react';
 import { readTableMetadata } from './metadata';
+import { tableURLState, type TableURLAdapter, type TableURLStateOptions } from './url-state';
+export type { TableURLAdapter, TableURLStateOptions } from './url-state';
 import { SessionContext, Viewport, Group, Row } from './viewport';
 import { Cell, EditingStatus } from './cell';
 export { useTableCell } from './cell';
@@ -11,6 +13,8 @@ export type { ViewportOptions } from './viewport';
 import {
     groupId,
     queryKey,
+    readTableState,
+    writeTableState,
     TableTransportError,
     validateState,
     parseEditorValue,
@@ -28,8 +32,14 @@ import {
 } from '../index';
 
 type StateOptions<C extends Capabilities> =
-    | { initialState?: Partial<TableState<C>>; state?: never; onStateChange?: never }
-    | { state: TableState<C>; onStateChange(next: TableState<C>): void; initialState?: never };
+    | {
+          initialState?: Partial<TableState<C>>;
+          state?: never;
+          onStateChange?: never;
+          /** Persist filters, sorting, grouping and expansions in the URL. Defaults to false. */
+          urlState?: boolean | TableURLStateOptions;
+      }
+    | { state: TableState<C>; onStateChange(next: TableState<C>): void; initialState?: never; urlState?: false };
 export interface EditingOptions<Row> {
     enabled: boolean;
     canEditRow?: (row: Row) => boolean;
@@ -407,25 +417,50 @@ export class TableSession<Row, C extends Capabilities = Capabilities> {
     private intent: string[] = [];
     private viewport: readonly string[] = [];
     private options: TableOptions<C, Row>;
+    private readonly initialState: TableState<C>;
+    private urlSnapshot: string | undefined;
     constructor(
         readonly descriptor: TableDescriptor<Row, C>,
         options: TableOptions<C, Row> = {},
     ) {
         this.options = options;
-        this.currentState = structuredClone(
-            options.state ?? {
-                filter: null,
-                sort: descriptor.capabilities.defaults.sort,
-                groupBy: descriptor.capabilities.defaults.groupBy,
-                expanded: [],
-                ...options.initialState,
-            },
-        );
+        this.initialState = structuredClone({
+            filter: null,
+            sort: descriptor.capabilities.defaults.sort,
+            groupBy: descriptor.capabilities.defaults.groupBy,
+            expanded: [],
+            ...options.initialState,
+        });
+        this.currentState = structuredClone(options.state ?? this.initialState);
         this.windowScope = queryKey([this.state.filter, this.state.sort, this.state.groupBy]);
         validateState(descriptor.capabilities, this.state);
         this.configure(options);
         this.rebuild();
     }
+    private synchronizeURL = () => {
+        if (!this.options.urlState) {
+            this.urlSnapshot = undefined;
+            return;
+        }
+        const options = tableURLState(this.options.urlState);
+        const source = options.adapter.getURL();
+        const snapshot = queryKey([source, options.key]);
+        if (snapshot === this.urlSnapshot) return;
+        this.urlSnapshot = snapshot;
+        const url = new URL(source, 'https://table.invalid');
+        const state = readTableState(this.descriptor.capabilities, url.searchParams, {
+            ...options,
+            initialState: this.initialState,
+        });
+        if (queryKey(state) !== queryKey(this.state)) this.applyState(state);
+    };
+    /** URL ownership follows the hook, not virtual rows or query-owner mounts. */
+    connectURL = (adapter: TableURLAdapter | undefined) => {
+        if (!adapter) return undefined;
+        const unsubscribe = adapter.subscribe(this.synchronizeURL);
+        this.synchronizeURL();
+        return unsubscribe;
+    };
     subscribe = (listener: () => void) => {
         this.listeners.add(listener);
         return () => {
@@ -471,6 +506,7 @@ export class TableSession<Row, C extends Capabilities = Capabilities> {
         if (syncState && options.state && queryKey(options.state) !== queryKey(this.state))
             this.applyState(options.state);
         if (syncState) {
+            this.synchronizeURL();
             if (options.hover === false && this.intent.length) {
                 this.intent = [];
                 this.emit(true);
@@ -483,7 +519,16 @@ export class TableSession<Row, C extends Capabilities = Capabilities> {
         const next = { ...this.state, ...patch };
         validateState(this.descriptor.capabilities, next);
         if (this.options.onStateChange) this.options.onStateChange(next);
-        else this.applyState(next);
+        else {
+            // Apply synchronously so multiple setters in one event compose, even with async routers.
+            this.applyState(next);
+            if (this.options.urlState) {
+                const options = tableURLState(this.options.urlState);
+                const url = new URL(options.adapter.getURL(), 'https://table.invalid');
+                url.search = writeTableState(this.descriptor.capabilities, url.searchParams, next, options).toString();
+                options.adapter.navigate(url.pathname + url.search + url.hash, options.history ?? 'replace');
+            }
+        }
     }
     private applyState(next: TableState<C>) {
         validateState(this.descriptor.capabilities, next);
@@ -980,6 +1025,8 @@ export function useDataTable<Row, C extends Capabilities>(
     // publishing during render. Controlled query state is reconciled after commit.
     table.configure(options, false);
     useLayoutEffect(() => table.configure(options), [table, options]);
+    const urlAdapter = options.urlState ? tableURLState(options.urlState).adapter : undefined;
+    useEffect(() => table.connectURL(urlAdapter), [table, urlAdapter]);
     useSyncExternalStore(table.subscribe, table.snapshot, table.snapshot);
     return table;
 }

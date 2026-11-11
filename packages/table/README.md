@@ -88,6 +88,50 @@ Each leaf grows one live prefix, with an extra row proving whether more exists.
 Snapshot counts never determine live exhaustion. A maximum of four additional
 non-expanded leaves are proactively warmed; explicit expansions are not capped.
 
+### Share the view in the URL
+
+Pass `urlState: true` to `useDataTable` to make the package own URL restoration,
+updates and Back/Forward synchronization. It stores filters, sort order, grouping
+and expanded group IDs in a versioned `table.<name>` search parameter, preserving
+other parameters, the fragment and existing history state. No application-owned
+serialization, effects, or change handlers are required.
+
+```tsx
+import { DataTable, useDataTable } from '@nickwelsh/zero-table/react';
+
+const table = useDataTable(tasks, { columns, urlState: true });
+// Or: urlState: { key: 'sidebar-tasks', history: 'push' }
+```
+
+For **Inertia**, import the same API from `@nickwelsh/zero-table/inertia` instead.
+That entry uses Inertia's client-side router, preserving page state and scroll,
+and restores the URL state during SSR from `usePage().url`. It merges rapid writes
+from multiple tables while navigation is pending. Only this entry requires the
+optional `@inertiajs/react@^3.8.0` peer; `/react` has no Inertia dependency.
+
+History defaults to `replace`, avoiding an entry per keystroke; choose `push` to
+step through view changes with Back/Forward. Give independent instances of the
+same descriptor distinct `key` values. Bind controls to `table.state`, so they
+reflect restored settings. Reloading or opening a link in a fresh session restores
+the view. Missing, malformed, unsupported-version or no-longer-allowed URL state
+uses `initialState` over descriptor defaults. Set `urlState: false` (the default)
+for memory-only state. URL mode and controlled `state`/`onStateChange` are mutually
+exclusive; types reject combining them.
+
+For another client-side router, pass a shared `TableURLAdapter` as
+`urlState: { adapter }`. Its `getURL()` must expose the latest effective URL
+(including pending writes), `navigate(url, history)` must update the router,
+and `subscribe(listener)` must notify on URL changes and return cleanup. Make
+`getURL()` return the request URL during SSR. The default browser adapter is
+SSR-safe but cannot infer a server request URL. The React-free `readTableState` /
+`writeTableState` helpers remain available for fully application-controlled state.
+
+Links restore **view settings**, not a frozen dataset: rows remain live and each
+viewer is authorized independently. URLs contain filter values and group IDs;
+do not put secrets in them. Rows, editing drafts, focus, scroll position and
+loaded/preloaded row windows are not serialized. The todos demo uses the packaged
+Inertia hook with `urlState: true`; editing and loading/debug controls remain local.
+
 `DataTable.Viewport` and `useTableViewport` accept `prefetchRows` (default `40`).
 This loads more when a pagination marker is within that many flattened items of
 the visible range, including group headers. It is independent of DOM `overscan`

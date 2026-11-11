@@ -179,6 +179,60 @@ export function validateState<C extends Capabilities>(capabilities: C, state: Ta
     }
     if (state.filter !== null) visit(state.filter, 1);
 }
+
+/** Restore a shareable view, falling back to initial state/defaults for invalid or outdated links. */
+export function readTableState<C extends Capabilities>(
+    capabilities: C,
+    search: URLSearchParams,
+    options: { key?: string; initialState?: Partial<TableState<C>> } = {},
+): TableState<C> {
+    const encoded = search.get(options.key ?? 'table.' + capabilities.name);
+    if (encoded !== null) {
+        try {
+            const value = JSON.parse(encoded) as { version: unknown; state: TableState<C> };
+            const state = value.state;
+            if (
+                value.version !== 1 ||
+                !Array.isArray(state.sort) ||
+                !Array.isArray(state.groupBy) ||
+                !Array.isArray(state.expanded) ||
+                state.expanded.some((id) => typeof id !== 'string')
+            )
+                invalid('URL state');
+            validateState(capabilities, state);
+            return { filter: state.filter, sort: state.sort, groupBy: state.groupBy, expanded: state.expanded };
+        } catch {
+            // URLs are untrusted and can outlive the capabilities that produced them.
+        }
+    }
+    const fallback: TableState<C> = {
+        filter: null,
+        sort: capabilities.defaults.sort,
+        groupBy: capabilities.defaults.groupBy,
+        expanded: [],
+        ...options.initialState,
+    };
+    validateState(capabilities, fallback);
+    return structuredClone(fallback);
+}
+
+/** Copy search parameters with this table's view; leave other tables and parameters untouched. */
+export function writeTableState<C extends Capabilities>(
+    capabilities: C,
+    search: URLSearchParams,
+    state: TableState<C>,
+    options: { key?: string } = {},
+): URLSearchParams {
+    validateState(capabilities, state);
+    const next = new URLSearchParams(search);
+    const { filter, sort, groupBy, expanded } = state;
+    next.set(
+        options.key ?? 'table.' + capabilities.name,
+        JSON.stringify({ version: 1, state: { filter, sort, groupBy, expanded } }),
+    );
+    return next;
+}
+
 // One structural bridge for generated native queries; server capabilities remain authoritative.
 interface Expressions {
     cmp(field: string, op: string, value: unknown): unknown;

@@ -22,6 +22,10 @@
             "types": "./dist/react/index.d.ts",
             "import": "./dist/react/index.js"
         },
+        "./inertia": {
+            "types": "./dist/inertia.d.ts",
+            "import": "./dist/inertia.js"
+        },
         "./formbraid": {
             "types": "./dist/formbraid.d.ts",
             "import": "./dist/formbraid.js"
@@ -42,6 +46,7 @@
     "peerDependencies": {
         "@formbraid/core": "^0.3.0",
         "@formbraid/react": "^0.3.0",
+        "@inertiajs/react": "^3.8.0",
         "@nickwelsh/zero-for-laravel": "^0.9.0",
         "@rocicorp/zero": "1.11.3",
         "react": "^18.0.0 || ^19.0.0"
@@ -51,6 +56,9 @@
             "optional": true
         },
         "@formbraid/react": {
+            "optional": true
+        },
+        "@inertiajs/react": {
             "optional": true
         },
         "react": {

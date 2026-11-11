@@ -99,6 +99,10 @@ function useTableContracts() {
     useDataTable(tasks, { columns: [column.text('unknown')] });
     // @ts-expect-error column query associations cannot invent backend capabilities
     useDataTable(tasks, { columns: [column.text('title', { query: { sort: 'done' } })] });
+    useDataTable(tasks, { urlState: true });
+    useDataTable(tasks, { urlState: { key: 'secondary', history: 'push' }, initialState: { groupBy: [] } });
+    // @ts-expect-error URL state and application-controlled state cannot own the same session
+    useDataTable(tasks, { urlState: true, state: table.state, onStateChange: () => {} });
     table.setFilter({ kind: 'condition', field: 'title', operator: 'contains', value: 'alpha' });
     table.setFilter({ kind: 'condition', field: 'completed', operator: 'equals', value: true });
     // @ts-expect-error generated aliases, not database column names

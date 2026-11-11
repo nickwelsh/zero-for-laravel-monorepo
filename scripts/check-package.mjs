@@ -10,8 +10,11 @@ for (const entry of Object.values(manifest.exports)) {
 await access(new URL('LICENSE', root));
 await access(new URL('README.md', root));
 let allowReact = false;
+let allowInertia = false;
 registerHooks({
     resolve(specifier, context, nextResolve) {
+        if (!allowInertia && specifier.startsWith('@inertiajs/'))
+            throw new Error('Generic package entry points must load without Inertia.');
         if (
             !allowReact &&
             (specifier === 'react' || specifier.startsWith('react/') || specifier.startsWith('@tanstack/'))
@@ -47,6 +50,9 @@ if (typeof optionSources.createZeroOptionSource !== 'function') throw new Error(
 const tableForms = await import(new URL('dist/formbraid.js', tableRoot).href);
 if (typeof tableForms.formbraidSubmit !== 'function' || typeof tableForms.RelationEditor !== 'function')
     throw new Error('Missing optional table form bridge.');
+allowInertia = true;
+const tableInertia = await import(new URL('dist/inertia.js', tableRoot).href);
+if (typeof tableInertia.useDataTable !== 'function') throw new Error('Missing packaged Inertia table hook.');
 console.log(
-    'Built exports exist; core and form producers load without React; all bindings load without Formbraid or Effect.',
+    'Built exports exist; core and form producers load without React; generic entries load without Inertia; all bindings load without Formbraid or Effect.',
 );

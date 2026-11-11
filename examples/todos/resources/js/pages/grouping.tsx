@@ -1,6 +1,6 @@
 import { Head } from '@inertiajs/react';
 import { column, editors, type CellChange } from '@nickwelsh/zero-table';
-import { DataTable, useDataTable } from '@nickwelsh/zero-table/react';
+import { DataTable, useDataTable } from '@nickwelsh/zero-table/inertia';
 import { editorFromForm, formbraidSubmit, RelationEditor } from '@nickwelsh/zero-table/formbraid';
 import { ZeroContext } from '@rocicorp/zero/react';
 import { useContext, useRef, useState } from 'react';
@@ -60,6 +60,7 @@ function TodosTable() {
     const [hover, setHover] = useState<false | 'load' | 'preload'>('load');
     const panel = useRef<HTMLDivElement>(null);
     const table = useDataTable(todos, {
+        urlState: true,
         columns,
         preload,
         hover,
@@ -103,6 +104,11 @@ function TodosTable() {
                         <input
                             aria-label="Title filter"
                             className="ml-2 rounded border px-2 py-1"
+                            value={
+                                table.state.filter?.kind === 'condition' && table.state.filter.field === 'title'
+                                    ? String(table.state.filter.value ?? '')
+                                    : ''
+                            }
                             onChange={(event) =>
                                 table.setFilter(
                                     event.target.value
@@ -122,6 +128,7 @@ function TodosTable() {
                         <select
                             aria-label="Order"
                             className="ml-2 rounded border px-2 py-1"
+                            value={table.state.sort[0]?.field ?? 'created_at'}
                             onChange={(event) =>
                                 table.setSort([
                                     {

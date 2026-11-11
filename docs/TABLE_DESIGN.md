@@ -371,9 +371,24 @@ not. Existing ZeroProvider/access boundaries still wrap the table.
 | `useTableCell(table, rowId, columnId)`                            | Current value, editability, draft, errors, submission state, warnings and begin/setDraft/submit/cancel actions                   |
 
 Options allow either `initialState` with internal ownership or controlled `state`
-plus `onStateChange(next)`, not both. `initialState` may be partial. No URL,
-localStorage or cross-tab persistence is implied; applications can control state
-to add those behaviors. Descriptors are shareable, mutable sessions are not.
+plus `onStateChange(next)`, not both. `initialState` may be partial. Internal state
+is memory-only unless `urlState: true` (or `{ key, history, adapter }`) is enabled.
+The package then owns URL restoration, change persistence and Back/Forward
+subscriptions, independent of query-owner mounts. Filters, sorts, grouping and
+expanded IDs use a versioned `table.<name>` parameter; independent instances may
+choose distinct keys. Unrelated parameters, fragments and history state survive.
+Invalid or removed URL state restores the original initial state over descriptor
+defaults. Setters compose synchronously even with asynchronous router commits.
+
+The default adapter uses browser history with replacement, or opt-in push.
+`@nickwelsh/zero-table/inertia` exports the same hook with Inertia client-side
+navigation, pending-write merging across tables, and request-URL SSR restoration.
+The generic React entry does not depend on Inertia. Custom routers may implement
+`TableURLAdapter`; fully controlled applications may use the React-free
+`readTableState` / `writeTableState` helpers. URL ownership and application-controlled
+state are mutually exclusive. Rows stay live and authorized per viewer; links do
+not persist drafts, focus, scroll position or loaded windows. Descriptors are
+shareable, mutable sessions are not.
 
 Loaded render items have a discriminated union, not a union of model rows and
 objects pretending to be model rows:
