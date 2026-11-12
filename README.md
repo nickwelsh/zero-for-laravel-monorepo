@@ -208,6 +208,9 @@ without a server visit, resetting pagination. Route bindings and trusted context
 are not editable. URL/history synchronization is opt-in; see the
 [React guide](apps/docs/content/docs/0.x/docs/react.mdx#editable-live-inputs).
 
+For nested table inputs, multiple controlled sources, PHP-normalized direct
+loads, and browser/Inertia history, see [URL state integration](docs/URL_STATE.md).
+
 For native reads, call `zero.run(index.tasks(input))` or pass that same request to
 Zero's `useQuery`. For the optional decoded-data adapter, call
 `useData(index.tasks.live(input))`. Internal `bindings` consume wire arguments from

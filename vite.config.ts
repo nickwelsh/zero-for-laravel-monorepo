@@ -179,6 +179,9 @@ export default defineConfig({
             '@nickwelsh/zero-for-laravel/react': fileURLToPath(
                 new URL('./packages/client/src/react/index.ts', import.meta.url),
             ),
+            '@nickwelsh/zero-for-laravel/inertia': fileURLToPath(
+                new URL('./packages/client/src/react/inertia.tsx', import.meta.url),
+            ),
             '@nickwelsh/zero-for-laravel': fileURLToPath(new URL('./packages/client/src/index.ts', import.meta.url)),
         },
     },

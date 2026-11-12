@@ -1,8 +1,22 @@
-export interface TableURLAdapter {
-    /** Current URL, including any writes not yet committed by an asynchronous router. Must be SSR-safe. */
-    getURL(): string;
-    subscribe(listener: () => void): () => void;
-    navigate(url: string, history: 'replace' | 'push'): void;
+import type { URLStateAdapter, URLStateCodec } from '@nickwelsh/zero-for-laravel/react';
+import { readTableState, writeTableState, type Capabilities, type TableState } from '../index';
+export type TableURLAdapter = URLStateAdapter;
+
+export function tableStateCodec<C extends Capabilities>(
+    capabilities: C,
+    options: { key?: string; initialState?: Partial<TableState<C>> } = {},
+): URLStateCodec<TableState<C>> {
+    return {
+        read: (search) => readTableState(capabilities, search, options),
+        write: (search, state) => writeTableState(capabilities, search, state, options),
+        reset(search) {
+            const next = new URLSearchParams(search);
+            const key = options.key ?? 'table.' + capabilities.name;
+            // oxlint-disable-next-line unicorn/no-useless-spread -- Deleting during live iteration skips adjacent keys.
+            for (const name of [...next.keys()]) if (name === key || name.startsWith(key + '[')) next.delete(name);
+            return next;
+        },
+    };
 }
 
 export interface TableURLStateOptions {
@@ -15,14 +29,16 @@ export interface TableURLStateOptions {
 }
 
 const changed = 'zero-table:url-state';
-const browserAdapter: TableURLAdapter = {
+export const browserURLAdapter: TableURLAdapter = {
     getURL: () => (typeof window === 'undefined' ? '/' : window.location.href),
     subscribe(listener) {
-        window.addEventListener('popstate', listener);
-        window.addEventListener(changed, listener);
+        const restore = () => listener('restore');
+        const write = () => listener('write');
+        window.addEventListener('popstate', restore);
+        window.addEventListener(changed, write);
         return () => {
-            window.removeEventListener('popstate', listener);
-            window.removeEventListener(changed, listener);
+            window.removeEventListener('popstate', restore);
+            window.removeEventListener(changed, write);
         };
     },
     navigate(url, history) {
@@ -33,5 +49,5 @@ const browserAdapter: TableURLAdapter = {
 
 export function tableURLState(value: boolean | TableURLStateOptions | undefined) {
     const options = typeof value === 'object' ? value : {};
-    return { ...options, adapter: options.adapter ?? browserAdapter };
+    return { ...options, adapter: options.adapter ?? browserURLAdapter };
 }

@@ -1,4 +1,6 @@
 import { router } from '@inertiajs/react';
+import { inertiaURLAdapter, inertiaURLVisit } from './inertia-url';
+export { inertiaURLAdapter } from './inertia-url';
 import {
     createContext,
     createElement,
@@ -247,21 +249,15 @@ function loading(selection: Pick<ReadSelection, 'one'>): Data<unknown> {
 export function createInertiaAdapter(factories: BindingFactories, options: InertiaInputOptions = {}) {
     const navigation = createNavigationLink(factories, options.navigation ?? []);
     let current: TransportPage | undefined;
-    let pendingURL: URL | undefined;
-    const pendingURLs = new Set<string>();
     const wrappers = new WeakMap<object, unknown>();
     const dispose =
         typeof window === 'undefined'
             ? []
             : [
+                  inertiaURLAdapter.subscribe(noop),
                   router.on('beforeUpdate', ({ detail }) => normalizePage(detail.page, current)),
                   router.on('navigate', ({ detail }) => {
                       current = detail.page;
-                      const url = new URL(detail.page.url, window.location.href).href;
-                      if (!pendingURLs.has(url) || pendingURL?.href === url) {
-                          pendingURL = undefined;
-                          pendingURLs.clear();
-                      } else pendingURLs.delete(url);
                   }),
               ];
     return {
@@ -313,7 +309,7 @@ export function createInertiaAdapter(factories: BindingFactories, options: Inert
                     const synchronize = (args: Record<string, unknown>, values: object) => {
                         const fields = options.url?.[current?.component ?? page?.component ?? '']?.[prop];
                         if (!fields) return false;
-                        const url = new URL(pendingURL ?? window.location.href);
+                        const url = new URL(inertiaURLAdapter.getURL());
                         const input = object(values, 'inputs');
                         for (const [field, parameter] of Object.entries(fields)) {
                             const value = input[field];
@@ -349,10 +345,7 @@ export function createInertiaAdapter(factories: BindingFactories, options: Inert
                                 };
                             },
                         };
-                        pendingURL = url;
-                        pendingURLs.add(url.href);
-                        if (options.history === 'push') router.push(visit);
-                        else router.replace(visit);
+                        inertiaURLVisit(visit, options.history ?? 'replace');
                         return true;
                     };
                     return (

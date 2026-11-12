@@ -20,6 +20,7 @@ export default defineConfig({
                 '@tanstack/react-virtual',
                 '@nickwelsh/zero-for-laravel',
                 '@nickwelsh/zero-for-laravel/react',
+                '@nickwelsh/zero-for-laravel/inertia',
                 '@rocicorp/zero',
                 '@rocicorp/zero/react',
                 'react',

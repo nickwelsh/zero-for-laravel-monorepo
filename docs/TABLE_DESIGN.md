@@ -380,6 +380,9 @@ choose distinct keys. Unrelated parameters, fragments and history state survive.
 Invalid or removed URL state restores the original initial state over descriptor
 defaults. Setters compose synchronously even with asynchronous router commits.
 
+For PHP-normalized direct loads, page-level controlled state, saved-default
+precedence, debounced search, and multiple sources, see [URL state integration](URL_STATE.md).
+
 The default adapter uses browser history with replacement, or opt-in push.
 `@nickwelsh/zero-table/inertia` exports the same hook with Inertia client-side
 navigation, pending-write merging across tables, and request-URL SSR restoration.

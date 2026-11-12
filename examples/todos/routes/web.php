@@ -4,6 +4,7 @@ use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\ShareListController;
 use App\Http\Controllers\TodoController;
 use App\Http\Controllers\TodoListController;
+use App\Http\Controllers\URLStateController;
 use Illuminate\Support\Facades\Route;
 
 Route::inertia('/', 'welcome')->name('home');
@@ -13,6 +14,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::delete('lists/{list}/share', [ShareListController::class, 'destroy'])->name('lists.unshare');
     Route::get('dashboard', [DashboardController::class, 'index'])->name('dashboard');
     Route::inertia('grouping', 'grouping')->name('grouping');
+    Route::get('url-state', URLStateController::class)->name('url-state');
     Route::get('lists/{list}', [TodoListController::class, 'show'])->name('lists.show');
     Route::post('lists', [TodoListController::class, 'store'])->name('lists.store');
     Route::patch('lists/{list}', [TodoListController::class, 'update'])->name('lists.update');

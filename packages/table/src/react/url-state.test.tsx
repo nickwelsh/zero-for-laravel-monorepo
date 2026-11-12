@@ -7,19 +7,24 @@ import tasks from '../../../../tests/interop/table.generated';
 import { groupId, readTableState, writeTableState, type TableState } from '../index';
 import { useDataTable } from './index';
 import { useDataTable as useInertiaDataTable } from '../inertia';
+import { createPageURLState, usePageURLState } from '../../../client/src/react/url-state';
+import { inertiaURLAdapter } from '../../../client/src/react/inertia-url';
+import { browserURLAdapter, tableStateCodec } from './url-state';
 
 const inertia = vi.hoisted(() => ({
     pageURL: '/tasks',
-    events: new Map<string, Set<(event: { detail: { page: { url: string } } }) => void>>(),
-    writes: [] as { url: string; history: 'replace' | 'push' }[],
+    events: new Map<string, Set<(event: { detail: { page: { url: string }; visitId?: string } }) => void>>(),
+    writes: [] as { url: string; history: 'replace' | 'push'; finish: () => void }[],
     zero: { context: { user_id: 'alice' } },
 }));
 vi.mock('@nickwelsh/zero-for-laravel/react', () => ({ useZero: () => inertia.zero, useData: vi.fn() }));
 vi.mock('@inertiajs/react', () => ({
     usePage: () => ({ url: inertia.pageURL }),
     router: {
-        replace: ({ url }: { url: string }) => inertia.writes.push({ url, history: 'replace' }),
-        push: ({ url }: { url: string }) => inertia.writes.push({ url, history: 'push' }),
+        replace: (visit: { url: string; onFinish?: (visit: unknown) => void }) =>
+            inertia.writes.push({ url: visit.url, history: 'replace', finish: () => visit.onFinish?.(visit) }),
+        push: (visit: { url: string; onFinish?: (visit: unknown) => void }) =>
+            inertia.writes.push({ url: visit.url, history: 'push', finish: () => visit.onFinish?.(visit) }),
         on: (name: string, callback: (event: { detail: { page: { url: string } } }) => void) => {
             const listeners = inertia.events.get(name) ?? new Set();
             inertia.events.set(name, listeners);
@@ -155,13 +160,14 @@ it('merges pending Inertia writes across tables and ignores intermediate router 
     const second = view.result.current[1]!.state;
     expect(first).toEqual({ filter, sort: capabilities.defaults.sort, groupBy: ['done'], expanded: [] });
     expect(second).toEqual({ filter: null, sort, groupBy: capabilities.defaults.groupBy, expanded: [] });
-    for (const write of inertia.writes) {
+    for (const [index, write] of inertia.writes.entries()) {
         act(() => {
             window.history[write.history === 'push' ? 'pushState' : 'replaceState']({}, '', write.url);
             inertia.pageURL = write.url;
             inertia.events
                 .get('clientVisit')
-                ?.forEach((callback) => callback({ detail: { page: { url: write.url } } }));
+                ?.forEach((callback) => callback({ detail: { page: { url: write.url }, visitId: String(index) } }));
+            write.finish();
         });
         expect(view.result.current[0]!.state).toEqual(first);
         expect(view.result.current[1]!.state).toEqual(second);
@@ -187,4 +193,177 @@ it('restores Inertia URL state during SSR without accessing browser globals', ()
         return <output>{table.state.filter?.kind === 'condition' ? table.state.filter.value : 'missing'}</output>;
     }
     expect(renderToString(<ServerTable />)).toBe('<output>R&amp;D + café</output>');
+});
+
+it('coordinates two controlled sources, debounced writes, defaults and history restoration', async () => {
+    const page = createPageURLState(browserURLAdapter, {
+        people: tableStateCodec(capabilities, { key: 'table.people', initialState }),
+        companies: tableStateCodec(capabilities, { key: 'table.companies', initialState: { groupBy: ['done'] } }),
+    });
+    const view = renderHook(() => {
+        const state = usePageURLState(page);
+        return {
+            people: useDataTable(tasks, { state: state.people, onStateChange: (next) => page.set('people', next) }),
+            companies: useDataTable(tasks, {
+                state: state.companies,
+                onStateChange: (next) => page.set('companies', next, { history: 'push' }),
+            }),
+        };
+    });
+    vi.useFakeTimers();
+    act(() => {
+        page.set('people', (previous) => ({ ...previous, filter }), { debounceMs: 250 });
+        page.set('companies', (previous) => ({ ...previous, sort }), { history: 'push' });
+    });
+    expect(view.result.current.people.state.filter).toEqual(filter);
+    expect(view.result.current.companies.state.sort).toEqual(sort);
+    expect(new URL(window.location.href).searchParams.has('table.people')).toBe(false);
+    act(() => {
+        vi.advanceTimersByTime(250);
+    });
+    expect(
+        readTableState(capabilities, new URL(window.location.href).searchParams, { key: 'table.people' }).filter,
+    ).toEqual(filter);
+    expect(view.result.current.companies.state.sort).toEqual(sort);
+    act(() => page.reset('people', 'push'));
+    expect(view.result.current.people.state).toEqual(initialState);
+    expect(view.result.current.companies.state.sort).toEqual(sort);
+    expect(new URL(window.location.href).searchParams.get('other')).toBe('keep');
+    vi.useRealTimers();
+    await act(async () => {
+        const moved = new Promise<void>((resolve) =>
+            window.addEventListener('popstate', () => resolve(), { once: true }),
+        );
+        window.history.back();
+        await moved;
+    });
+    expect(view.result.current.people.state.filter).toEqual(filter);
+    await act(async () => {
+        const moved = new Promise<void>((resolve) =>
+            window.addEventListener('popstate', () => resolve(), { once: true }),
+        );
+        window.history.forward();
+        await moved;
+    });
+    expect(view.result.current.people.state).toEqual(initialState);
+    vi.useFakeTimers();
+    act(() => page.set('people', (previous) => ({ ...previous, filter }), { debounceMs: 250 }));
+    act(() => {
+        window.history.replaceState({}, '', '/tasks?other=restored');
+        window.dispatchEvent(new PopStateEvent('popstate'));
+        vi.advanceTimersByTime(300);
+    });
+    expect(view.result.current.people.state).toEqual(initialState);
+    expect(view.result.current.companies.state.groupBy).toEqual(['done']);
+    expect(window.location.search).toBe('?other=restored');
+    vi.useRealTimers();
+});
+
+it('composes a page coordinator with independent Inertia table writes before router acknowledgement', () => {
+    const page = createPageURLState(inertiaURLAdapter, { people: tableStateCodec(capabilities, { key: 'people' }) });
+    const view = renderHook(() => {
+        const state = usePageURLState(page);
+        return { state, second: useInertiaDataTable(tasks, { urlState: { key: 'second' } }) };
+    });
+    act(() => {
+        page.set('people', (previous) => ({ ...previous, filter }), { history: 'push' });
+        view.result.current.second.setSort(sort);
+    });
+    const last = inertia.writes.at(-1)!;
+    expect(last.history).toBe('replace');
+    expect(
+        readTableState(capabilities, new URL(last.url, window.location.href).searchParams, { key: 'people' }).filter,
+    ).toEqual(filter);
+    expect(view.result.current.state.people.filter).toEqual(filter);
+    expect(view.result.current.second.state.sort).toEqual(sort);
+});
+
+it('uses PHP initial inputs only for their request URL, not stale props remounted by Inertia history', () => {
+    const codecs = { people: tableStateCodec(capabilities, { key: 'people', initialState }) };
+    const initial = { url: '/tasks?other=keep', state: { people: { ...initialState, filter } } };
+    const direct = createPageURLState(browserURLAdapter, codecs, initial);
+    expect(direct.getSnapshot().people.filter).toEqual(filter);
+    const search = writeTableState(capabilities, new URLSearchParams(), { ...initialState, sort }, { key: 'people' });
+    window.history.replaceState({}, '', '/tasks?' + search.toString());
+    const restored = createPageURLState(browserURLAdapter, codecs, initial);
+    expect(restored.getSnapshot().people).toEqual({ ...initialState, sort });
+});
+
+it.each(['browser', 'inertia'] as const)('preserves a debounced search across unrelated %s writes', (kind) => {
+    vi.useFakeTimers();
+    try {
+        const adapter = kind === 'browser' ? browserURLAdapter : inertiaURLAdapter;
+        const page = createPageURLState(adapter, { people: tableStateCodec(capabilities, { key: 'people' }) });
+        const view = renderHook(() => usePageURLState(page));
+        act(() => page.set('people', (previous) => ({ ...previous, filter }), { debounceMs: 250 }));
+        act(() => adapter.navigate('/tasks?other=changed#rows', 'push'));
+        expect(view.result.current.people.filter).toEqual(filter);
+        act(() => {
+            vi.advanceTimersByTime(250);
+        });
+        const search = new URL(adapter.getURL()).searchParams;
+        expect(readTableState(capabilities, search, { key: 'people' }).filter).toEqual(filter);
+        expect(search.get('other')).toBe('changed');
+        expect(new URL(adapter.getURL()).hash).toBe('#rows');
+        const restoredURL = adapter.getURL();
+        act(() => {
+            page.set('people', (previous) => ({ ...previous, filter: null }), { debounceMs: 250 });
+            window.history.replaceState({}, '', restoredURL);
+            if (kind === 'browser') window.dispatchEvent(new PopStateEvent('popstate'));
+            else
+                inertia.events
+                    .get('navigate')
+                    ?.forEach((callback) => callback({ detail: { page: { url: restoredURL } } }));
+            vi.advanceTimersByTime(300);
+        });
+        expect(view.result.current.people.filter).toEqual(filter);
+        expect(adapter.getURL()).toBe(restoredURL);
+        view.unmount();
+    } finally {
+        vi.useRealTimers();
+    }
+});
+
+it('keeps the latest repeated Inertia URL and pending search through every queued acknowledgement', () => {
+    vi.useFakeTimers();
+    try {
+        const page = createPageURLState(inertiaURLAdapter, {
+            people: tableStateCodec(capabilities, { key: 'people', initialState }),
+        });
+        const view = renderHook(() => usePageURLState(page));
+        act(() => {
+            page.set('people', { ...initialState, sort }, { history: 'push' });
+            page.set('people', initialState);
+            page.set('people', { ...initialState, sort }, { history: 'push' });
+            page.set('people', (previous) => ({ ...previous, filter }), { debounceMs: 250 });
+        });
+        const latestURL = inertiaURLAdapter.getURL();
+        for (const [index, write] of [...inertia.writes].entries()) {
+            act(() => {
+                window.history.replaceState({}, '', write.url);
+                const event = { detail: { page: { url: write.url }, visitId: String(index) } };
+                if (write.history === 'push') inertia.events.get('navigate')?.forEach((callback) => callback(event));
+                inertia.events.get('clientVisit')?.forEach((callback) => callback(event));
+                write.finish();
+            });
+            expect(inertiaURLAdapter.getURL()).toBe(latestURL);
+            expect(view.result.current.people).toEqual({ ...initialState, sort, filter });
+        }
+        act(() => {
+            vi.advanceTimersByTime(250);
+        });
+        expect(
+            readTableState(capabilities, new URL(inertiaURLAdapter.getURL()).searchParams, { key: 'people' }),
+        ).toEqual({ ...initialState, sort, filter });
+        // A real history restoration also discards an outstanding URL write.
+        act(() => {
+            window.history.replaceState({}, '', latestURL);
+            inertia.events.get('navigate')?.forEach((callback) => callback({ detail: { page: { url: latestURL } } }));
+            vi.advanceTimersByTime(250);
+        });
+        expect(view.result.current.people).toEqual({ ...initialState, sort });
+        view.unmount();
+    } finally {
+        vi.useRealTimers();
+    }
 });

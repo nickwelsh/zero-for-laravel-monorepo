@@ -121,6 +121,9 @@ export function queryKey(input: unknown): string {
 function invalid(message: string): never {
     throw new Error('Invalid table state: ' + message);
 }
+function keys(value: object, allowed: readonly string[]): void {
+    if (Object.keys(value).some((key) => !allowed.includes(key))) invalid('unknown field');
+}
 function scalar(value: unknown, column: Column): void {
     if (
         value === null
@@ -131,6 +134,13 @@ function scalar(value: unknown, column: Column): void {
     if (value !== null && column.enum && !column.enum.includes(value as string | number)) invalid('enum value');
 }
 export function validateState<C extends Capabilities>(capabilities: C, state: TableState<C>): void {
+    if (!Array.isArray(state.sort) || !Array.isArray(state.groupBy) || !Array.isArray(state.expanded))
+        invalid('state lists');
+    if (
+        state.expanded.length > 100 ||
+        state.expanded.some((id) => typeof id !== 'string' || new TextEncoder().encode(id).length > 2048)
+    )
+        invalid('expanded groups');
     if (
         state.groupBy.length > capabilities.maxGroupDepth ||
         new Set(state.groupBy).size !== state.groupBy.length ||
@@ -142,16 +152,18 @@ export function validateState<C extends Capabilities>(capabilities: C, state: Ta
         state.sort.some((sort) => !capabilities.sorts.includes(sort.field) || !['asc', 'desc'].includes(sort.direction))
     )
         invalid('sort');
+    state.sort.forEach((sort) => keys(sort, ['field', 'direction']));
     let terms = 0;
     function visit(node: FilterNode<C>, depth: number): void {
         if (++terms > 100 || depth > 8) invalid('filter complexity');
+        keys(node, node.kind === 'condition' ? ['kind', 'field', 'operator', 'value'] : ['kind', 'children']);
         if (node.kind !== 'condition') {
             if (!['and', 'or'].includes(node.kind) || !Array.isArray(node.children) || !node.children.length)
                 invalid('filter group');
             node.children.forEach((child) => visit(child, depth + 1));
             return;
         }
-        const filter = capabilities.filters[node.field];
+        const filter = Object.hasOwn(capabilities.filters, node.field) ? capabilities.filters[node.field] : undefined;
         if (!filter || !filter.operators.includes(node.operator)) invalid('filter capability');
         if (node.operator === 'isNull' || node.operator === 'isNotNull') {
             if ('value' in node) invalid('null operation');
@@ -168,6 +180,10 @@ export function validateState<C extends Capabilities>(capabilities: C, state: Ta
                     !Number.isFinite(Date.parse(value))
                 )
                     invalid('date offset');
+                const [year, month, day] = value.slice(0, 10).split('-').map(Number);
+                const calendar = new Date(0);
+                calendar.setUTCFullYear(year!, month! - 1, day);
+                if (calendar.getUTCMonth() !== month! - 1 || calendar.getUTCDate() !== day) invalid('date calendar');
             } else scalar(value, filter.column);
             if (
                 typeof value === 'string' &&
@@ -186,34 +202,41 @@ export function readTableState<C extends Capabilities>(
     search: URLSearchParams,
     options: { key?: string; initialState?: Partial<TableState<C>> } = {},
 ): TableState<C> {
-    const encoded = search.get(options.key ?? 'table.' + capabilities.name);
+    const fallback = normalizeTableState(capabilities, options.initialState ?? {});
+    const key = options.key ?? 'table.' + capabilities.name;
+    const encoded = search.get(key);
     if (encoded !== null) {
         try {
-            const value = JSON.parse(encoded) as { version: unknown; state: TableState<C> };
-            const state = value.state;
-            if (
-                value.version !== 1 ||
-                !Array.isArray(state.sort) ||
-                !Array.isArray(state.groupBy) ||
-                !Array.isArray(state.expanded) ||
-                state.expanded.some((id) => typeof id !== 'string')
-            )
+            if (search.getAll(key).length !== 1 || [...search.keys()].some((name) => name.startsWith(key + '[')))
+                invalid('ambiguous URL');
+            if (new TextEncoder().encode(encoded).length > 16384) invalid('URL size');
+            const value = JSON.parse(encoded) as { version: unknown; state: Partial<TableState<C>> };
+            keys(value, ['version', 'state']);
+            if (value.version !== 1 || !value.state || Array.isArray(value.state) || typeof value.state !== 'object')
                 invalid('URL state');
-            validateState(capabilities, state);
-            return { filter: state.filter, sort: state.sort, groupBy: state.groupBy, expanded: state.expanded };
+            return normalizeTableState(capabilities, { ...fallback, ...value.state });
         } catch {
             // URLs are untrusted and can outlive the capabilities that produced them.
         }
     }
-    const fallback: TableState<C> = {
+    return fallback;
+}
+
+/** Shallow precedence: descriptor defaults, application/saved defaults, explicit fields (including null/[]). */
+export function normalizeTableState<C extends Capabilities>(
+    capabilities: C,
+    overrides: Partial<TableState<C>> = {},
+): TableState<C> {
+    keys(overrides, ['filter', 'sort', 'groupBy', 'expanded']);
+    const state: TableState<C> = {
         filter: null,
         sort: capabilities.defaults.sort,
         groupBy: capabilities.defaults.groupBy,
         expanded: [],
-        ...options.initialState,
+        ...overrides,
     };
-    validateState(capabilities, fallback);
-    return structuredClone(fallback);
+    validateState(capabilities, state);
+    return structuredClone(state);
 }
 
 /** Copy search parameters with this table's view; leave other tables and parameters untouched. */
@@ -223,13 +246,16 @@ export function writeTableState<C extends Capabilities>(
     state: TableState<C>,
     options: { key?: string } = {},
 ): URLSearchParams {
+    keys(state, ['filter', 'sort', 'groupBy', 'expanded']);
     validateState(capabilities, state);
     const next = new URLSearchParams(search);
     const { filter, sort, groupBy, expanded } = state;
-    next.set(
-        options.key ?? 'table.' + capabilities.name,
-        JSON.stringify({ version: 1, state: { filter, sort, groupBy, expanded } }),
-    );
+    const encoded = JSON.stringify({ version: 1, state: { filter, sort, groupBy, expanded } });
+    if (new TextEncoder().encode(encoded).length > 16384) invalid('URL size');
+    const key = options.key ?? 'table.' + capabilities.name;
+    // oxlint-disable-next-line unicorn/no-useless-spread -- Snapshot before deleting bracket variants.
+    for (const name of [...next.keys()]) if (name.startsWith(key + '[')) next.delete(name);
+    next.set(key, encoded);
     return next;
 }
 

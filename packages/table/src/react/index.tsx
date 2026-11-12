@@ -4,6 +4,7 @@ import { useData, useZero, type Data } from '@nickwelsh/zero-for-laravel/react';
 import { readTableMetadata } from './metadata';
 import { tableURLState, type TableURLAdapter, type TableURLStateOptions } from './url-state';
 export type { TableURLAdapter, TableURLStateOptions } from './url-state';
+export { tableStateCodec, browserURLAdapter } from './url-state';
 import { SessionContext, Viewport, Group, Row } from './viewport';
 import { Cell, EditingStatus } from './cell';
 export { useTableCell } from './cell';

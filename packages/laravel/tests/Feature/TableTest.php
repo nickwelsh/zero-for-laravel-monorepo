@@ -20,6 +20,7 @@ use ZeroForLaravel\ResolvedContext;
 use ZeroForLaravel\Tables\AllowedFilter;
 use ZeroForLaravel\Tables\AllowedGroup;
 use ZeroForLaravel\Tables\Table;
+use ZeroForLaravel\Tables\TableURLState;
 use ZeroForLaravel\Tests\Fixtures\Comment;
 use ZeroForLaravel\Tests\Fixtures\Tag;
 use ZeroForLaravel\Tests\Fixtures\Task;
@@ -115,6 +116,25 @@ test('table capabilities reject malformed or broadened query input', function ()
     expect(fn (): Table => Table::for(Task::class)->allowedFilters([AllowedFilter::number('title')]))->toThrow(InvalidArgumentException::class);
     expect(fn (): Table => Table::for(Task::class)->allowedFilters([AllowedFilter::exact('done')->nullable()]))->toThrow(InvalidArgumentException::class);
     expect(fn (): Table => Table::for(Task::class)->allowedGroups([AllowedGroup::belongsTo('tags')->label('name')]))->toThrow(InvalidArgumentException::class);
+});
+
+test('URL views normalize independent namespaces without changing mandatory membership', function (): void {
+    $table = taskTable();
+    $sort = [['field' => 'rating', 'direction' => 'desc'], ['field' => 'title', 'direction' => 'asc']];
+    $encoded = TableURLState::encode($table, ['filter' => null, 'sort' => $sort, 'groupBy' => [], 'expanded' => ['g:[{"field":"done","value":false}]']]);
+    $query = 'other=keep&table.people='.urlencode($encoded).'&table.companies='.urlencode('{"version":1,"state":{"sort":[]}}');
+    $people = TableURLState::read($table, $query, 'table.people');
+    $companies = TableURLState::read($table, $query, 'table.companies', ['groupBy' => []]);
+    expect($people['sort'])->toBe($sort)
+        ->and($people['expanded'])->toBe(['g:[{"field":"done","value":false}]'])
+        ->and($companies['sort'])->toBe([])
+        ->and($companies['groupBy'])->toBe([]);
+    $context = new ResolvedContext(['user_id' => 'alice'], 'alice');
+    expect($table->sql($context, $people['filter'])->count())->toBe(3);
+    $fallback = TableURLState::normalize($table, ['groupBy' => []]);
+    foreach (['table.people=null', 'table.people='.urlencode($encoded).'&table.people=other', 'table.people='.urlencode('{"version":1,"state":{"tenant":"bob"}}')] as $invalid) {
+        expect(TableURLState::read($table, $invalid, 'table.people', ['groupBy' => []]))->toBe($fallback);
+    }
 });
 
 test('nullable filter operations do not depend on declaration order and unsupported scopes fail explicitly', function (): void {
