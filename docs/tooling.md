@@ -14,7 +14,7 @@ Use PHP **8.5** for development across both Composer projects. The library suppo
 PHP 8.3+ and Laravel 12/13, with its Composer platform pinned to PHP 8.3. The example
 requires PHP 8.4.1+ and Pest 5. Use Node 22.18+ on the 22.x line or 24.11+, the
 `packageManager` version of pnpm (**11.24.0**), and the locked TypeScript 7 toolchain.
-Pin Zero client and cache to **1.11.3**.
+Pin Zero client and cache to **1.11.4**.
 
 From the repository root:
 
@@ -153,7 +153,7 @@ both package tarballs and test their imports/types in a clean consumer outside
 the workspace, with and without optional Formbraid packages.
 Push the tested `main` commit and matching annotated `v<version>`
 tag, then publish a GitHub Release for that tag. For this release the version is
-**0.9.0** for all packages and the tag is **v0.9.0**. Stable releases use `latest`; prerelease versions must
+**0.10.0** for all packages and the tag is **v0.10.0**. Stable releases use `latest`; prerelease versions must
 be marked as GitHub prereleases and use `next`.
 
 `Publish npm` runs reusable CI, verifies the tag/version, and calls

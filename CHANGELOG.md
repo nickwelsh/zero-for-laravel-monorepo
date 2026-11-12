@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.10.0] - 2026-11-12
+
+- Discover standalone query classes without routes. Public methods returning
+  `ZeroQuery` generate callable native queries and `.live()` selections, with
+  their own FormRequest validation and authorization on the existing transport.
+  Standalone reads do not inherit page middleware or route model binding.
+- Add first-class table URL state for filters, sorting, grouping, and expansion,
+  with native history and optional Inertia support. Share validated state between
+  PHP and TypeScript and coordinate independent page-level URL sources with
+  debounced history updates. Include a two-source example and regression coverage.
+- Update Zero client/cache compatibility to **1.11.4**, align Vite+ tooling, and
+  isolate asynchronous hook progress. Refresh dependencies and docs-base **1.1.0**.
+
+Upgrade `nickwelsh/zero-for-laravel`, `@nickwelsh/zero-for-laravel`, and the optional
+`@nickwelsh/zero-table` together to **0.10.0**, then regenerate and deploy PHP and
+TypeScript contracts together. Upgrade Zero client and cache together to
+**1.11.4**; optional Formbraid packages remain on **^0.3.0**. URL state is opt-in.
+
 ## [0.9.0] - 2026-11-10
 
 - Discover participating models and table definitions in the application's
@@ -132,6 +150,7 @@ Deploy generated PHP and TypeScript contracts together. Supported targets are PH
 8.3+, Laravel 12/13, PostgreSQL 15+, and React 18/19. Automatic live pages require
 Inertia Laravel 3 and `@inertiajs/react` ^3.8.0.
 
+[0.10.0]: https://github.com/nickwelsh/zero-for-laravel-monorepo/releases/tag/v0.10.0
 [0.9.0]: https://github.com/nickwelsh/zero-for-laravel-monorepo/releases/tag/v0.9.0
 [0.8.0]: https://github.com/nickwelsh/zero-for-laravel-monorepo/releases/tag/v0.8.0
 [0.7.0]: https://github.com/nickwelsh/zero-for-laravel-monorepo/releases/tag/v0.7.0

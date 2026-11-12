@@ -1,6 +1,6 @@
 {
     "name": "@nickwelsh/zero-table",
-    "version": "0.9.0",
+    "version": "0.10.0",
     "description": "Headless live Zero tables with snapshot groups and Laravel capabilities.",
     "license": "MIT",
     "repository": {
@@ -47,7 +47,7 @@
         "@formbraid/core": "^0.3.0",
         "@formbraid/react": "^0.3.0",
         "@inertiajs/react": "^3.8.0",
-        "@nickwelsh/zero-for-laravel": "^0.9.0",
+        "@nickwelsh/zero-for-laravel": "^0.10.0",
         "@rocicorp/zero": "1.11.4",
         "react": "^18.0.0 || ^19.0.0"
     },

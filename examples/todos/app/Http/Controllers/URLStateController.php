@@ -22,7 +22,7 @@ class URLStateController extends Controller
         $initialInputs = [];
         foreach ($defaults as $key => $state) {
             $defaults[$key] = TableURLState::normalize($table, $state);
-            $initialInputs[$key] = TableURLState::read($table, $request->server('QUERY_STRING', ''), 'table.'.$key, $state);
+            $initialInputs[$key] = TableURLState::read($table, $request->server->getString('QUERY_STRING'), 'table.'.$key, $state);
         }
 
         return Inertia::render('url-state', ['initialInputs' => $initialInputs, 'initialURL' => $request->getRequestUri(), 'defaults' => $defaults]);

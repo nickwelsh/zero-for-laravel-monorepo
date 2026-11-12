@@ -1,7 +1,7 @@
 # @nickwelsh/zero-for-laravel
 
 Controller-first Laravel queries and mutations on native Rocicorp Zero **1.11.4**.
-Use **v0.9.0** with the matching `nickwelsh/zero-for-laravel` Composer package.
+Use **v0.10.0** with the matching `nickwelsh/zero-for-laravel` Composer package.
 Generate and deploy the PHP and TypeScript contracts together. React and Inertia are optional peers;
 the `/inertia` adapter requires Inertia 3 and `@inertiajs/react` ^3.8.0.
 
