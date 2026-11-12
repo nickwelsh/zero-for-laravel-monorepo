@@ -42,6 +42,11 @@ if ((${#missing[@]})); then
         echo 'deb [signed-by=/usr/share/keyrings/debsuryorg-archive-keyring.gpg] https://packages.sury.org/php/ bookworm main' |
             sudo tee /etc/apt/sources.list.d/php.list > /dev/null
     fi
+    # Debian otherwise initializes an unused system cluster during installation.
+    # The orb owns a separate cluster below, supervised by .amp/services.yaml.
+    sudo install -d /etc/postgresql-common/createcluster.d
+    echo 'create_main_cluster = false' |
+        sudo tee /etc/postgresql-common/createcluster.d/99-amp-orb.conf > /dev/null
     step sudo apt-get update -qq
     step sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "${missing[@]}"
 fi

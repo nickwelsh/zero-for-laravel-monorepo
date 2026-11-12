@@ -28,7 +28,7 @@ export default defineConfig({
         }),
         tailwindcss(),
         wayfinder({
-            command: 'php artisan zero:generate --react && php artisan wayfinder:generate',
+            // The Formbraid integration above owns Zero contract generation.
             patterns: ['routes/**/*.php', 'app/**/*.php', 'config/wayfinder.php'],
         }),
     ]),

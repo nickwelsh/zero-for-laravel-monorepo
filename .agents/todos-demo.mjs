@@ -45,6 +45,9 @@ Object.assign(process.env, JSON.parse(readFileSync(credentials, 'utf8')), {
 });
 
 async function run(command, args) {
+    const started = performance.now();
+    const preparing = process.argv[2] === 'prepare';
+    if (preparing) console.log(`\n==> ${command} ${args.join(' ')}`);
     const child = spawn(command, args, { stdio: 'inherit' });
     const forward = (signal) => child.kill(signal);
     process.on('SIGTERM', forward);
@@ -57,6 +60,10 @@ async function run(command, args) {
                 else reject(new Error(`${command} exited with ${signal ?? code}`));
             });
         });
+        if (preparing) console.log(`==> Finished in ${((performance.now() - started) / 1000).toFixed(1)}s`);
+    } catch (error) {
+        if (preparing) console.error(`==> Failed in ${((performance.now() - started) / 1000).toFixed(1)}s`);
+        throw error;
     } finally {
         process.off('SIGTERM', forward);
         process.off('SIGINT', forward);
