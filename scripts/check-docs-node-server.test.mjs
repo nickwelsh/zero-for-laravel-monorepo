@@ -41,7 +41,7 @@ async function startServer(t, app) {
         });
 }
 
-test('the docs lockfile keeps every Node adapter at the patched baseline', () => {
+await test('the docs lockfile keeps every Node adapter at the patched baseline', () => {
     const lock = parse(readFileSync(new URL('../pnpm-lock.yaml', import.meta.url), 'utf8'));
     const versions = Object.keys(lock.packages).filter((name) => name.startsWith('@hono/node-server@'));
     assert.ok(versions.length > 0, 'expected the Waku Node adapter in the lockfile');
@@ -53,7 +53,7 @@ test('the docs lockfile keeps every Node adapter at the patched baseline', () =>
     }
 });
 
-test('the docs Node adapter rejects raw backslashes instead of rewriting protected paths', async (t) => {
+await test('the docs Node adapter rejects raw backslashes instead of rewriting protected paths', async (t) => {
     const app = new Hono();
     app.get('/admin/secret', (c) => c.text('protected fixture'));
     const get = await startServer(t, app);
@@ -62,7 +62,7 @@ test('the docs Node adapter rejects raw backslashes instead of rewriting protect
     assert.equal((await get('/public\\..\\admin/secret')).status, 400);
 });
 
-test('allowPercentInPath cannot decode around static-path middleware', async (t) => {
+await test('allowPercentInPath cannot decode around static-path middleware', async (t) => {
     const root = await mkdtemp(join(tmpdir(), 'zero-docs-node-adapter-'));
     t.after(() => rm(root, { recursive: true, force: true }));
     await mkdir(join(root, 'static/admin'), { recursive: true });
