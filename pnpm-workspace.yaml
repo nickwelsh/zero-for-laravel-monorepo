@@ -4,7 +4,7 @@ packages:
   - examples/*
 minimumReleaseAgeExclude:
   - '@rocicorp/zero@1.11.4'
-  - '@nickwelsh/docs-base@1.0.2'
+  - '@nickwelsh/docs-base@1.1.0'
   - '@nickwelsh/refquill-darwin-arm64@0.1.0'
   - '@nickwelsh/refquill-fumadocs@0.1.0'
   - '@nickwelsh/refquill-linux-arm64@0.1.0'
@@ -14,6 +14,7 @@ minimumReleaseAgeExclude:
   - '@nickwelsh/refquill@0.1.0'
   - '@formbraid/core@0.2.0 || 0.3.0'
   - '@formbraid/react@0.2.0 || 0.3.0'
+  - '@nickwelsh/threeslash@0.0.6'
 allowBuilds:
   typesense-instantsearch-adapter: false
   esbuild: true
