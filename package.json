@@ -28,7 +28,8 @@
         "php:peck": "composer --working-dir=packages/laravel peck",
         "php:test:coverage": "composer --working-dir=packages/laravel test:coverage",
         "php:check": "composer --working-dir=packages/laravel check",
-        "check": "pnpm workflows:check && pnpm format:check && pnpm lint:check && pnpm typecheck && pnpm php:test && pnpm test && pnpm contracts:check && pnpm build && pnpm package:check",
+        "security:check": "node --test scripts/check-docs-node-server.test.mjs",
+        "check": "pnpm security:check && pnpm workflows:check && pnpm format:check && pnpm lint:check && pnpm typecheck && pnpm php:test && pnpm test && pnpm contracts:check && pnpm build && pnpm package:check",
         "docs:generate": "pnpm --filter @zero-for-laravel/docs api:generate",
         "workflows:check": "node --test scripts/check-workflows.test.mjs && node scripts/check-workflows.mjs"
     },
