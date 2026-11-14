@@ -6,8 +6,8 @@ import its generated descriptor. The React-free root exports descriptor types,
 query lowering, filter validation and stable identities. `/react` owns sessions
 and subscriptions using Zero for Laravel's existing authorization-aware `useData`.
 
-Use matching table, PHP, and client **0.10.0** packages with Zero client/cache **1.11.4**.
-Install `@nickwelsh/zero-table@^0.10.0` alongside client **^0.10.0** and regenerate
+Use matching table, PHP, and client **0.11.0** packages with Zero client/cache **1.11.4**.
+Install `@nickwelsh/zero-table@^0.11.0` alongside client **^0.11.0** and regenerate
 contracts after upgrading the PHP package. The optional Formbraid bridge requires
 Formbraid **^0.3.0**; other entry points do not require Formbraid.
 

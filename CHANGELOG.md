@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.11.0] - 2026-11-14
+
+- Add independent ascending or descending ordering at each table grouping level.
+  Ordered `{ field, direction }` rules define grouping priority without changing
+  row sorting. Carry the rules through Laravel declarations, generated live
+  queries, group metadata, TypeScript sessions, and PHP/browser/Inertia URL state.
+- Paginate group directories with NULLS LAST in both directions and scope cursors
+  to the complete grouping rules. Invalidate metadata on grouping changes, ignore
+  stale responses, and clear expansion on actual `setGroupBy` changes while
+  allowing explicit controlled or URL restoration to restore expansion.
+  Preserve grown row windows and authorized dirty or pending edits when regrouping.
+- Patch docs Node-adapter and test DOM-parser dependencies, update Hono, and add
+  security regression checks for protected static paths.
+
+Upgrade `nickwelsh/zero-for-laravel`, `@nickwelsh/zero-for-laravel`, and the optional
+`@nickwelsh/zero-table` together to **0.11.0**. Table protocol **v2** replaces
+`groupBy: ['status']` with `groupBy: [{ field: 'status', direction: 'asc' }]`,
+including PHP defaults and saved views. Regenerate and deploy matching PHP and
+TypeScript contracts together. Old v1 URLs and invalid v2 state fall back to the
+whole namespace's application defaults; there is no automatic legacy conversion.
+See the [grouping migration guide](packages/table/README.md#ordered-grouping-and-migration).
+Zero client/cache remain pinned to **1.11.4**; optional Formbraid packages remain
+on **^0.3.0**. Multi-sort, nested filters, authorization, and tenant scopes are unchanged.
+
 ## [0.10.0] - 2026-11-12
 
 - Discover standalone query classes without routes. Public methods returning
@@ -150,6 +174,7 @@ Deploy generated PHP and TypeScript contracts together. Supported targets are PH
 8.3+, Laravel 12/13, PostgreSQL 15+, and React 18/19. Automatic live pages require
 Inertia Laravel 3 and `@inertiajs/react` ^3.8.0.
 
+[0.11.0]: https://github.com/nickwelsh/zero-for-laravel-monorepo/releases/tag/v0.11.0
 [0.10.0]: https://github.com/nickwelsh/zero-for-laravel-monorepo/releases/tag/v0.10.0
 [0.9.0]: https://github.com/nickwelsh/zero-for-laravel-monorepo/releases/tag/v0.9.0
 [0.8.0]: https://github.com/nickwelsh/zero-for-laravel-monorepo/releases/tag/v0.8.0
