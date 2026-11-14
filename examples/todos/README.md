@@ -117,6 +117,51 @@ The dedicated `laravel_zero_todos` publication contains the allowlisted domain
 tables and private permission projections needed by Zero's query predicates.
 Permission projections never enter the browser schema.
 
+## Ordered grouping and table URLs
+
+`/grouping` consumes the generated `tables/todos` descriptor through
+`@nickwelsh/zero-table/inertia` with `urlState: true`. `TodosTable` declares mixed
+directions: completed descending, then list ascending. The equivalent client state
+is:
+
+```ts
+groupBy: [
+    { field: 'completed', direction: 'desc' },
+    { field: 'list', direction: 'asc' },
+];
+```
+
+Each group directory follows its level's direction with NULLS LAST in either
+direction. List groups order foreign-key IDs, not list names. Row sorting is
+independent. Directory pages are SQL snapshots with opaque keyset cursors scoped
+to the full rules, including order/direction; changing rules clears metadata,
+cancels old requests and ignores stale responses. Refresh counts to rediscover
+groups after concurrent changes. Row windows grow live prefixes; snapshot counts
+never prove row exhaustion.
+
+An actual `setGroupBy` rule change clears expansion, including a direction-only
+change. Identical rules preserve it. Full controlled state or URL restoration can
+explicitly restore rules and expanded IDs together; collapsing a parent still
+preserves descendant expansion. Group selectors and other presentation remain
+app-owned; this demo does not add grouping controls.
+
+`/url-state` demonstrates PHP-first normalization and two independent controlled
+sources. Its active/completed application defaults intentionally use `groupBy: []`,
+but version-2 links can override them with the same ordered rules. PHP
+`TableURLState`, the browser codec and Inertia use identical validation/default
+precedence for direct loads, SSR and Back/Forward. Authorization remains separate
+from these editable view defaults.
+
+When upgrading, replace string-array grouping in PHP defaults, TypeScript state
+and saved views. Capabilities, metadata requests/responses and URL envelopes are
+version 2; version-1 URLs and invalid version-2 string arrays fall back to the whole
+namespace's application/descriptor defaults, without silent conversion. Run
+`pnpm zero:generate` from this directory and deploy paired PHP/TypeScript contracts;
+fingerprints include the protocol version. Check freshness with `pnpm zero:check`.
+Allowlists, depth limits, authorization, scopes, nested filters and multi-sort are
+unchanged. See [the table README](../../packages/table/README.md) and
+[URL state integration](../../docs/URL_STATE.md) for the full contract.
+
 ## Generated page types
 
 This example uses Wayfinder `dev-next` with the published `config/wayfinder.php`.

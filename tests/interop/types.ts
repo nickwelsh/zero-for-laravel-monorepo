@@ -133,7 +133,17 @@ function useTableContracts() {
     // @ts-expect-error only admitted sorts
     table.setSort([{ field: 'done', direction: 'asc' }]);
     // @ts-expect-error only admitted group dimensions
-    table.setGroupBy(['user_id']);
+    table.setGroupBy([{ field: 'user_id', direction: 'asc' }]);
+    table.setGroupBy([
+        { field: 'list', direction: 'desc' },
+        { field: 'done', direction: 'asc' },
+    ]);
+    // @ts-expect-error legacy string grouping is no longer supported
+    table.setGroupBy(['done']);
+    // @ts-expect-error every grouping rule requires a direction
+    table.setGroupBy([{ field: 'done' }]);
+    // @ts-expect-error only ascending or descending group directories
+    table.setGroupBy([{ field: 'done', direction: 'sideways' }]);
     const item = table.items[0];
     if (item?.kind === 'row') {
         const title: string = item.row.title;

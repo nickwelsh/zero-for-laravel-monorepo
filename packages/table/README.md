@@ -32,8 +32,14 @@ public function definition(TableContext $context): Table
             AllowedFilter::exact('completed'),
         ])
         ->allowedSorts(['title', 'created_at'])
-        ->allowedGroups([AllowedGroup::field('completed')])
-        ->defaultGroupBy(['completed'])->pageSize(50);
+        ->allowedGroups([
+            AllowedGroup::field('completed'),
+            AllowedGroup::belongsTo('list')->label('name'),
+        ])
+        ->defaultGroupBy([
+            ['field' => 'completed', 'direction' => 'desc'],
+            ['field' => 'list', 'direction' => 'asc'],
+        ])->maxGroupDepth(2)->pageSize(50);
 }
 ```
 
@@ -41,6 +47,48 @@ Only declared filters, operators, sorts and group paths are accepted. Mandatory
 visibility wraps the entire user filter, including OR branches. Rows use native
 Zero queries; directories and counts use an authenticated SQL snapshot endpoint.
 The endpoint accepts table state, never arbitrary browser ZQL or SQL.
+
+### Ordered grouping and migration
+
+`groupBy` is an ordered list of rules, each with a required `field` alias and
+`direction`. For example, application defaults or `table.setGroupBy` can use:
+
+```ts
+[
+    { field: 'completed', direction: 'desc' },
+    { field: 'list', direction: 'asc' },
+];
+```
+
+The first rule defines the outer directory; each level orders its own group keys
+in its declared direction, with **NULLS LAST in both directions**. A relation
+group orders foreign-key values, not its display labels. Labels and all other
+presentation remain application-owned. Row `sort` is independent: changing a
+group direction does not reverse the rows within each leaf.
+
+Directory pagination uses opaque keyset cursors scoped to the complete rules,
+including their order and directions, as well as the contract, actor/context,
+filter and directory path. Do not reuse a cursor after changing any rule.
+Directories/counts are snapshots; concurrent changes between pages can require
+a refresh. Changing rule order or direction clears metadata, cancels old requests
+and ignores stale responses rather than displaying an incompatible directory.
+Live rows still grow by `pageSize` prefixes; snapshot counts do not prove exhaustion.
+
+`setGroupBy` clears expanded IDs on any actual rule change (field, order or
+direction). Setting identical rules preserves expansion. A complete controlled
+state or URL restoration can explicitly supply both new rules and expanded IDs,
+so restoring a saved view can restore expansion too. Collapsing a group without
+changing the rules still preserves descendant expansion.
+
+To migrate, replace all string-array grouping in PHP defaults, TypeScript state
+and saved views with explicit rules. Table capabilities, metadata requests and
+responses, and table URL envelopes now use **version 2**. Run
+`php artisan zero:generate` and deploy matching PHP and TypeScript output together;
+contract fingerprints include the protocol version. Version-1 URLs and invalid
+version-2 `groupBy: ['completed']` links fall back to the whole namespace's
+application/descriptor defaults, with **no silent legacy conversion**. Invalid
+application defaults and writes throw. Allowlists, maximum depth, authorization,
+mandatory scopes, nested filters and multi-sort behavior are unchanged.
 
 ## Render with your own UI
 
@@ -108,6 +156,9 @@ That entry uses Inertia's client-side router, preserving page state and scroll,
 and restores the URL state during SSR from `usePage().url`. It merges rapid writes
 from multiple tables while navigation is pending. Only this entry requires the
 optional `@inertiajs/react@^3.8.0` peer; `/react` has no Inertia dependency.
+Both entries and PHP `TableURLState` use the same version-2 rule validation,
+default fallback and expansion restoration, including direct loads and Back/Forward.
+For PHP-first, multi-source controlled pages, see [URL state integration](../../docs/URL_STATE.md).
 
 History defaults to `replace`, avoiding an entry per keystroke; choose `push` to
 step through view changes with Back/Forward. Give independent instances of the

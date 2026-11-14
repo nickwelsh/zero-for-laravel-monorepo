@@ -547,6 +547,8 @@ export class TableSession<Row, C extends Capabilities = Capabilities> {
             this.request?.abort();
             this.request = undefined;
             this.directories.clear();
+            this.intent = [];
+            this.viewport = [];
             this.count = initialCount();
         }
         this.emit();
@@ -554,7 +556,11 @@ export class TableSession<Row, C extends Capabilities = Capabilities> {
     }
     setFilter = (filter: TableState<C>['filter']) => this.change({ filter });
     setSort = (sort: TableState<C>['sort']) => this.change({ sort });
-    setGroupBy = (groupBy: TableState<C>['groupBy']) => this.change({ groupBy });
+    setGroupBy = (groupBy: TableState<C>['groupBy']) =>
+        this.change({
+            groupBy,
+            expanded: queryKey(groupBy) === queryKey(this.state.groupBy) ? this.state.expanded : [],
+        });
     expand = (id: string) => {
         if (!this.state.expanded.includes(id)) this.change({ expanded: [...this.state.expanded, id] });
     };
@@ -609,7 +615,10 @@ export class TableSession<Row, C extends Capabilities = Capabilities> {
         const known = [...this.directories.values()].flatMap((directory) =>
             directory.groups.map((group) => ({
                 ...group,
-                path: [...directory.path, { field: this.state.groupBy[directory.path.length]!, value: group.value }],
+                path: [
+                    ...directory.path,
+                    { field: this.state.groupBy[directory.path.length]!.field, value: group.value },
+                ],
             })),
         );
         for (const group of known)
@@ -668,7 +677,7 @@ export class TableSession<Row, C extends Capabilities = Capabilities> {
         const directoryItems = (path: GroupPath) => {
             const directory = this.directory(path);
             for (const group of directory.groups) {
-                const child = [...path, { field: this.state.groupBy[path.length]!, value: group.value }];
+                const child = [...path, { field: this.state.groupBy[path.length]!.field, value: group.value }];
                 const open = expanded.has(group.id);
                 items.push({
                     kind: 'group',

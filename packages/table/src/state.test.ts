@@ -1,13 +1,27 @@
+/* oxlint-disable unicorn/no-array-reverse -- ES2022 support; only newly allocated arrays are reversed. */
 import { expect, it } from 'vite-plus/test';
 import { execFileSync } from 'node:child_process';
-import tasks from '../../../tests/interop/table.generated';
-import { groupId, readTableState, writeTableState, type TableState } from './index';
+import { createBuilder } from '@rocicorp/zero';
+import { asQueryInternals } from '@rocicorp/zero/bindings';
+import { schema } from '../../../tests/interop/generated';
+import tasks, { queries } from '../../../tests/interop/table.generated';
+import {
+    groupId,
+    readTableState,
+    writeTableState,
+    validateState,
+    type TableState,
+    type TableQueryInput,
+} from './index';
 
 const { capabilities } = tasks;
 const defaults = {
     filter: null,
     sort: [{ field: 'title', direction: 'asc' }],
-    groupBy: ['done', 'list'],
+    groupBy: [
+        { field: 'done', direction: 'desc' },
+        { field: 'list', direction: 'asc' },
+    ],
     expanded: [],
 };
 
@@ -21,12 +35,15 @@ it('round-trips the full view through a shareable URL without changing other par
             ],
         },
         sort: [{ field: 'title', direction: 'desc' }],
-        groupBy: ['done', 'list'],
+        groupBy: [
+            { field: 'list', direction: 'desc' },
+            { field: 'done', direction: 'asc' },
+        ],
         expanded: [
-            groupId([{ field: 'done', value: false }]),
+            groupId([{ field: 'list', value: null }]),
             groupId([
-                { field: 'done', value: false },
                 { field: 'list', value: null },
+                { field: 'done', value: false },
             ]),
         ],
     };
@@ -63,11 +80,12 @@ it('agrees with PHP on normalization, rejection, and bidirectional URL round tri
         },
         expanded: [groupId([{ field: 'done', value: false }])],
     };
-    const envelope = (state: unknown) => JSON.stringify({ version: 1, state });
+    const envelope = (state: unknown) => JSON.stringify({ version: 2, state });
     let deep: unknown = { kind: 'condition', field: 'completed', operator: 'equals', value: true };
     for (let index = 0; index < 8; index++) deep = { kind: 'and', children: [deep] };
     const inputs = [
         envelope(full),
+        envelope({ ...full, groupBy: [...defaults.groupBy].reverse() }),
         envelope({ filter: null, sort: [], groupBy: [] }),
         envelope({ sort: [] }),
         envelope({}),
@@ -97,7 +115,20 @@ it('agrees with PHP on normalization, rejection, and bidirectional URL round tri
         envelope({ tenant: 'another' }),
         envelope({ sort: null }),
         envelope([]),
-        JSON.stringify({ version: 2, state: full }),
+        JSON.stringify({ version: 1, state: full }),
+        envelope({ groupBy: ['done', 'list'] }),
+        envelope({ groupBy: [{ field: 'done' }] }),
+        envelope({ groupBy: [{ field: 'done', direction: 'sideways' }] }),
+        envelope({ groupBy: [{ field: 'done', direction: 'asc', extra: true }] }),
+        envelope({ groupBy: [{ field: 'removed', direction: 'desc' }] }),
+        envelope({
+            groupBy: [
+                { field: 'done', direction: 'asc' },
+                { field: 'done', direction: 'desc' },
+            ],
+        }),
+        envelope({ groupBy: [...defaults.groupBy, { field: 'title', direction: 'asc' }] }),
+        envelope({ groupBy: [null] }),
         ' '.repeat(16385),
     ];
     const cases = inputs.map((input) => ({
@@ -127,8 +158,9 @@ it('agrees with PHP on normalization, rejection, and bidirectional URL round tri
         ).toEqual(state);
     });
     expect(php[0]!.state).toEqual(full);
-    expect(php[1]!.state).toEqual({ filter: null, sort: [], groupBy: [], expanded: [] });
-    expect(php[2]!.state).toEqual({ ...defaults, groupBy: [], sort: [] });
+    expect(php[1]!.state).toEqual({ ...full, groupBy: [...defaults.groupBy].reverse() });
+    expect(php[2]!.state).toEqual({ filter: null, sort: [], groupBy: [], expanded: [] });
+    expect(php[3]!.state).toEqual({ ...defaults, groupBy: [], sort: [] });
 });
 
 it('uses descriptor defaults for missing, malformed, unsupported or stale URL state', () => {
@@ -136,13 +168,13 @@ it('uses descriptor defaults for missing, malformed, unsupported or stale URL st
     for (const value of [
         'not json',
         'null',
-        JSON.stringify({ version: 2, state: defaults }),
-        JSON.stringify({ version: 1, state: {} }),
-        JSON.stringify({ version: 1, state: { ...defaults, expanded: [123] } }),
-        JSON.stringify({ version: 1, state: { ...defaults, sort: [{ field: 'deleted', direction: 'asc' }] } }),
-        JSON.stringify({ version: 1, state: { ...defaults, groupBy: ['removed'] } }),
+        JSON.stringify({ version: 1, state: defaults }),
+        JSON.stringify({ version: 2, state: {} }),
+        JSON.stringify({ version: 2, state: { ...defaults, expanded: [123] } }),
+        JSON.stringify({ version: 2, state: { ...defaults, sort: [{ field: 'deleted', direction: 'asc' }] } }),
+        JSON.stringify({ version: 2, state: { ...defaults, groupBy: ['removed'] } }),
         JSON.stringify({
-            version: 1,
+            version: 2,
             state: {
                 ...defaults,
                 filter: { kind: 'condition', field: 'title', operator: 'equals', value: 'unsupported' },
@@ -157,4 +189,54 @@ it('uses descriptor defaults for missing, malformed, unsupported or stale URL st
             sort: [{ field: 'title', direction: 'sideways' }],
         } as unknown as TableState<typeof capabilities>),
     ).toThrow('Invalid table state');
+});
+
+it('generated live queries validate ordered group paths without adding group ordering to row sorts', () => {
+    const query = queries[`q_${capabilities.contract}`];
+    const ctx = { user_id: 'alice' };
+    const base = createBuilder(schema).tasks.where('deleted_at', 'IS', null);
+    for (const groupBy of [capabilities.defaults.groupBy, [...capabilities.defaults.groupBy].reverse()]) {
+        const input: TableQueryInput<typeof capabilities> = {
+            filter: null,
+            sort: [{ field: 'title', direction: 'desc' }],
+            groupBy,
+            path: groupBy.map(({ field }) => ({ field, value: field === 'done' ? false : null })),
+        };
+        const ast = (args: TableQueryInput<typeof capabilities>) => {
+            const request = query(args);
+            return asQueryInternals(request.query.fn({ args: request.args, ctx })).ast;
+        };
+        const expected = base.where('done', '=', false).where('list_id', 'IS', null);
+        expect(ast(input)).toEqual(
+            asQueryInternals(expected.orderBy('title', 'desc').orderBy('id', 'asc').limit(3)).ast,
+        );
+        expect(
+            ast({
+                ...input,
+                groupBy: groupBy.map((rule) => ({ ...rule, direction: rule.direction === 'asc' ? 'desc' : 'asc' })),
+            }),
+        ).toEqual(ast(input));
+        expect(ast({ ...input, sort: [{ field: 'title', direction: 'asc' }] })).toEqual(
+            asQueryInternals(expected.orderBy('title', 'asc').orderBy('id', 'asc').limit(3)).ast,
+        );
+        expect(() => ast({ ...input, path: [...input.path].reverse() })).toThrow('group path');
+        expect(() => ast({ ...input, path: input.path.slice(0, 1) })).toThrow('complete leaf path');
+    }
+    for (const groupBy of [
+        ['done'],
+        [{ field: 'done' }],
+        [{ field: 'done', direction: 'DESC' }],
+        [{ field: 'user_id', direction: 'asc' }],
+        [{ field: 'done', direction: 'asc', extra: true }],
+        [
+            { field: 'done', direction: 'asc' },
+            { field: 'done', direction: 'desc' },
+        ],
+        [...capabilities.defaults.groupBy, { field: 'title', direction: 'asc' }],
+        [null],
+    ]) {
+        expect(() =>
+            validateState(capabilities, { ...defaults, groupBy } as unknown as TableState<typeof capabilities>),
+        ).toThrow('Invalid table state');
+    }
 });

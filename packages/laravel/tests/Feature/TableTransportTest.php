@@ -91,14 +91,15 @@ test('table directories batch authorized snapshots and scope opaque pagination c
     $definition = resolve(TableRegistry::class)->all()[0];
     $alice = (new User)->setKeyType('string')->forceFill(['id' => 'alice']);
     $context = new ResolvedContext(['user_id' => 'alice'], 'alice');
-    $body = ['version' => 1, 'contract' => $definition->contract, 'filter' => null, 'groupBy' => ['done', 'list'], 'directories' => [
+    $body = ['version' => 2, 'contract' => $definition->contract, 'filter' => null, 'groupBy' => $definition->table->defaultGrouping, 'directories' => [
         ['path' => [], 'after' => null],
         ['path' => [['field' => 'done', 'value' => false]], 'after' => null],
         ['path' => [['field' => 'done', 'value' => true]], 'after' => null],
     ]];
     $response = (new Metadata)->read($definition, $context, $alice, $body);
     expect($response['totalCount'])->toBe(53);
-    expect(data_get($response, 'directories.0.groups.*.count'))->toBe([52, 1]);
+    expect(data_get($response, 'directories.0.groups.*.value'))->toBe([true, false]);
+    expect(data_get($response, 'directories.0.groups.*.count'))->toBe([1, 52]);
     expect(data_get($response, 'directories.1.groups'))->toHaveCount(50);
     expect(data_get($response, 'directories.2.groups.0'))->toMatchArray(['value' => null, 'count' => 1, 'label' => 'Unassigned']);
 
@@ -116,10 +117,71 @@ test('table directories batch authorized snapshots and scope opaque pagination c
     expect(fn (): array => (new Metadata)->read($definition, new ResolvedContext(['user_id' => 'bob'], 'bob'), $bob, $body))->toThrow(ValidationException::class);
 });
 
+test('mixed and reordered grouping paginates nullable keys without gaps and keeps row sorting independent', function (string $direction): void {
+    $definition = resolve(TableRegistry::class)->all()[0];
+    $alice = (new User)->setKeyType('string')->forceFill(['id' => 'alice']);
+    $context = new ResolvedContext(['user_id' => 'alice'], 'alice');
+    $metadata = new Metadata;
+    $ids = array_map(fn (int $i): string => sprintf('00000000-0000-4000-8000-%012d', $i), range(1, 101));
+    foreach (range(52, 101) as $i) {
+        DB::table('lists')->insert(['id' => $ids[$i - 1], 'user_id' => 'alice', 'name' => 'List '.$i]);
+        DB::table('tasks')->insert(['id' => sprintf('00000000-0000-4000-8001-%012d', $i), 'user_id' => 'alice', 'title' => 'Extra '.$i, 'done' => false, 'list_id' => $ids[$i - 1]]);
+    }
+
+    $other = $direction === 'asc' ? 'desc' : 'asc';
+    $rules = $definition->table->grouping([['field' => 'done', 'direction' => $other], ['field' => 'list', 'direction' => $direction]]);
+    $parent = [['field' => 'done', 'value' => false]];
+    $body = ['version' => 2, 'contract' => $definition->contract, 'filter' => null, 'groupBy' => $rules, 'directories' => [['path' => $parent, 'after' => null]]];
+    $expected = [...($direction === 'asc' ? $ids : array_reverse($ids)), null];
+    // Exercise the nullable directory both as the second level and after priority is reversed.
+    foreach ([$rules, array_reverse($rules)] as $groupBy) {
+        $path = $groupBy[0]['field'] === 'done' ? $parent : [];
+        $body['groupBy'] = $groupBy;
+        $body['directories'] = [['path' => $path, 'after' => null]];
+        $values = [];
+        $counts = [];
+        $pages = 0;
+        do {
+            $result = $metadata->read($definition, $context, $alice, $body);
+            $page = $result['directories'][0];
+            $values = [...$values, ...array_column($page['groups'], 'value')];
+            $counts = [...$counts, ...array_column($page['groups'], 'count')];
+            $cursor = $page['nextCursor'];
+            if ($pages === 0) {
+                expect($cursor)->toBeString();
+                foreach ([
+                    array_reverse($groupBy),
+                    [...array_slice($groupBy, 0, -1), [...$groupBy[1], 'direction' => $groupBy[1]['direction'] === 'asc' ? 'desc' : 'asc']],
+                    [[...$groupBy[0], 'direction' => $groupBy[0]['direction'] === 'asc' ? 'desc' : 'asc'], $groupBy[1]],
+                ] as $changed) {
+                    // Root paths stay valid even when priority changes; the cursor must still be rejected.
+                    $changedPath = $changed[0]['field'] === 'done' ? $parent : [];
+                    expect(fn (): array => $metadata->read($definition, $context, $alice, [...$body, 'groupBy' => $changed, 'directories' => [['path' => $changedPath, 'after' => $cursor]]]))->toThrow(ValidationException::class);
+                }
+            }
+
+            $body['directories'][0]['after'] = $cursor;
+            $pages++;
+            expect($pages)->toBeLessThanOrEqual(3);
+        } while ($cursor !== null);
+
+        expect($pages)->toBe(3);
+        expect($values)->toBe($expected);
+        expect(array_sum($counts))->toBe($path === [] ? 103 : 102);
+        expect($counts)->toBe([...array_fill(0, 101, 1), $path === [] ? 2 : 1]);
+        $leaf = $groupBy[0]['field'] === 'done' ? [...$parent, ['field' => 'list', 'value' => null]] : [['field' => 'list', 'value' => null], ...$parent];
+        $input = ['groupBy' => $groupBy, 'path' => $leaf, 'sort' => [['field' => 'title', 'direction' => 'desc']]];
+        $rows = $definition->rows($input);
+        expect($rows->ast()['orderBy'])->toBe([['title', 'desc'], ['id', 'asc']]);
+        expect($definition->table->sql($context, null, $definition->table->path($leaf, $groupBy, leaf: true))->count())->toBe(1);
+        expect(fn () => $definition->rows([...$input, 'path' => array_reverse($leaf)]))->toThrow(ValidationException::class);
+    }
+})->with(['asc', 'desc']);
+
 test('table native registrations and metadata reject stale, malformed and anonymous requests', function (): void {
     /** @var OwnerPostgresTestCase $this */
     $definition = resolve(TableRegistry::class)->all()[0];
-    $body = ['version' => 1, 'contract' => $definition->contract, 'filter' => null, 'groupBy' => ['done'], 'directories' => [['path' => [], 'after' => null]]];
+    $body = ['version' => 2, 'contract' => $definition->contract, 'filter' => null, 'groupBy' => [['field' => 'done', 'direction' => 'desc']], 'directories' => [['path' => [], 'after' => null]]];
     $this->postJson('/table-metadata/tasks', $body)->assertUnauthorized();
     $alice = (new User)->setKeyType('string')->forceFill(['id' => 'alice']);
     $this->actingAs($alice);
@@ -128,6 +190,8 @@ test('table native registrations and metadata reject stale, malformed and anonym
     $this->postJson('/table-metadata/missing', $body)->assertNotFound();
     $this->postJson('/table-metadata/tasks', [...$body, 'contract' => 'outdated'])->assertStatus(409);
     $this->postJson('/table-metadata/tasks', [...$body, 'groupBy' => ['done', 'done']])->assertUnprocessable();
+    $this->postJson('/table-metadata/tasks', [...$body, 'version' => 1])->assertUnprocessable();
+    $this->postJson('/table-metadata/tasks', [...$body, 'groupBy' => [...$body['groupBy'], ...$body['groupBy']]])->assertUnprocessable();
     request()->setUserResolver(fn () => $alice);
     $registered = new RegisteredTableQuery('tasks', $definition->contract);
     $ast = $registered->invoke(['filter' => null, 'sort' => [], 'groupBy' => [], 'path' => [], '__window' => 3], new ResolvedContext(['user_id' => 'alice'], 'alice'), new QueryCompiler(resolve(ModelRegistry::class)));
@@ -147,7 +211,7 @@ test('table native registrations and metadata reject stale, malformed and anonym
 test('metadata runs configured scope middleware as well as browser authentication', function (): void {
     /** @var TableTransportTestCase $this */
     $definition = resolve(TableRegistry::class)->all()[0];
-    $body = ['version' => 1, 'contract' => $definition->contract, 'filter' => null, 'groupBy' => [], 'directories' => []];
+    $body = ['version' => 2, 'contract' => $definition->contract, 'filter' => null, 'groupBy' => [], 'directories' => []];
     $this->postJson('/zero/tables/tasks/metadata', $body)->assertUnauthorized();
     $alice = (new User)->setKeyType('string')->forceFill(['id' => 'alice']);
     $this->actingAs($alice);

@@ -9,13 +9,30 @@ for a working two-source page at `/url-state`.
 ## Wire contract
 
 Each table uses one query parameter, conventionally `table.<instance>`, whose
-decoded value is JSON: `{"version":1,"state":{...}}`. Use `URLSearchParams` to
+decoded value is JSON: `{"version":2,"state":{...}}`. Use `URLSearchParams` to
 percent-encode it; do not concatenate JSON into a URL. Instance keys must be
 unique on a page, even when descriptors are identical. Writers preserve other
 parameters (including repeated ones), the path, and the fragment.
 
 The supported state is the existing `TableState`: `filter`, ordered `sort`,
-ordered `groupBy`, and `expanded`. No additional query AST or security scope is
+ordered `groupBy` rules, and `expanded`. For example:
+
+```json
+{
+    "version": 2,
+    "state": {
+        "groupBy": [
+            { "field": "completed", "direction": "desc" },
+            { "field": "list", "direction": "asc" }
+        ]
+    }
+}
+```
+
+Each rule requires a capability alias and `asc` or `desc` direction. Rule order
+defines nesting; direction orders each directory's keys, with NULLS LAST in both
+directions. Relation directories order foreign keys, not display labels. Row
+`sort` remains independent. No additional query AST or security scope is
 accepted. PHP `TableURLState` and TypeScript `readTableState`, `writeTableState`,
 and `normalizeTableState` reuse the table's capability validators. Generated
 descriptors already expose the capability-specific `TableState`/`TableQueryInput`
@@ -41,6 +58,15 @@ keys, capabilities, operators, and versions are rejected. Duplicate parameters
 and bracket-array variants are invalid. Invalid links are not rewritten on load;
 reset or the next valid write repairs the namespace.
 
+Version-1 envelopes and version-2 links containing legacy `groupBy: ['completed']`
+are invalid and fall back to the whole namespace's application/descriptor defaults.
+There is no silent string-array conversion. Migrate application defaults and
+saved views to explicit rules, regenerate with `php artisan zero:generate`, and
+deploy paired PHP/TypeScript contracts. Capabilities and metadata requests and
+responses are also version 2; contract fingerprints include the protocol version.
+Allowlists, maximum depth, authorization, scopes, nested filters and multi-sort
+behavior are unchanged.
+
 Limits (per namespace): 16,384 decoded UTF-8 bytes; filter depth 8, root counted
 as 1; 100 total filter nodes; 1–100 membership operands; 1,000 Unicode characters
 per string operand; 100 expanded IDs of at most 2,048 UTF-8 bytes each. Boolean
@@ -49,6 +75,16 @@ unique sorts, grouping uniqueness/depth, and date offsets are capability checked
 Expanded IDs remain opaque table-generated strings: stale IDs are inert, not
 server query paths or permissions. Deployment/proxy URL limits can be lower;
 large saved views should use application-owned saved-view IDs instead of URLs.
+
+`setGroupBy` clears expansion on any actual rule change, including reordering or
+changing only a direction; identical rules preserve expansion. Full controlled
+state and URL restoration can explicitly supply expanded IDs alongside the rules
+to restore a complete view. Collapsing a parent preserves its descendants' saved
+expansion while rules are unchanged. Metadata cursors are scoped to all grouping
+rules, including order/direction. A rule change clears metadata, cancels obsolete
+requests and ignores stale responses. Snapshot directory pages use keyset cursors;
+concurrent data changes between pages may require a refresh. Row pagination still
+uses live prefixes and never treats a snapshot count as proof of exhaustion.
 
 ## PHP first, before subscriptions
 
@@ -77,6 +113,10 @@ render, before mounting table/query subscriptions. `TableURLState::encode` emits
 the same versioned envelope for server-authored links; percent-encode it when
 building a query string. The codec does not run a row query or authorize a saved
 view. Applications must authorize saved-view access independently.
+PHP and TypeScript apply the same version-2 rule validation, fallback precedence
+and explicit expansion restoration on direct loads, SSR and Back/Forward. The
+packaged `@nickwelsh/zero-table/inertia` hook with `urlState: true` uses that same
+contract for single-owner pages; the coordinator below supports multiple sources.
 
 Mandatory authorization, tenant predicates, and row visibility stay in the
 table's base query/`visibleTo` and the authoritative Zero transport. Never put

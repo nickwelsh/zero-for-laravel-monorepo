@@ -36,7 +36,7 @@ export async function readTableMetadata<C extends Capabilities>(
     const result: unknown = await readMetadata(capabilities, state, directories, signal);
     if (
         !record(result) ||
-        result.version !== 1 ||
+        result.version !== 2 ||
         typeof result.requestKey !== 'string' ||
         typeof result.observedAt !== 'string' ||
         !count(result.totalCount) ||
@@ -56,7 +56,7 @@ export async function readTableMetadata<C extends Capabilities>(
         )
             invalid();
         if (queryKey(page.path) !== queryKey(directory.path)) invalid('directory');
-        const field = state.groupBy[directory.path.length]!;
+        const field = state.groupBy[directory.path.length]!.field;
         for (const group of page.groups) {
             if (
                 !record(group) ||

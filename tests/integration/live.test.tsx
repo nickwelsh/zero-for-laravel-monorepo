@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 /* oxlint-disable unicorn/no-array-sort -- ES2022; only newly allocated ID arrays are sorted. */
+/* oxlint-disable unicorn/no-array-reverse -- ES2022; only newly allocated grouping arrays are reversed. */
 import { spawn, execFileSync, type ChildProcess } from 'node:child_process';
 import {
     mkdtempSync,
@@ -40,6 +41,9 @@ import {
     editors,
     type TableDescriptor,
     type FilterNode,
+    type GroupPath,
+    type MetadataResponse,
+    type TableState,
 } from '../../packages/table/src';
 import { DataTable, useDataTable } from '../../packages/table/src/react';
 import { encodeDate } from '../../packages/client/src';
@@ -527,10 +531,10 @@ it.skipIf(!enabled)(
                                 Accept: 'application/json',
                             },
                             body: JSON.stringify({
-                                version: 1,
+                                version: 2,
                                 contract: tableDescriptor.capabilities.contract,
                                 filter,
-                                groupBy: ['done'],
+                                groupBy: [{ field: 'done', direction: 'desc' }],
                                 directories: [{ path: [], after: null }],
                             }),
                         });
@@ -547,6 +551,67 @@ it.skipIf(!enabled)(
                         remove();
                         selected.destroy();
                     }
+                }
+                // Mixed grouping must describe the same authorized leaf membership as live rows.
+                const listID = '019a0000-0000-7000-8000-000000000101';
+                psql(`INSERT INTO lists (id,user_id,name) VALUES ('${listID}','alice','Grouping parity')`);
+                psql(`UPDATE tasks SET list_id='${listID}' WHERE id='${parityIDs[0]}'`);
+                const groupedFilter: FilterNode = {
+                    kind: 'or',
+                    children: [condition('title', 'contains', '%_\\'), condition('title', 'equals', 'alpha')],
+                };
+                const rules: TableState['groupBy'] = [
+                    { field: 'done', direction: 'desc' },
+                    { field: 'list', direction: 'asc' },
+                ];
+                for (const groupBy of [rules, [...rules].reverse()]) {
+                    const paths: GroupPath[] = [[]];
+                    let leafCount = 0;
+                    for (const path of paths) {
+                        const response = await fetch(`${base}${tableDescriptor.capabilities.metadataURL}`, {
+                            method: 'POST',
+                            headers: {
+                                Authorization: 'Bearer alice',
+                                'Content-Type': 'application/json',
+                                Accept: 'application/json',
+                            },
+                            body: JSON.stringify({
+                                version: 2,
+                                contract: tableDescriptor.capabilities.contract,
+                                filter: groupedFilter,
+                                groupBy,
+                                directories: [{ path, after: null }],
+                            }),
+                        });
+                        expect(response.status).toBe(200);
+                        const snapshot = (await response.json()) as MetadataResponse;
+                        expect(snapshot.totalCount).toBe(2);
+                        for (const group of snapshot.directories[0]!.groups) {
+                            const leaf = [...path, { field: groupBy[path.length]!.field, value: group.value }];
+                            if (leaf.length < groupBy.length) {
+                                paths.push(leaf);
+                                continue;
+                            }
+                            const request = tableDescriptor
+                                .rows({
+                                    filter: groupedFilter,
+                                    groupBy,
+                                    path: leaf,
+                                    sort: [{ field: 'title', direction: 'desc' }],
+                                    __window: 100,
+                                })
+                                .request();
+                            const rows = await zero.run(
+                                request as ReturnType<typeof tasks> extends { request(): infer R } ? R : never,
+                                { type: 'complete' },
+                            );
+                            const done = leaf.find((part) => part.field === 'done')!.value;
+                            expect(rows.map((row) => row.id)).toEqual([parityIDs[done ? 1 : 0]]);
+                            expect(rows.length).toBe(group.count);
+                            leafCount += rows.length;
+                        }
+                    }
+                    expect(leafCount).toBe(2);
                 }
                 // Exercise the real generated descriptor and React query lifecycle.
                 // Mocked native results cannot catch identity-owner render loops.

@@ -46,7 +46,7 @@ final class Table
     /** @var Sort */
     public array $defaultOrdering = [];
 
-    /** @var list<string> */
+    /** @var Sort */
     public array $defaultGrouping = [];
 
     public int $increment = 50;
@@ -160,10 +160,10 @@ final class Table
         return $this;
     }
 
-    /** @param list<string> $fields */
-    public function defaultGroupBy(array $fields): self
+    /** @param Sort $rules */
+    public function defaultGroupBy(array $rules): self
     {
-        $this->defaultGrouping = $this->grouping($fields);
+        $this->defaultGrouping = $this->grouping($rules);
 
         return $this;
     }
@@ -197,26 +197,30 @@ final class Table
         return $this;
     }
 
-    /** @return list<string> */
+    /** @return Sort */
     public function grouping(mixed $input): array
     {
         if (! is_array($input) || ! array_is_list($input) || count($input) > ($this->depth ?? min(3, count($this->groups)))) {
             Input::fail('groupBy', 'Invalid group depth.');
         }
 
-        $fields = [];
-        foreach ($input as $field) {
-            if (! is_string($field) || ! isset($this->groups[$field]) || in_array($field, $fields, true)) {
-                Input::fail('groupBy', 'Unknown or repeated group dimension.');
+        $rules = [];
+        foreach ($input as $item) {
+            $item = Input::object($item, 'groupBy');
+            Input::keys($item, ['field', 'direction'], 'groupBy');
+            $field = $item['field'] ?? null;
+            $direction = $item['direction'] ?? null;
+            if (! is_string($field) || ! isset($this->groups[$field]) || in_array($field, array_column($rules, 'field'), true) || ! in_array($direction, ['asc', 'desc'], true)) {
+                Input::fail('groupBy', 'Unknown field, direction or repeated group dimension.');
             }
 
-            $fields[] = $field;
+            $rules[] = ['field' => $field, 'direction' => $direction];
         }
 
-        return $fields;
+        return $rules;
     }
 
-    /** @param list<string> $groupBy
+    /** @param Sort $groupBy
      * @return Path
      */
     public function path(mixed $input, array $groupBy, bool $leaf = false): array
@@ -229,16 +233,17 @@ final class Table
         foreach ($input as $index => $part) {
             $part = Input::object($part, 'path');
             Input::keys($part, ['field', 'value'], 'path');
-            if (($part['field'] ?? null) !== $groupBy[$index] || ! array_key_exists('value', $part)) {
+            $field = $groupBy[$index]['field'];
+            if (($part['field'] ?? null) !== $field || ! array_key_exists('value', $part)) {
                 Input::fail('path', 'Path is not a prefix of the grouping.');
             }
 
-            $value = Input::value($part['value'], $this->base->model->columns[$this->groups[$groupBy[$index]]['field']], 'path.value');
+            $value = Input::value($part['value'], $this->base->model->columns[$this->groups[$field]['field']], 'path.value');
             if (! is_scalar($value) && $value !== null) {
                 Input::fail('path.value', 'Group keys must be scalar.');
             }
 
-            $path[] = ['field' => $groupBy[$index], 'value' => $value];
+            $path[] = ['field' => $field, 'value' => $value];
         }
 
         return $path;

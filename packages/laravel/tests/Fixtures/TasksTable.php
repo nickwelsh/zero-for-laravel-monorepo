@@ -17,6 +17,6 @@ final class TasksTable
             ->allowedFilters([AllowedFilter::partial('title'), AllowedFilter::exact('completed', 'done')])
             ->allowedSorts(['title'])->defaultSort('title')
             ->allowedGroups([AllowedGroup::field('done'), AllowedGroup::field('title'), AllowedGroup::belongsTo('list')->label('name')])
-            ->defaultGroupBy(['done', 'list'])->maxGroupDepth(2)->pageSize(2);
+            ->defaultGroupBy([['field' => 'done', 'direction' => 'desc'], ['field' => 'list', 'direction' => 'asc']])->maxGroupDepth(2)->pageSize(2);
     }
 }

@@ -6,7 +6,7 @@ export type { Editor, ColumnDefinition, CellChange, CellSubmitResult } from './c
 export type Scalar = string | number | boolean | null;
 export type GroupPath = readonly { readonly field: string; readonly value: Scalar }[];
 export interface Capabilities {
-    readonly version: 1;
+    readonly version: 2;
     readonly name: string;
     readonly contract: string;
     readonly model: string;
@@ -37,7 +37,7 @@ export interface Capabilities {
     >;
     readonly pageSize: number;
     readonly maxGroupDepth: number;
-    readonly defaults: { readonly sort: readonly Sort[]; readonly groupBy: readonly string[] };
+    readonly defaults: { readonly sort: readonly Sort[]; readonly groupBy: readonly Sort[] };
     readonly metadataURL: string;
 }
 type Value<C extends Column> = C['date'] extends true
@@ -71,7 +71,7 @@ export interface Sort {
 export interface TableState<C extends Capabilities = Capabilities> {
     readonly filter: FilterNode<C> | null;
     readonly sort: readonly { readonly field: C['sorts'][number]; readonly direction: 'asc' | 'desc' }[];
-    readonly groupBy: readonly (keyof C['groups'] & string)[];
+    readonly groupBy: readonly { readonly field: keyof C['groups'] & string; readonly direction: 'asc' | 'desc' }[];
     readonly expanded: readonly string[];
 }
 export type TableQueryInput<C extends Capabilities = Capabilities> = Omit<TableState<C>, 'expanded'> & {
@@ -134,6 +134,7 @@ function scalar(value: unknown, column: Column): void {
     if (value !== null && column.enum && !column.enum.includes(value as string | number)) invalid('enum value');
 }
 export function validateState<C extends Capabilities>(capabilities: C, state: TableState<C>): void {
+    if (capabilities.version !== 2) invalid('unsupported protocol');
     if (!Array.isArray(state.sort) || !Array.isArray(state.groupBy) || !Array.isArray(state.expanded))
         invalid('state lists');
     if (
@@ -143,10 +144,19 @@ export function validateState<C extends Capabilities>(capabilities: C, state: Ta
         invalid('expanded groups');
     if (
         state.groupBy.length > capabilities.maxGroupDepth ||
-        new Set(state.groupBy).size !== state.groupBy.length ||
-        state.groupBy.some((field) => !Object.hasOwn(capabilities.groups, field))
+        new Set(state.groupBy.map((rule) => rule?.field)).size !== state.groupBy.length ||
+        state.groupBy.some(
+            (rule) =>
+                !rule ||
+                typeof rule !== 'object' ||
+                Array.isArray(rule) ||
+                typeof rule.field !== 'string' ||
+                !Object.hasOwn(capabilities.groups, rule.field) ||
+                !['asc', 'desc'].includes(rule.direction),
+        )
     )
         invalid('grouping');
+    state.groupBy.forEach((rule) => keys(rule, ['field', 'direction']));
     if (
         new Set(state.sort.map((sort) => sort.field)).size !== state.sort.length ||
         state.sort.some((sort) => !capabilities.sorts.includes(sort.field) || !['asc', 'desc'].includes(sort.direction))
@@ -212,7 +222,7 @@ export function readTableState<C extends Capabilities>(
             if (new TextEncoder().encode(encoded).length > 16384) invalid('URL size');
             const value = JSON.parse(encoded) as { version: unknown; state: Partial<TableState<C>> };
             keys(value, ['version', 'state']);
-            if (value.version !== 1 || !value.state || Array.isArray(value.state) || typeof value.state !== 'object')
+            if (value.version !== 2 || !value.state || Array.isArray(value.state) || typeof value.state !== 'object')
                 invalid('URL state');
             return normalizeTableState(capabilities, { ...fallback, ...value.state });
         } catch {
@@ -250,7 +260,7 @@ export function writeTableState<C extends Capabilities>(
     validateState(capabilities, state);
     const next = new URLSearchParams(search);
     const { filter, sort, groupBy, expanded } = state;
-    const encoded = JSON.stringify({ version: 1, state: { filter, sort, groupBy, expanded } });
+    const encoded = JSON.stringify({ version: 2, state: { filter, sort, groupBy, expanded } });
     if (new TextEncoder().encode(encoded).length > 16384) invalid('URL size');
     const key = options.key ?? 'table.' + capabilities.name;
     // oxlint-disable-next-line unicorn/no-useless-spread -- Snapshot before deleting bracket variants.
@@ -327,7 +337,7 @@ export function applyTableQuery<Q, C extends Capabilities>(base: Q, input: Table
             return expression(input.filter!);
         });
     input.path.forEach((part, index) => {
-        if (part.field !== input.groupBy[index]) invalid('group path');
+        if (part.field !== input.groupBy[index]!.field) invalid('group path');
         const field = capabilities.groups[part.field]!.field;
         scalar(part.value, capabilities.columns[field]!);
         query = query.where(field, part.value === null ? 'IS' : '=', part.value);
@@ -357,7 +367,7 @@ export type TableItem<Row> =
     | { kind: 'loading' | 'load-more' | 'empty'; id: string; groupId: string | null }
     | { kind: 'error'; id: string; groupId: string | null; error: Error };
 export interface MetadataResponse {
-    version: 1;
+    version: 2;
     requestKey: string;
     observedAt: string;
     totalCount: number;
@@ -405,7 +415,7 @@ export async function readMetadata<C extends Capabilities>(
             ...(xsrf ? { 'X-XSRF-TOKEN': decodeURIComponent(xsrf) } : {}),
         },
         body: JSON.stringify({
-            version: 1,
+            version: 2,
             contract: capabilities.contract,
             filter: state.filter,
             groupBy: state.groupBy,

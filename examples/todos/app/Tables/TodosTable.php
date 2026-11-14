@@ -22,6 +22,9 @@ final class TodosTable
             ])
             ->allowedSorts(['created_at', 'title'])->defaultSort('created_at')
             ->allowedGroups([AllowedGroup::field('completed'), AllowedGroup::belongsTo('list')->label('name')])
-            ->defaultGroupBy(['completed', 'list'])->maxGroupDepth(2)->pageSize(50);
+            ->defaultGroupBy([
+                ['field' => 'completed', 'direction' => 'desc'],
+                ['field' => 'list', 'direction' => 'asc'],
+            ])->maxGroupDepth(2)->pageSize(50);
     }
 }

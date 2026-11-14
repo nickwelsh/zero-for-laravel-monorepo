@@ -77,7 +77,9 @@ function TodosTable() {
             <header className="space-y-3">
                 <h1 className="text-2xl font-semibold">Todos data table</h1>
                 <p className="text-sm text-muted-foreground">
-                    Live rows · snapshot group counts · double-click or Enter to edit
+                    Live rows · snapshot group counts · double-click or Enter to edit. Default groups: completed
+                    descending, then list ID ascending; row order is independent. The URL restores grouping and
+                    expansion.
                 </p>
                 <div className="flex flex-wrap items-center gap-3">
                     <label className="flex items-center gap-2">

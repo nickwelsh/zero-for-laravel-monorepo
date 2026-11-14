@@ -57,7 +57,10 @@ final class TodosTable
                 AllowedGroup::belongsTo('list')->label('name'),
             ])
             ->defaultSort('created_at')
-            ->defaultGroupBy(['completed', 'list'])
+            ->defaultGroupBy([
+                ['field' => 'completed', 'direction' => 'desc'],
+                ['field' => 'list', 'direction' => 'asc'],
+            ])
             ->maxGroupDepth(2)
             ->pageSize(50);
     }
@@ -91,7 +94,7 @@ scope cannot be silently applied to counts while omitted from live rows.
 | `allowedSorts([...])`                                           | Current-table scalar field names; no arbitrary expressions               |
 | `AllowedGroup::field(field)`                                    | Group by an admitted scalar field; date/JSON fields excluded initially   |
 | `AllowedGroup::belongsTo(relation)->label(field)`               | Group by the declared foreign key, resolve authorized display labels     |
-| `defaultSort(field)` / `defaultGroupBy(fields)`                 | Defaults validated against the same capabilities as user input           |
+| `defaultSort(field)` / `defaultGroupBy(rules)`                  | Defaults validated against the same capabilities as user input           |
 | `pageSize(n)` / `maxGroupDepth(n)`                              | Server-owned row increment and maximum permitted nesting                 |
 
 Absent overrides, defaults are 50 rows per leaf, no user filter, no grouping,
@@ -114,7 +117,8 @@ hatch that makes counts approximate without saying so.
 - Native live query definitions and authoritative server registrations using the
   existing registration/contract-freshness mechanism.
 - The metadata route binding and a contract fingerprint shared by server and
-  client. The descriptor supplies the URL; applications do not hard-code it.
+  client. The fingerprint includes the table protocol version. The descriptor
+  supplies the URL; applications do not hard-code it.
 - Capabilities: public aliases, underlying public field associations, operator and
   value schemas, allowed sorts/groups, defaults, page size and group-depth limit.
 - Existing model decoding/casts and stable primary-key identity. Schema/publication
@@ -124,6 +128,20 @@ The generated descriptor contains no actor credential, API key, raw SQL, private
 policy implementation, or replicated row data. A descriptor/registration mismatch
 fails closed with a reload-required error rather than partially applying a query.
 Generated files participate in `--check`, ownership manifests and stale-file cleanup.
+
+### Version-2 migration
+
+Table capabilities, metadata requests/responses and table URL envelopes use
+version 2. Replace legacy string-array grouping with ordered `{ field, direction }`
+rules in PHP defaults, TypeScript state and application-owned saved views. Each
+direction is required and is either `asc` or `desc`; no legacy conversion occurs.
+Regenerate descriptors with `php artisan zero:generate` and deploy paired PHP and
+TypeScript contracts. Protocol-version changes also change contract fingerprints.
+Version-1 URLs and invalid version-2 string-array grouping restore the namespace's
+descriptor/application defaults, not a partially accepted state. Invalid defaults
+and programmatic writes throw. Allowlists, maximum group depth, authorization,
+scopes, nested filters and multi-sort semantics are unchanged. No grouping UI or
+presentation controls are supplied by this protocol change.
 
 ## 3. Query state and semantics
 
@@ -144,7 +162,7 @@ type GroupPath = readonly {
 type TableState = {
     filter: FilterNode | null;
     sort: readonly { field: string; direction: 'asc' | 'desc' }[];
-    groupBy: readonly string[];
+    groupBy: readonly { field: string; direction: 'asc' | 'desc' }[];
     expanded: readonly string[]; // Opaque group IDs, not labels or array indices.
 };
 ```
@@ -193,18 +211,22 @@ requires the same complexity and parity checks.
 - Sort only allowed current-table scalar columns. Preserve requested sort order
   and append any missing primary-key fields ascending, matching native Zero.
   No local reordering of fetched pages to simulate a global sort.
-- Native null ordering applies: first ascending, last descending. Related labels,
-  counts, formulas and arbitrary frontend accessors are not sortable in v1.
+- Native row-sort null ordering applies: first ascending, last descending. Related
+  labels, counts, formulas and arbitrary frontend accessors are not sortable.
 - Group by allowed scalar fields or belongs-to foreign-key identity. A belongs-to
   declaration resolves public alias `list` to `list_id`; labels come from separately
   authorized related rows. An unavailable label does not merge IDs or expose a
   private label. Null is an explicit unassigned bucket.
-- Group fields cannot repeat; nesting must respect `maxGroupDepth()`. V1 supports
+- Grouping is an ordered list of `{ field, direction }` rules. Group fields cannot
+  repeat; nesting must respect `maxGroupDepth()`. The implementation supports
   configured depths up to 3. Group identity encodes the entire typed path; null,
   empty string, the number 1 and the string `"1"` cannot collide.
-- Directories use deterministic group-key ordering, not label/count ordering.
-  SQL keyset comparisons must use the same scalar/null/string ordering as their
-  corresponding directory cursor. No offset or count-based random scrolling.
+- Each directory uses its level's direction and deterministic group-key ordering,
+  with NULLS LAST for both ascending and descending. Relation grouping orders the
+  foreign key, never its label or count. Row sorting is independent of grouping
+  order and direction. SQL keyset comparisons use the same scalar/null/string
+  ordering as their directory cursor, including the final null bucket. No offset
+  or count-based random scrolling.
 - Ungrouped tables use the same row-loading path with an empty group path and no
   synthetic visible group header.
 
@@ -233,15 +255,15 @@ to return aggregates through Zero's custom-query protocol.
 
 ```ts
 type MetadataInput = {
-    version: 1;
+    version: 2;
     contract: string;
     filter: FilterNode | null;
-    groupBy: readonly string[];
+    groupBy: readonly { field: string; direction: 'asc' | 'desc' }[];
     directories: readonly { path: GroupPath; after: string | null }[];
 };
 
 type MetadataResponse = {
-    version: 1;
+    version: 2;
     requestKey: string;
     observedAt: string;
     totalCount: number;
@@ -272,16 +294,20 @@ use one read-only repeatable-read PostgreSQL snapshot on the supported connectio
 This promises internal response consistency, not alignment with Zero. Another
 HTTP page or refresh has a new snapshot; `observedAt` is not a replication watermark.
 
-Cursors are opaque and bound to contract, actor/context, filter, grouping and
-directory path. Tampering or reuse with another scope is rejected. They are not
-authorization credentials. Concurrent inserts/deletes between directory pages can
-change discovery; deduplicate group IDs, expose snapshot semantics and refresh to
-rebuild the directory. There is no pinned cross-request database transaction.
+Cursors are opaque and bound to contract, actor/context, filter, the full grouping
+rules (including order and directions), and directory path. Changing even one
+direction invalidates the previous cursors. Tampering or reuse with another scope
+is rejected. They are not authorization credentials. Concurrent inserts/deletes
+between directory pages can change discovery; deduplicate group IDs, expose
+snapshot semantics and refresh to rebuild the directory. There is no pinned
+cross-request database transaction.
 
 The client matches responses to canonical request state and the current access
 generation, aborts obsolete work, and rejects late responses even if cancellation
-races. Responses are private/no-store. Failures are errors or stale data, never a
-zero count. Authorization/session loss clears protected rows, labels, counts,
+races. A grouping rule order/direction change clears incompatible metadata,
+cancels old requests and ignores stale responses. Responses are private/no-store.
+Failures are errors or stale data, never a zero count.
+Authorization/session loss clears protected rows, labels, counts,
 choices and drafts; transient failures can retain authorized stale metadata.
 
 HTTP errors use the existing application envelope: 401/419 for session failure,
@@ -321,7 +347,10 @@ const columns = [
 const table = useDataTable(todos, {
     columns,
     initialState: {
-        groupBy: ['completed', 'list'],
+        groupBy: [
+            { field: 'completed', direction: 'desc' },
+            { field: 'list', direction: 'asc' },
+        ],
         sort: [{ field: 'created_at', direction: 'asc' }],
     },
     editing: {
@@ -360,7 +389,7 @@ not. Existing ZeroProvider/access boundaries still wrap the table.
 | ----------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
 | `useDataTable(descriptor, options)`                               | One mounted table session; state, loaded items, query demand, snapshots and edit ownership                                       |
 | `table.state`                                                     | Readonly current filter, sort, grouping and expansion state                                                                      |
-| `table.setFilter(tree)` / `setSort(sort)` / `setGroupBy(fields)`  | Validate against descriptor and change state without an Inertia visit                                                            |
+| `table.setFilter(tree)` / `setSort(sort)` / `setGroupBy(rules)`   | Validate against descriptor and change state without an Inertia visit                                                            |
 | `table.expand(groupId)` / `collapse(groupId)` / `toggle(groupId)` | Change only that group; descendants retain their expansion state                                                                 |
 | `table.items`                                                     | Flattened currently discovered headers, loaded rows and loading/error/sentinel entries, in display order                         |
 | `table.loadMore(itemId)` / `retry(itemId)`                        | Request the identified directory or leaf window; no global page number                                                           |
@@ -375,7 +404,7 @@ plus `onStateChange(next)`, not both. `initialState` may be partial. Internal st
 is memory-only unless `urlState: true` (or `{ key, history, adapter }`) is enabled.
 The package then owns URL restoration, change persistence and Back/Forward
 subscriptions, independent of query-owner mounts. Filters, sorts, grouping and
-expanded IDs use a versioned `table.<name>` parameter; independent instances may
+expanded IDs use a version-2 `table.<name>` parameter; independent instances may
 choose distinct keys. Unrelated parameters, fragments and history state survive.
 Invalid or removed URL state restores the original initial state over descriptor
 defaults. Setters compose synchronously even with asynchronous router commits.
@@ -386,6 +415,9 @@ precedence, debounced search, and multiple sources, see [URL state integration](
 The default adapter uses browser history with replacement, or opt-in push.
 `@nickwelsh/zero-table/inertia` exports the same hook with Inertia client-side
 navigation, pending-write merging across tables, and request-URL SSR restoration.
+PHP `TableURLState`, browser and Inertia adapters share version-2 ordered-rule
+validation, default fallback, and explicit expansion restoration on direct loads
+and Back/Forward.
 The generic React entry does not depend on Inertia. Custom routers may implement
 `TableURLAdapter`; fully controlled applications may use the React-free
 `readTableState` / `writeTableState` helpers. URL ownership and application-controlled
@@ -421,9 +453,12 @@ remain undefined until a successful response; refresh/error flags never invent 0
 
 Filter/sort/group changes create the appropriate new query identity. Never display
 rows from an incompatible identity as current results. Reusing a visited identity
-may recover its authorized cached data and requested window. Grouping changes
-invalidate incompatible paths; compatible group IDs retain expansion. A label
-change never changes identity.
+may recover its authorized cached data and requested window. `setGroupBy` clears
+all expanded IDs on an actual rule change, including a field reorder or direction
+change; identical rules preserve expansion. Full controlled state or URL
+restoration can explicitly restore rules and expansion together. Collapsing a
+parent still preserves descendant expansion when the grouping rules are unchanged.
+A label change never changes identity.
 
 ### Loading, retention and virtualization
 

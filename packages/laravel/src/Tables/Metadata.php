@@ -5,7 +5,9 @@ declare(strict_types=1);
 namespace ZeroForLaravel\Tables;
 
 use Illuminate\Contracts\Auth\Authenticatable;
+use Illuminate\Contracts\Database\Query\Expression;
 use Illuminate\Contracts\Encryption\DecryptException;
+use Illuminate\Database\Grammar;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Facades\Crypt;
 use JsonException;
@@ -25,12 +27,12 @@ final class Metadata
     }
 
     /** @param array<string, mixed> $input
-     * @return array<string, mixed>
+     * @return array{version: int, requestKey: string, observedAt: string, totalCount: int, directories: list<array{path: Path, groups: list<array{id: string, value: string|int|float|bool|null, label: string, count: int}>, nextCursor: string|null}>}
      */
     public function read(TableDefinition $definition, ResolvedContext $context, ?Authenticatable $actor, array $input): array
     {
         Input::keys($input, ['version', 'contract', 'filter', 'groupBy', 'directories'], 'metadata');
-        if (($input['version'] ?? null) !== 1) {
+        if (($input['version'] ?? null) !== 2) {
             Input::fail('version', 'Unsupported table protocol.');
         }
 
@@ -70,7 +72,9 @@ final class Metadata
             $results = [];
             foreach ($directories as $directory) {
                 $path = $directory['path'];
-                $dimension = $groupBy[count($path)];
+                $rule = $groupBy[count($path)];
+                $dimension = $rule['field'];
+                $direction = $rule['direction'];
                 $group = $table->groups[$dimension];
                 $field = $group['field'];
                 $column = $table->base->model->columns[$field];
@@ -80,11 +84,21 @@ final class Metadata
                 if ($directory['after'] !== null) {
                     $after = $this->cursor($directory['after'], $scope);
                     Input::value($after, [...$column, 'nullable' => false], 'after');
-                    // PostgreSQL ascending directories put null last. The cursor uses that same order.
-                    $query->where(fn (Builder $next) => $next->where($qualified, '>', $after)->orWhereNull($qualified));
+                    // Both directions put null last; null can only finish the final page.
+                    $query->where(fn (Builder $next) => $next->where($qualified, $direction === 'asc' ? '>' : '<', $after)->orWhereNull($qualified));
                 }
 
-                $rows = $query->select($qualified)->selectRaw('COUNT(*) AS aggregate')->groupBy($qualified)->orderBy($qualified)->limit(51)->get();
+                $nulls = new readonly class($qualified) implements Expression
+                {
+                    public function __construct(private string $column) {}
+
+                    public function getValue(Grammar $grammar): string
+                    {
+                        return $grammar->wrap($this->column).' IS NULL';
+                    }
+                };
+                $rows = $query->select($qualified)->selectRaw('COUNT(*) AS aggregate')->groupBy($qualified)->orderBy($nulls)
+                    ->orderBy($qualified, $direction)->limit(51)->get();
                 $more = $rows->count() > 50;
                 $rows = $rows->take(50);
                 $labels = [];
@@ -130,7 +144,7 @@ final class Metadata
                     'nextCursor' => $more && $last !== null ? Crypt::encryptString(json_encode(['scope' => $scope, 'after' => $last], JSON_THROW_ON_ERROR)) : null];
             }
 
-            return ['version' => 1, 'requestKey' => hash('sha256', serialize([$filter, $groupBy, $directories])),
+            return ['version' => 2, 'requestKey' => hash('sha256', serialize([$filter, $groupBy, $directories])),
                 'observedAt' => now('UTC')->toIso8601String(), 'totalCount' => $total, 'directories' => $results];
         });
     }

@@ -159,5 +159,5 @@ return [
   'value' => 'id',
   'label' => 'name',
 ), 'q_30471d43196629bcc854513e6e8f5b7f07948b8f5b7de4512eedfaf4177ce71d'),
-    'q_0fdab00ea7600bf1e0cf67200ecc75dbf4edf6e2f1fbd592a4ad964bf54d828c' => new \ZeroForLaravel\Tables\RegisteredTableQuery('todos', '0fdab00ea7600bf1e0cf67200ecc75dbf4edf6e2f1fbd592a4ad964bf54d828c'),
+    'q_ee1febdff149e09e5dc576849090369d246b2d0f3d07941cdf2252222dad9544' => new \ZeroForLaravel\Tables\RegisteredTableQuery('todos', 'ee1febdff149e09e5dc576849090369d246b2d0f3d07941cdf2252222dad9544'),
 ];

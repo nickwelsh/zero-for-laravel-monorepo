@@ -145,6 +145,83 @@ Laravel's FormRequest again; normalize numeric and boolean URL strings there.
 `QueryData` includes both decoded rows and editable inputs; `Data` alone describes
 the read-only `useData` result. Native calls still pass their inputs explicitly.
 
+## Headless tables and ordered grouping
+
+`@nickwelsh/zero-table` uses generated PHP table capabilities for authorized live
+rows and snapshot group directories/counts. Declare allowed dimensions and ordered
+default rules in your table's `definition(TableContext $context): Table`:
+
+```php
+return Table::for(Todo::class)->visibleTo($context->user())
+    ->allowedGroups([
+        AllowedGroup::field('completed'),
+        AllowedGroup::belongsTo('list')->label('name'),
+    ])
+    ->defaultGroupBy([
+        ['field' => 'completed', 'direction' => 'desc'],
+        ['field' => 'list', 'direction' => 'asc'],
+    ])->maxGroupDepth(2);
+```
+
+`Table`, `TableContext` and `AllowedGroup` are in `ZeroForLaravel\Tables`. Generate
+the descriptor with `php artisan zero:generate`, then consume it inside the
+existing Zero provider/access boundary:
+
+```tsx
+import { column } from '@nickwelsh/zero-table';
+import { DataTable, useDataTable } from '@nickwelsh/zero-table/inertia';
+import todos from '@/zero/tables/todos';
+
+const columns = [column.text('title')];
+
+function Todos() {
+    'use no memo';
+    const table = useDataTable(todos, { columns, urlState: true });
+    // Render your own rows/headers in a viewport under one DataTable.Root.
+    // The descriptor's defaults are equivalent to:
+    // groupBy: [{ field: 'completed', direction: 'desc' }, { field: 'list', direction: 'asc' }]
+    return <DataTable.Root table={table}>{/* Application-owned UI */}</DataTable.Root>;
+}
+```
+
+Rule order defines nesting. Each level orders its keys in its own direction with
+**NULLS LAST in both directions**. Relation groups order foreign-key values, not
+labels. Row `sort` remains independent; changing group direction does not reverse
+rows within a leaf. Allowlists, maximum depth, authorization, mandatory scopes,
+nested filters and multi-sort retain their existing semantics. Presentation and
+grouping controls remain application-owned.
+
+Directory pagination uses opaque keyset cursors scoped to the full grouping rules,
+including order/direction, plus contract, actor/context, filter and directory path.
+Changing rules clears metadata, cancels old requests and ignores stale responses.
+Directories/counts are snapshots; changes between pages can require a refresh.
+Live row windows grow prefixes; snapshot counts never establish row exhaustion.
+
+`setGroupBy` clears expanded IDs on an actual field/order/direction change, while
+identical rules preserve them. Full controlled state or URL restoration can
+explicitly supply both rules and expansion. Collapsing a parent still preserves
+descendant expansion when rules have not changed.
+
+### Version-2 migration and URL parity
+
+Replace all legacy string-array grouping in PHP defaults, TypeScript state and
+saved views with explicit `{ field, direction }` rules. Capabilities, metadata
+requests/responses and table URL envelopes now use **version 2**. Regenerate
+descriptors and deploy matching PHP/TypeScript output together; contract
+fingerprints include the protocol version. Version-1 URLs and invalid version-2
+string-array grouping fall back to the whole namespace's application/descriptor
+defaults, with no silent conversion. Invalid defaults and programmatic writes throw.
+
+The browser `/react` and `/inertia` hooks use the same version-2 URL contract as PHP
+`TableURLState`, including rule directions, expansion, validation and fallback.
+Inertia's hook restores from `usePage().url` during SSR, uses client-side router
+writes, merges pending changes across tables, and restores Back/Forward without
+losing unrelated parameters or scroll. For PHP-first multi-source pages, use
+`TableURLState` with a controlled `createPageURLState` coordinator rather than a
+second `urlState` owner. See the repository's `docs/URL_STATE.md` and
+`examples/todos/resources/js/pages/url-state.tsx` for that integration, and
+`packages/table/README.md` for rendering and editing examples.
+
 ## Native Zero access
 
 The generated hook returns the actual, schema-typed Zero instance. Query factories

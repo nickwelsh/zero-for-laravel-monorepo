@@ -34,7 +34,7 @@ final readonly class TableDefinition
     {
         $table = $this->table;
 
-        return ['version' => 1, 'name' => $this->name, 'contract' => $this->contract,
+        return ['version' => 2, 'name' => $this->name, 'contract' => $this->contract,
             'model' => $table->base->model->name, 'key' => [$table->base->model->key],
             'pageSize' => $table->increment, 'maxGroupDepth' => $table->depth ?? min(3, count($table->groups)),
             'filters' => (object) array_map(fn (AllowedFilter $filter): array => ['field' => $filter->field, 'kind' => $filter->kind,

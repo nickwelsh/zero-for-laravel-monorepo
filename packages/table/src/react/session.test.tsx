@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+/* oxlint-disable unicorn/no-array-reverse -- ES2022 support; only newly allocated arrays are reversed. */
 import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vite-plus/test';
 import { StrictMode, useEffect } from 'react';
@@ -11,6 +12,7 @@ import {
     queryKey,
     type GroupPath,
     type TableQueryInput,
+    type TableState,
     type CellSubmitResult,
 } from '../index';
 import { DataTable, useDataTable, type TableSession, type TableOptions } from './index';
@@ -80,7 +82,7 @@ vi.mock('@rocicorp/zero/react', async () => {
     };
 });
 const capabilities = {
-    version: 1,
+    version: 2,
     name: 'tasks',
     contract: 'test-contract',
     model: 'Task',
@@ -96,7 +98,13 @@ const capabilities = {
     },
     pageSize: 2,
     maxGroupDepth: 2,
-    defaults: { sort: [], groupBy: ['done', 'list'] },
+    defaults: {
+        sort: [],
+        groupBy: [
+            { field: 'done', direction: 'asc' },
+            { field: 'list', direction: 'asc' },
+        ],
+    },
     metadataURL: '/metadata',
 } as const;
 type Row = { id: string; title: string; done: boolean; list_id: string | null };
@@ -137,9 +145,10 @@ function Harness({ options = {} }: { options?: TableOptions<typeof capabilities,
         </DataTable.Root>
     );
 }
-function directory(path: GroupPath) {
-    const field = path.length ? 'list' : 'done';
-    const values = path.length ? Array.from({ length: 8 }, (_, index) => `list-${index}`) : [false, true];
+function directory(path: GroupPath, groupBy: TableQueryInput['groupBy'] = capabilities.defaults.groupBy) {
+    const { field, direction } = groupBy[path.length]!;
+    const values = field === 'list' ? Array.from({ length: 8 }, (_, index) => `list-${index}`) : [false, true];
+    if (direction === 'desc') values.reverse();
     return {
         path,
         groups: values.map((value) => ({
@@ -151,14 +160,18 @@ function directory(path: GroupPath) {
         nextCursor: null,
     };
 }
-const response = (directories: readonly { path: GroupPath }[], count = 144) =>
+const response = (
+    directories: readonly { path: GroupPath }[],
+    count = 144,
+    groupBy: TableQueryInput['groupBy'] = capabilities.defaults.groupBy,
+) =>
     new Response(
         JSON.stringify({
-            version: 1,
+            version: 2,
             requestKey: 'test',
             observedAt: '2026-11-04T12:00:00Z',
             totalCount: count,
-            directories: directories.map(({ path }) => directory(path)),
+            directories: directories.map(({ path }) => directory(path, groupBy)),
         }),
     );
 beforeEach(() => {
@@ -278,7 +291,13 @@ it('preloads hovered collapsed leaves within shared query and row budgets withou
     for (const leaf of leaves)
         for (const window of [3, 6, 8])
             native.rows.set(
-                queryKey({ filter: null, sort: [], groupBy: ['done', 'list'], path: leaf, __window: window }),
+                queryKey({
+                    filter: null,
+                    sort: [],
+                    groupBy: capabilities.defaults.groupBy,
+                    path: leaf,
+                    __window: window,
+                }),
                 Array.from({ length: window }, (_, i) => ({
                     id: `${leaf[1]!.value}-${i}`,
                     title: `Task ${i}`,
@@ -354,7 +373,7 @@ it('keeps independent open siblings and saved live prefixes across parent collap
     const args = (leaf: GroupPath, window: number) => ({
         filter: null,
         sort: [],
-        groupBy: ['done', 'list'],
+        groupBy: capabilities.defaults.groupBy,
         path: leaf,
         __window: window,
     });
@@ -514,6 +533,274 @@ it('aborts obsolete metadata across refresh, grouping, unmount and StrictMode re
     expect(table.count.value).toBe(3);
 });
 
+it.each(['direction', 'priority'] as const)(
+    'discards old directories and late responses after a grouping %s change',
+    async (kind) => {
+        const requests: {
+            body: {
+                version: number;
+                groupBy: TableQueryInput['groupBy'];
+                directories: { path: GroupPath; after: string | null }[];
+            };
+            signal: AbortSignal;
+            deliver: (value: Response) => void;
+        }[] = [];
+        vi.stubGlobal(
+            'fetch',
+            (_url: string, options: RequestInit) =>
+                new Promise<Response>((deliver) =>
+                    requests.push({ body: JSON.parse(options.body as string), signal: options.signal!, deliver }),
+                ),
+        );
+        const open = groupId([{ field: 'done', value: false }]);
+        render(
+            <Harness options={{ initialState: { expanded: [open], sort: [{ field: 'title', direction: 'desc' }] } }} />,
+        );
+        await waitFor(() => expect(requests).toHaveLength(1));
+        await act(async () => requests[0]!.deliver(response([{ path: [] }])));
+        await waitFor(() => expect(requests).toHaveLength(2));
+        expect(table.items.some((item) => item.kind === 'group' && item.expanded)).toBe(true);
+        const rules =
+            kind === 'priority'
+                ? [...capabilities.defaults.groupBy].reverse()
+                : [{ field: 'done' as const, direction: 'desc' as const }, capabilities.defaults.groupBy[1]];
+        act(() => table.setGroupBy(rules));
+        await waitFor(() => expect(requests).toHaveLength(3));
+        expect(requests[1]!.signal.aborted).toBe(true);
+        expect(requests[2]!.body).toMatchObject({
+            version: 2,
+            groupBy: rules,
+            directories: [{ path: [], after: null }],
+        });
+        expect(table.state.expanded).toEqual([]);
+        expect(table.state.sort).toEqual([{ field: 'title', direction: 'desc' }]);
+        expect(table.count.value).toBeUndefined();
+        expect(table.items.some((item) => item.kind === 'group')).toBe(false);
+        const field = kind === 'priority' ? 'list' : 'done';
+        const values = kind === 'priority' ? ['list-b', 'list-a', null] : [true, false];
+        const groups = values.map((value) => ({
+            id: groupId([{ field, value }]),
+            value,
+            label: String(value),
+            count: 1,
+        }));
+        await act(async () =>
+            requests[2]!.deliver(
+                new Response(
+                    JSON.stringify({
+                        version: 2,
+                        requestKey: 'new',
+                        observedAt: 'now',
+                        totalCount: 7,
+                        directories: [{ path: [], groups, nextCursor: null }],
+                    }),
+                ),
+            ),
+        );
+        expect(table.items.filter((item) => item.kind === 'group').map((item) => item.id)).toEqual(
+            groups.map((group) => group.id),
+        );
+        // Even an obsolete access-denied result must not revoke the new view.
+        await act(async () => requests[1]!.deliver(new Response('{}', { status: 403 })));
+        expect(table.count.value).toBe(7);
+        act(() => table.expand(groups[0]!.id));
+        await waitFor(() => expect(requests).toHaveLength(4));
+        act(() => table.setGroupBy(structuredClone(rules)));
+        expect(table.state.expanded).toEqual([groups[0]!.id]);
+        expect(requests[3]!.signal.aborted).toBe(false);
+        act(() => table.setSort([{ field: 'title', direction: 'asc' }]));
+        expect(requests[3]!.signal.aborted).toBe(false);
+        expect(table.state.groupBy).toEqual(rules);
+        expect(table.count.value).toBe(7);
+    },
+);
+
+it.each(['direction', 'priority'] as const)(
+    'restores controlled nested expansion after a grouping %s change with metadata outstanding',
+    async (kind) => {
+        const requests: {
+            body: { groupBy: TableQueryInput['groupBy']; directories: { path: GroupPath }[] };
+            signal: AbortSignal;
+            deliver: (value: Response) => void;
+        }[] = [];
+        vi.stubGlobal(
+            'fetch',
+            (_url: string, options: RequestInit) =>
+                new Promise<Response>((deliver) =>
+                    requests.push({ body: JSON.parse(options.body as string), signal: options.signal!, deliver }),
+                ),
+        );
+        const oldPath = [
+            { field: 'done', value: false },
+            { field: 'list', value: 'list-0' },
+        ] as const;
+        const state: TableState<typeof capabilities> = {
+            filter: null,
+            sort: [{ field: 'title', direction: 'desc' }],
+            groupBy: capabilities.defaults.groupBy,
+            expanded: [groupId(oldPath.slice(0, 1)), groupId(oldPath)],
+        };
+        let proposed!: TableState<typeof capabilities>;
+        const onStateChange = (next: TableState<typeof capabilities>) => {
+            proposed = next;
+        };
+        const screen = render(<Harness options={{ state, onStateChange }} />);
+        await waitFor(() => expect(requests).toHaveLength(1));
+        await act(async () => requests[0]!.deliver(response(requests[0]!.body.directories)));
+        await waitFor(() => expect(requests).toHaveLength(2));
+        const groupBy: TableState<typeof capabilities>['groupBy'] =
+            kind === 'priority'
+                ? [{ field: 'list', direction: 'desc' }, capabilities.defaults.groupBy[0]]
+                : [{ field: 'done', direction: 'desc' }, capabilities.defaults.groupBy[1]];
+        const path: GroupPath =
+            kind === 'priority'
+                ? [
+                      { field: 'list', value: 'list-5' },
+                      { field: 'done', value: true },
+                  ]
+                : [
+                      { field: 'done', value: true },
+                      { field: 'list', value: 'list-5' },
+                  ];
+        const row: Row = { id: 'replacement', title: 'Replacement view', done: true, list_id: 'list-5' };
+        native.rows.set(queryKey({ filter: null, sort: state.sort, groupBy, path, __window: 3 }), [row]);
+        act(() => table.setGroupBy(groupBy));
+        expect(proposed).toEqual({ ...state, groupBy, expanded: [] });
+        // A setter proposes a change; only the parent owns the controlled view.
+        expect(table.state).toEqual(state);
+        expect(requests[1]!.signal.aborted).toBe(false);
+        const restored = { ...proposed, expanded: [groupId(path.slice(0, 1)), groupId(path)] };
+        screen.rerender(<Harness options={{ state: restored, onStateChange }} />);
+        await waitFor(() => expect(requests).toHaveLength(3));
+        expect(requests[1]!.signal.aborted).toBe(true);
+        expect(table.state).toEqual(restored);
+        expect(table.count.value).toBeUndefined();
+        expect(table.items.some((item) => item.kind === 'group')).toBe(false);
+        await act(async () => requests[2]!.deliver(response(requests[2]!.body.directories, 7, groupBy)));
+        await waitFor(() => expect(requests).toHaveLength(4));
+        expect(requests[3]!.body).toMatchObject({ groupBy, directories: [{ path: path.slice(0, 1) }] });
+        // An old successful child response must not overwrite the restored view's count or directories.
+        await act(async () => requests[1]!.deliver(response(requests[1]!.body.directories, 999)));
+        expect(table.count.value).toBe(7);
+        expect(table.items.some((item) => item.kind === 'group' && item.depth === 1)).toBe(false);
+        await act(async () => requests[3]!.deliver(response(requests[3]!.body.directories, 7, groupBy)));
+        await waitFor(() =>
+            expect(table.items.filter((item) => item.kind === 'row').map((item) => item.row)).toEqual([row]),
+        );
+        expect(screen.container.querySelector('output')?.textContent).toContain('Replacement view');
+        expect(table.items.filter((item) => item.kind === 'group' && item.depth === 0).map((item) => item.id)).toEqual(
+            directory([], groupBy).groups.map((group) => group.id),
+        );
+        expect(table.state).toEqual(restored);
+        expect(table.count).toMatchObject({ value: 7, error: undefined });
+    },
+);
+
+it.each([
+    ['direction', 'editing'],
+    ['priority', 'pending'],
+] as const)('preserves grown windows across a grouping %s change with a %s draft', async (kind, status) => {
+    const path = [
+        { field: 'done', value: false },
+        { field: 'list', value: 'list-0' },
+    ] as const;
+    const expanded = [groupId(path.slice(0, 1)), groupId(path)];
+    const rows: Row[] = Array.from({ length: 7 }, (_, index) => ({
+        id: `r-${index}`,
+        title: `Task ${index}`,
+        done: false,
+        list_id: 'list-0',
+    }));
+    for (const window of [3, 5, 7])
+        native.rows.set(
+            queryKey({ filter: null, sort: [], groupBy: capabilities.defaults.groupBy, path, __window: window }),
+            rows.slice(0, window),
+        );
+    native.rows.set(editingKey(rows[0]!.id), [rows[0]!]);
+    vi.stubGlobal('fetch', async (_url: string, options: RequestInit) => {
+        const input = JSON.parse(options.body as string) as {
+            groupBy: TableQueryInput['groupBy'];
+            directories: { path: GroupPath }[];
+        };
+        return response(input.directories, 144, input.groupBy);
+    });
+    let resolve!: (result: CellSubmitResult) => void;
+    const screen = render(
+        <Harness
+            options={{
+                initialState: { expanded },
+                columns: [column.text('title', { editor: editors.text() })],
+                editing: {
+                    enabled: true,
+                    submit: () => new Promise<CellSubmitResult>((done) => (resolve = done)),
+                },
+            }}
+        />,
+    );
+    await waitFor(() => expect(table.items.filter((item) => item.kind === 'row')).toHaveLength(2));
+    for (const count of [4, 6]) {
+        const more = table.items.find((item) => item.kind === 'load-more' && item.groupId === groupId(path))!;
+        act(() => table.loadMore(more.id));
+        await waitFor(() => expect(table.items.filter((item) => item.kind === 'row')).toHaveLength(count));
+    }
+    const oldLeaf = table.leaves.find((leaf) => groupId(leaf.path) === groupId(path))!;
+    const oldResult = oldLeaf.data!;
+    const id = descriptor.rowId(rows[0]!);
+    let pending: Promise<void> | undefined;
+    act(() => {
+        table.cell(id, 'title').begin();
+        table.cell(id, 'title').setDraft('My draft');
+        if (status === 'pending') pending = table.cell(id, 'title').submit();
+    });
+    const groupBy: TableState<typeof capabilities>['groupBy'] =
+        kind === 'priority'
+            ? [{ field: 'list', direction: 'desc' }, capabilities.defaults.groupBy[0]]
+            : [{ field: 'done', direction: 'desc' }, capabilities.defaults.groupBy[1]];
+    act(() => table.setGroupBy(groupBy));
+    await waitFor(() => expect(table.count).toMatchObject({ value: 144, pending: false }));
+    expect(table.state.expanded).toEqual([]);
+    expect(table.diagnostics.requestedRows).toBe(0);
+    const authorized = { ...rows[0]!, title: 'Identity-authorized row' };
+    native.rows.set(editingKey(rows[0]!.id), [authorized]);
+    act(() => native.listeners.forEach((listener) => listener()));
+    await waitFor(() =>
+        expect(table.items.filter((item) => item.kind === 'row')).toMatchObject([{ row: authorized, groupId: null }]),
+    );
+    // Simulate late reports from the retired owner, including an obsolete denial.
+    await act(async () => {
+        table.report(oldLeaf.key, {
+            ...oldResult,
+            data: [{ id: 'obsolete', title: 'Obsolete leaf result', done: false, list_id: 'list-0' }],
+        });
+        table.report(oldLeaf.key, {
+            ...oldResult,
+            error: Object.assign(new Error('Obsolete denial'), { status: 403 }),
+        });
+    });
+    expect(table.items.filter((item) => item.kind === 'row').map((item) => item.row)).toEqual([authorized]);
+    expect(screen.queryByText('Obsolete leaf result')).toBeNull();
+    expect(table.cell(id, 'title')).toMatchObject({ active: true, dirty: true, draft: 'My draft', status });
+    act(() => {
+        table.setGroupBy(capabilities.defaults.groupBy);
+        for (const group of expanded) table.expand(group);
+    });
+    await waitFor(() => expect(table.items.filter((item) => item.kind === 'row')).toHaveLength(6));
+    expect(table.items.filter((item) => item.kind === 'row').map((item) => item.id)).toEqual(
+        rows.slice(0, 6).map((row) => descriptor.rowId(row)),
+    );
+    expect(table.state.expanded).toEqual(expanded);
+    expect(table.items.some((item) => item.kind === 'load-more' && item.groupId === groupId(path))).toBe(true);
+    expect(table.cell(id, 'title')).toMatchObject({ active: true, dirty: true, draft: 'My draft', status });
+    if (pending) {
+        await act(async () => {
+            resolve({ status: 'invalid', errors: { title: ['Reserved title'] } });
+            await pending;
+        });
+        expect(table.cell(id, 'title')).toMatchObject({ active: true, draft: 'My draft', status: 'invalid' });
+        expect(screen.getByRole('alert').textContent).toBe('Reserved title');
+    }
+});
+
 it('retains stale metadata on malformed responses and recovers only on manual retry', async () => {
     render(<Harness />);
     await waitFor(() => expect(table.count.value).toBe(144));
@@ -521,7 +808,7 @@ it('retains stale metadata on malformed responses and recovers only on manual re
         async () =>
             new Response(
                 JSON.stringify({
-                    version: 1,
+                    version: 2,
                     requestKey: 42,
                     observedAt: '2026-11-04T12:01:00Z',
                     totalCount: 999,
@@ -552,7 +839,7 @@ it('never publishes queued sibling rows after a live access denial', async () =>
     const args = (list: string) => ({
         filter: null,
         sort: [],
-        groupBy: ['done', 'list'],
+        groupBy: capabilities.defaults.groupBy,
         path: [...path, { field: 'list', value: list }],
         __window: 3,
     });

@@ -89,7 +89,7 @@ final class TableCompiler
             }
 
             ksort($dependencies);
-            $fingerprint = hash('sha256', serialize([$name, hash_file('sha256', $file), $dependencies, $table->groups, ContextDefinition::configured()->contract(), config()->string('zero.route_prefix')]));
+            $fingerprint = hash('sha256', serialize([2, $name, hash_file('sha256', $file), $dependencies, $table->groups, ContextDefinition::configured()->contract(), config()->string('zero.route_prefix')]));
 
             return new TableDefinition($name, $table, $expression, $fingerprint, $visible);
         } catch (Throwable $throwable) {
@@ -127,11 +127,19 @@ final class TableCompiler
         if ($node instanceof Expr\Array_) {
             $items = [];
             foreach ($node->items as $item) {
-                if ($item === null || $item->unpack || $item->byRef || $item->key !== null) {
-                    throw new LogicException('Table declaration arrays must be literal lists.');
+                if ($item === null || $item->unpack || $item->byRef || ($item->key !== null && ! $item->key instanceof Scalar\String_)) {
+                    throw new LogicException('Table declaration arrays must be literal lists or string-keyed objects.');
                 }
 
-                $items[] = $this->value($item->value);
+                if ($item->key instanceof Scalar\String_) {
+                    if (array_key_exists($item->key->value, $items)) {
+                        throw new LogicException('Duplicate table declaration key.');
+                    }
+
+                    $items[$item->key->value] = $this->value($item->value);
+                } else {
+                    $items[] = $this->value($item->value);
+                }
             }
 
             return $items;

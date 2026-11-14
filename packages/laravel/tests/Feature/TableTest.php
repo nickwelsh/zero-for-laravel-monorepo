@@ -42,7 +42,7 @@ function taskTable(): Table
             AllowedFilter::date('completed_at')->operators(['equals', 'gt', 'lte'])->nullable(),
         ])->allowedSorts(['title', 'rating'])->allowedGroups([
             AllowedGroup::field('done'), AllowedGroup::belongsTo('list')->label('name'),
-        ])->defaultGroupBy(['done', 'list'])->maxGroupDepth(2)->defaultSort('title');
+        ])->defaultGroupBy([['field' => 'done', 'direction' => 'desc'], ['field' => 'list', 'direction' => 'asc']])->maxGroupDepth(2)->defaultSort('title');
 }
 
 beforeEach(function (): void {
@@ -86,7 +86,7 @@ test('table predicates preserve authorized membership, literal matching, nulls a
         expect(json_encode($ast, JSON_THROW_ON_ERROR))->toContain('permission_index', 'user:alice');
     }
 
-    $path = $table->path([['field' => 'done', 'value' => false], ['field' => 'list', 'value' => null]], ['done', 'list'], leaf: true);
+    $path = $table->path([['field' => 'done', 'value' => false], ['field' => 'list', 'value' => null]], $table->defaultGrouping, leaf: true);
     expect($table->sql($context, null, $path)->count())->toBe(2);
     expect($table->rows(null, [], $table->ordering([['field' => 'rating', 'direction' => 'desc']]))->ast()['orderBy'])->toBe([['rating', 'desc'], ['id', 'asc']]);
     expect(fn (): Builder => $table->sql(new ResolvedContext(['user_id' => 'bob'], 'bob')))->toThrow(AuthorizationException::class);
@@ -110,8 +110,20 @@ test('table capabilities reject malformed or broadened query input', function ()
         expect(fn (): ZeroQuery => $table->rows($filter))->toThrow(ValidationException::class);
     }
 
-    expect(fn (): array => $table->grouping(['done', 'done']))->toThrow(ValidationException::class);
-    expect(fn (): array => $table->path([['field' => 'list', 'value' => null]], ['done', 'list']))->toThrow(ValidationException::class);
+    foreach ([
+        ['done', 'list'],
+        [['field' => 'done']],
+        [['field' => 'done', 'direction' => 'sideways']],
+        [['field' => 'secret', 'direction' => 'asc']],
+        [['field' => 'done', 'direction' => 'asc', 'extra' => true]],
+        [['field' => 'done', 'direction' => 'asc'], ['field' => 'done', 'direction' => 'desc']],
+        [...$table->defaultGrouping, ['field' => 'done', 'direction' => 'asc']],
+    ] as $invalid) {
+        expect(fn (): array => $table->grouping($invalid))->toThrow(ValidationException::class);
+    }
+
+    expect($table->grouping(array_reverse($table->defaultGrouping)))->toBe(array_reverse($table->defaultGrouping));
+    expect(fn (): array => $table->path([['field' => 'list', 'value' => null]], $table->defaultGrouping))->toThrow(ValidationException::class);
     expect(fn (): array => $table->ordering([['field' => 'secret', 'direction' => 'asc']]))->toThrow(ValidationException::class);
     expect(fn (): Table => Table::for(Task::class)->allowedFilters([AllowedFilter::number('title')]))->toThrow(InvalidArgumentException::class);
     expect(fn (): Table => Table::for(Task::class)->allowedFilters([AllowedFilter::exact('done')->nullable()]))->toThrow(InvalidArgumentException::class);
@@ -121,18 +133,20 @@ test('table capabilities reject malformed or broadened query input', function ()
 test('URL views normalize independent namespaces without changing mandatory membership', function (): void {
     $table = taskTable();
     $sort = [['field' => 'rating', 'direction' => 'desc'], ['field' => 'title', 'direction' => 'asc']];
-    $encoded = TableURLState::encode($table, ['filter' => null, 'sort' => $sort, 'groupBy' => [], 'expanded' => ['g:[{"field":"done","value":false}]']]);
-    $query = 'other=keep&table.people='.urlencode($encoded).'&table.companies='.urlencode('{"version":1,"state":{"sort":[]}}');
+    $groupBy = array_reverse($table->defaultGrouping);
+    $encoded = TableURLState::encode($table, ['filter' => null, 'sort' => $sort, 'groupBy' => $groupBy, 'expanded' => ['g:[{"field":"list","value":null}]']]);
+    $query = 'other=keep&table.people='.urlencode($encoded).'&table.companies='.urlencode('{"version":2,"state":{"sort":[]}}');
     $people = TableURLState::read($table, $query, 'table.people');
     $companies = TableURLState::read($table, $query, 'table.companies', ['groupBy' => []]);
     expect($people['sort'])->toBe($sort)
-        ->and($people['expanded'])->toBe(['g:[{"field":"done","value":false}]'])
+        ->and($people['groupBy'])->toBe($groupBy)
+        ->and($people['expanded'])->toBe(['g:[{"field":"list","value":null}]'])
         ->and($companies['sort'])->toBe([])
         ->and($companies['groupBy'])->toBe([]);
     $context = new ResolvedContext(['user_id' => 'alice'], 'alice');
     expect($table->sql($context, $people['filter'])->count())->toBe(3);
     $fallback = TableURLState::normalize($table, ['groupBy' => []]);
-    foreach (['table.people=null', 'table.people='.urlencode($encoded).'&table.people=other', 'table.people='.urlencode('{"version":1,"state":{"tenant":"bob"}}')] as $invalid) {
+    foreach (['table.people=null', 'table.people='.urlencode($encoded).'&table.people=other', 'table.people='.urlencode('{"version":2,"state":{"tenant":"bob"}}'), 'table.people='.urlencode('{"version":1,"state":{"sort":[]}}'), 'table.people='.urlencode('{"version":2,"state":{"groupBy":["done"]}}')] as $invalid) {
         expect(TableURLState::read($table, $invalid, 'table.people', ['groupBy' => []]))->toBe($fallback);
     }
 });

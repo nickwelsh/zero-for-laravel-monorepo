@@ -44,7 +44,7 @@ final class TableURLState
 
             $envelope = Input::object($envelope, 'url');
             Input::keys($envelope, ['version', 'state'], 'url');
-            if (! in_array($envelope['version'] ?? null, [1, 1.0], true)) {
+            if (! in_array($envelope['version'] ?? null, [2, 2.0], true)) {
                 return $fallback;
             }
 
@@ -81,7 +81,7 @@ final class TableURLState
     /** @param array<string, mixed> $state */
     public static function encode(Table $table, array $state): string
     {
-        $encoded = json_encode(['version' => 1, 'state' => self::normalize($table, $state)], JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_LINE_TERMINATORS);
+        $encoded = json_encode(['version' => 2, 'state' => self::normalize($table, $state)], JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_LINE_TERMINATORS);
         if (strlen($encoded) > 16384) {
             Input::fail('state', 'URL state exceeds 16384 bytes.');
         }

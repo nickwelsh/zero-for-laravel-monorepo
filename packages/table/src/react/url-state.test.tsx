@@ -56,10 +56,10 @@ it('owns URL restoration and synchronous composed updates, preserving unrelated 
     act(() => {
         view.result.current.setFilter(filter);
         view.result.current.setSort(sort);
-        view.result.current.setGroupBy(['done']);
+        view.result.current.setGroupBy([{ field: 'done', direction: 'desc' }]);
         view.result.current.expand(expanded);
     });
-    const expected = { filter, sort, groupBy: ['done'], expanded: [expanded] };
+    const expected = { filter, sort, groupBy: [{ field: 'done', direction: 'desc' }], expanded: [expanded] };
     expect(view.result.current.state).toEqual(expected);
     expect(readTableState(capabilities, new URL(window.location.href).searchParams)).toEqual(expected);
     expect(window.history.length).toBe(historyLength);
@@ -154,11 +154,22 @@ it('merges pending Inertia writes across tables and ignores intermediate router 
     act(() => {
         view.result.current[0]!.setFilter(filter);
         view.result.current[1]!.setSort(sort);
-        view.result.current[0]!.setGroupBy(['done']);
+        view.result.current[0]!.setGroupBy([
+            { field: 'list', direction: 'desc' },
+            { field: 'done', direction: 'asc' },
+        ]);
     });
     const first = view.result.current[0]!.state;
     const second = view.result.current[1]!.state;
-    expect(first).toEqual({ filter, sort: capabilities.defaults.sort, groupBy: ['done'], expanded: [] });
+    expect(first).toEqual({
+        filter,
+        sort: capabilities.defaults.sort,
+        groupBy: [
+            { field: 'list', direction: 'desc' },
+            { field: 'done', direction: 'asc' },
+        ],
+        expanded: [],
+    });
     expect(second).toEqual({ filter: null, sort, groupBy: capabilities.defaults.groupBy, expanded: [] });
     for (const [index, write] of inertia.writes.entries()) {
         act(() => {
@@ -185,20 +196,36 @@ it('merges pending Inertia writes across tables and ignores intermediate router 
 });
 
 it('restores Inertia URL state during SSR without accessing browser globals', () => {
-    const search = writeTableState(capabilities, new URLSearchParams(), { ...initialState, filter, sort });
+    const state: TableState<typeof capabilities> = {
+        ...initialState,
+        filter,
+        sort,
+        groupBy: [
+            { field: 'list', direction: 'desc' },
+            { field: 'done', direction: 'asc' },
+        ],
+        expanded: [groupId([{ field: 'list', value: null }])],
+    };
+    const search = writeTableState(capabilities, new URLSearchParams(), state);
     inertia.pageURL = '/tasks?' + search.toString();
     vi.stubGlobal('window', undefined);
+    let restored: TableState<typeof capabilities> | undefined;
     function ServerTable() {
         const table = useInertiaDataTable(tasks, { urlState: true });
+        restored = table.state;
         return <output>{table.state.filter?.kind === 'condition' ? table.state.filter.value : 'missing'}</output>;
     }
     expect(renderToString(<ServerTable />)).toBe('<output>R&amp;D + café</output>');
+    expect(restored).toEqual(state);
 });
 
 it('coordinates two controlled sources, debounced writes, defaults and history restoration', async () => {
     const page = createPageURLState(browserURLAdapter, {
         people: tableStateCodec(capabilities, { key: 'table.people', initialState }),
-        companies: tableStateCodec(capabilities, { key: 'table.companies', initialState: { groupBy: ['done'] } }),
+        companies: tableStateCodec(capabilities, {
+            key: 'table.companies',
+            initialState: { groupBy: [{ field: 'done', direction: 'asc' }] },
+        }),
     });
     const view = renderHook(() => {
         const state = usePageURLState(page);
@@ -254,7 +281,7 @@ it('coordinates two controlled sources, debounced writes, defaults and history r
         vi.advanceTimersByTime(300);
     });
     expect(view.result.current.people.state).toEqual(initialState);
-    expect(view.result.current.companies.state.groupBy).toEqual(['done']);
+    expect(view.result.current.companies.state.groupBy).toEqual([{ field: 'done', direction: 'asc' }]);
     expect(window.location.search).toBe('?other=restored');
     vi.useRealTimers();
 });
