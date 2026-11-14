@@ -176,8 +176,8 @@ importers:
         specifier: ^3.0.0
         version: 3.8.0(axios@1.21.0(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2))(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
       '@inertiajs/vite':
-        specifier: ^3.0.0
-        version: 3.8.0(@voidzero-dev/vite-plus-core@1.5.0(@types/node@26.6.5)(@volar/typescript@2.4.28(typescript@7.0.2))(@vue/language-core@3.3.13)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(tsx@4.23.15)(typescript@7.0.2)(yaml@2.9.1))(axios@1.21.0(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2))
+        specifier: ^3.11.0
+        version: 3.11.0(@voidzero-dev/vite-plus-core@1.5.0(@types/node@26.6.5)(@volar/typescript@2.4.28(typescript@7.0.2))(@vue/language-core@3.3.13)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(tsx@4.23.15)(typescript@7.0.2)(yaml@2.9.1))(axios@1.21.0(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2))
       '@laravel/passkeys':
         specifier: ^0.4.0
         version: 0.4.0(react@19.3.1)(svelte@5.57.2)
@@ -1279,6 +1279,14 @@ packages:
     cpu: [x64]
     os: [win32]
 
+  '@inertiajs/core@3.11.0':
+    resolution: {integrity: sha512-YDqkKHsTiDUKofVzE3p6IduuU1u0ZwmheSpk2AZP6Eig3ZwhTlchDiLbUhFUCd138naqlhjRh2rTxIXeKrnmOQ==}
+    peerDependencies:
+      axios: ^1.15.2
+    peerDependenciesMeta:
+      axios:
+        optional: true
+
   '@inertiajs/core@3.8.0':
     resolution: {integrity: sha512-jTNnVtyGzyS016GH2WpAzgT0ZygWAZMe+J2QaY80zQaNBrOBR0KNOVVbQm5XwiF9oG5Eaqp0gpQwmGixnZjoCA==}
     peerDependencies:
@@ -1293,8 +1301,8 @@ packages:
       react: ^19.0.0
       react-dom: ^19.0.0
 
-  '@inertiajs/vite@3.8.0':
-    resolution: {integrity: sha512-Tq1q5PnJWwGppHeWMnPsI1dgc59f0MoTDOyYdhh2tMoKfrfd5HojwEJ6K+Z/SLq1RfDfY9o4Olr7melXpD1FtA==}
+  '@inertiajs/vite@3.11.0':
+    resolution: {integrity: sha512-BQDD++BbQ/Q7U2E3yPGYki/vkwC+pT2DNUXUItrGeMefLy8aBaJXftF979+hupU/V3rfXf1RpGZZRi+BcQ5jRQ==}
     peerDependencies:
       vite: ^7.0.0 || ^8.0.0
 
@@ -5991,6 +5999,14 @@ packages:
       axios:
         optional: true
 
+  laravel-precognition@2.1.1:
+    resolution: {integrity: sha512-Wg05+puJ5qiNsE8rdO5JmSiqQ2xcEf7442AIZiDhZg1JyPOePv5SSCu0fO7z7LqmJcPMxNNuOIcZd6UatEmYug==}
+    peerDependencies:
+      axios: ^1.4.0
+    peerDependenciesMeta:
+      axios:
+        optional: true
+
   laravel-vite-plugin@3.2.1:
     resolution: {integrity: sha512-VqWn6U4YC1zRYVDlR/hu7JHesXqwj+DsEBSlVAe7al1MlAE5aYslyuyYV7v47DCGLGKJZxfbaZnApsIHdYIBJA==}
     engines: {node: ^20.19.0 || >=22.12.0}
@@ -8968,6 +8984,14 @@ snapshots:
   '@img/sharp-win32-x64@0.35.5':
     optional: true
 
+  '@inertiajs/core@3.11.0(axios@1.21.0(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2))':
+    dependencies:
+      '@jridgewell/trace-mapping': 0.3.31
+      es-toolkit: 1.52.0
+      laravel-precognition: 2.1.1(axios@1.21.0(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2))
+    optionalDependencies:
+      axios: 1.21.0(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)
+
   '@inertiajs/core@3.8.0(axios@1.21.0(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2))':
     dependencies:
       '@jridgewell/trace-mapping': 0.3.31
@@ -8986,9 +9010,11 @@ snapshots:
     transitivePeerDependencies:
       - axios
 
-  '@inertiajs/vite@3.8.0(@voidzero-dev/vite-plus-core@1.5.0(@types/node@26.6.5)(@volar/typescript@2.4.28(typescript@7.0.2))(@vue/language-core@3.3.13)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(tsx@4.23.15)(typescript@7.0.2)(yaml@2.9.1))(axios@1.21.0(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2))':
+  '@inertiajs/vite@3.11.0(@voidzero-dev/vite-plus-core@1.5.0(@types/node@26.6.5)(@volar/typescript@2.4.28(typescript@7.0.2))(@vue/language-core@3.3.13)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(tsx@4.23.15)(typescript@7.0.2)(yaml@2.9.1))(axios@1.21.0(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2))':
     dependencies:
-      '@inertiajs/core': 3.8.0(axios@1.21.0(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2))
+      '@inertiajs/core': 3.11.0(axios@1.21.0(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2))
+      '@jridgewell/remapping': 2.3.5
+      magic-string: 0.30.21
       tinyglobby: 0.2.17
       vite: '@voidzero-dev/vite-plus-core@1.5.0(@types/node@26.6.5)(@volar/typescript@2.4.28(typescript@7.0.2))(@vue/language-core@3.3.13)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(tsx@4.23.15)(typescript@7.0.2)(yaml@2.9.1)'
     transitivePeerDependencies:
@@ -13750,6 +13776,12 @@ snapshots:
   kleur@4.1.5: {}
 
   laravel-precognition@2.1.0(axios@1.21.0(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)):
+    dependencies:
+      es-toolkit: 1.52.0
+    optionalDependencies:
+      axios: 1.21.0(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)
+
+  laravel-precognition@2.1.1(axios@1.21.0(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)):
     dependencies:
       es-toolkit: 1.52.0
     optionalDependencies:
