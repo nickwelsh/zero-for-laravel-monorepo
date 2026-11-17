@@ -18,7 +18,7 @@ import {
 import { DataTable, useDataTable, type TableSession, type TableOptions } from './index';
 
 const native = vi.hoisted(() => ({
-    zero: { context: { user_id: 'alice' } },
+    zero: { userID: 'alice', context: { user_id: 'alice', tenant_id: 'one' } },
     rows: new Map<string, readonly object[]>(),
     denied: new Set<string>(),
     failed: new Set<string>(),
@@ -117,11 +117,18 @@ const descriptor = createTable(capabilities, (args) => ({
 const editingKey = (id: string) =>
     queryKey({ filter: null, sort: [], groupBy: [], path: [], __window: 1, __row: [id] });
 let table: TableSession<Row, typeof capabilities>;
-function Harness({ options = {} }: { options?: TableOptions<typeof capabilities, Row> }) {
+function Harness({
+    options = {},
+    mounted = true,
+}: {
+    options?: TableOptions<typeof capabilities, Row>;
+    mounted?: boolean;
+}) {
     const session = useDataTable(descriptor, options);
     useEffect(() => {
         table = session;
     }, [session]);
+    if (!mounted) return null;
     return (
         <DataTable.Root table={session}>
             <DataTable.EditingStatus />
@@ -175,6 +182,7 @@ const response = (
         }),
     );
 beforeEach(() => {
+    native.zero = { userID: 'alice', context: { user_id: 'alice', tenant_id: 'one' } };
     native.rows.clear();
     native.denied.clear();
     native.failed.clear();
@@ -195,6 +203,212 @@ afterEach(() => {
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
 });
+
+it.each([false, true])('renders cached rows through StrictMode replay with native pending=%s', async (pending) => {
+    const key = queryKey({ filter: null, sort: [], groupBy: [], path: [], __window: 3 });
+    const row: Row = { id: 'cached', title: 'Cached constituent', done: false, list_id: null };
+    native.rows.set(key, [row]);
+    if (pending) native.pending.add(key);
+    // Remote metadata and native synchronization need never change for local rows to render.
+    vi.stubGlobal(
+        'fetch',
+        vi.fn(() => new Promise<Response>(() => {})),
+    );
+    const options = { initialState: { groupBy: [] } };
+    const view = render(<Harness options={options} />, { wrapper: StrictMode });
+    await act(async () => {});
+    expect(view.getByText(row.title, { selector: 'output', exact: false })).toBeDefined();
+    expect(table.items.filter((item) => item.kind === 'row').map((item) => item.row)).toEqual([row]);
+    expect(table.items.some((item) => item.kind === 'loading')).toBe(false);
+    expect(table.leaves[0]!.data?.complete).toBe(!pending);
+    expect(table.count.pending).toBe(true);
+    const session = table;
+    view.rerender(<Harness options={options} mounted={false} />);
+    expect(native.listeners.size).toBe(0);
+    expect(table.count.pending).toBe(false);
+    expect(table.diagnostics.metadataPending).toBe(false);
+    view.rerender(<Harness options={options} />);
+    await act(async () => {});
+    expect(table).toBe(session);
+    expect(view.getByText(row.title, { selector: 'output', exact: false })).toBeDefined();
+});
+
+it('cancels pending continuations and background growth on cleanup without discarding local rows', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const args = (window: number) => ({ filter: null, sort: [], groupBy: [], path: [], __window: window });
+    const rows: Row[] = Array.from({ length: 5 }, (_, index) => ({
+        id: String(index),
+        title: `Local ${index}`,
+        done: false,
+        list_id: null,
+    }));
+    native.rows.set(queryKey(args(3)), rows.slice(0, 3));
+    native.rows.set(queryKey(args(5)), rows);
+    native.pending.add(queryKey(args(3)));
+    const options = { initialState: { groupBy: [] } };
+    const view = render(<Harness options={options} />, { wrapper: StrictMode });
+    await act(async () => {});
+    act(() => table.loadMore(table.items.find((item) => item.kind === 'load-more')!.id));
+    view.rerender(<Harness options={options} mounted={false} />);
+    native.pending.clear();
+    view.rerender(<Harness options={options} />);
+    await act(async () => {});
+    // Completion after remount must not resume the previous owner's load-more intent.
+    expect(table.diagnostics.requestedRows).toBe(3);
+    expect(table.items.filter((item) => item.kind === 'row').map((item) => item.row)).toEqual(rows.slice(0, 2));
+    const preloading = { ...options, preload: { maxRows: 5, batchSize: 2 } };
+    view.rerender(<Harness options={preloading} />);
+    view.rerender(<Harness options={preloading} mounted={false} />);
+    await act(async () => vi.advanceTimersByTimeAsync(1000));
+    expect(table.diagnostics.requestedRows).toBe(3);
+    expect(native.listeners.size).toBe(0);
+    view.rerender(<Harness options={preloading} />);
+    await act(async () => vi.advanceTimersByTimeAsync(150));
+    expect(table.items.filter((item) => item.kind === 'row').map((item) => item.row)).toEqual(rows.slice(0, 4));
+});
+
+it.each(['success', 'denial', 'abort'] as const)(
+    'retains grouped state on remount despite obsolete metadata %s',
+    async (outcome) => {
+        const path = [
+            { field: 'done', value: false },
+            { field: 'list', value: 'list-0' },
+        ] as const;
+        const expanded = [groupId(path.slice(0, 1)), groupId(path)];
+        const rows: Row[] = Array.from({ length: 5 }, (_, index) => ({
+            id: String(index),
+            title: `Cached ${index}`,
+            done: false,
+            list_id: 'list-0',
+        }));
+        for (const window of [3, 5])
+            native.rows.set(
+                queryKey({ filter: null, sort: [], groupBy: capabilities.defaults.groupBy, path, __window: window }),
+                rows.slice(0, window),
+            );
+        const options = { initialState: { expanded } };
+        const view = render(<Harness options={options} />, { wrapper: StrictMode });
+        await waitFor(() => expect(table.items.filter((item) => item.kind === 'row')).toHaveLength(2));
+        act(() => table.loadMore(table.items.find((item) => item.kind === 'load-more')!.id));
+        await waitFor(() => expect(table.items.filter((item) => item.kind === 'row')).toHaveLength(4));
+        const requests: { signal: AbortSignal; deliver: (value: Response) => void; fail: (error: Error) => void }[] =
+            [];
+        const fetch = vi.fn(
+            (_url: string, init: RequestInit) =>
+                new Promise<Response>((deliver, fail) => requests.push({ signal: init.signal!, deliver, fail })),
+        );
+        vi.stubGlobal('fetch', fetch);
+        act(() => table.refreshCounts());
+        await waitFor(() => expect(requests).toHaveLength(1));
+        const before = table.items;
+        const requestedRows = table.diagnostics.requestedRows;
+        view.rerender(<Harness options={options} mounted={false} />);
+        expect(requests[0]!.signal.aborted).toBe(true);
+        expect(table.count).toMatchObject({ value: 144, pending: false, stale: true });
+        expect(table.items.filter((item) => item.kind === 'group').every((item) => !item.count.pending)).toBe(true);
+        expect(table.items.map((item) => item.id)).toEqual(before.map((item) => item.id));
+        view.rerender(<Harness options={options} />);
+        await waitFor(() => expect(requests).toHaveLength(2));
+        expect(view.getByText('Cached 3', { exact: false })).toBeDefined();
+        expect(table.state.expanded).toEqual(expanded);
+        expect(table.diagnostics.requestedRows).toBe(requestedRows);
+        // Neither stale success, denial nor abort may overwrite or finish the current request.
+        await act(async () => {
+            if (outcome === 'abort') requests[0]!.fail(new DOMException('Aborted', 'AbortError'));
+            else
+                requests[0]!.deliver(
+                    outcome === 'denial'
+                        ? new Response('{}', { status: 403 })
+                        : response([{ path: [] }, { path: path.slice(0, 1) }], 999),
+                );
+        });
+        expect(table.count).toMatchObject({ value: 144, pending: true, error: undefined });
+        expect(table.diagnostics.metadataPending).toBe(true);
+        await act(async () => requests[1]!.deliver(response([{ path: [] }, { path: path.slice(0, 1) }], 23)));
+        expect(table.count).toMatchObject({ value: 23, pending: false, error: undefined });
+        expect(table.items.filter((item) => item.kind === 'row')).toHaveLength(4);
+    },
+);
+
+it.each(['actor', 'context'] as const)(
+    'isolates cached rows and outstanding metadata after an %s change',
+    async (kind) => {
+        const key = queryKey({ filter: null, sort: [], groupBy: [], path: [], __window: 3 });
+        native.rows.set(key, [{ id: 'private', title: 'Previous identity', done: false, list_id: null }]);
+        const requests: { signal: AbortSignal; deliver: (value: Response) => void }[] = [];
+        vi.stubGlobal(
+            'fetch',
+            (_url: string, options: RequestInit) =>
+                new Promise<Response>((deliver) => requests.push({ signal: options.signal!, deliver })),
+        );
+        const options = { initialState: { groupBy: [] } };
+        const view = render(<Harness options={options} />, { wrapper: StrictMode });
+        await waitFor(() => expect(view.getByText('Previous identity')).toBeDefined());
+        const previous = table;
+        native.zero.context = { ...native.zero.context };
+        view.rerender(<Harness options={options} />);
+        expect(table).toBe(previous); // Equivalent context values are still the same authorization scope.
+        if (kind === 'actor') native.zero = { ...native.zero, userID: 'bob' };
+        else native.zero.context = { ...native.zero.context, tenant_id: 'two' };
+        // The new native identity has no authorized rows yet.
+        native.rows.clear();
+        native.pending.add(key);
+        view.rerender(<Harness options={options} />);
+        await act(async () => {});
+        expect(table).not.toBe(previous);
+        expect(view.queryByText('Previous identity')).toBeNull();
+        expect(table.diagnostics.loadedRows).toBe(0);
+        expect(requests[0]!.signal.aborted).toBe(true);
+        await act(async () => requests[0]!.deliver(response([], 999)));
+        expect(table.count.value).toBeUndefined();
+        const row = { id: 'new', title: 'Current identity', done: false, list_id: null };
+        native.rows.set(key, [row]);
+        act(() => native.listeners.forEach((listener) => listener()));
+        await waitFor(() => expect(view.getByText(row.title, { exact: false })).toBeDefined());
+        expect(table.items.filter((item) => item.kind === 'row').map((item) => item.row)).toEqual([row]);
+    },
+);
+
+it.each(['metadata', 'rows', 'editing'] as const)(
+    'does not reauthorize a revoked session on remount after %s denial',
+    async (source) => {
+        const row: Row = { id: 'private', title: 'Protected row', done: false, list_id: null };
+        const key = queryKey({ filter: null, sort: [], groupBy: [], path: [], __window: 3 });
+        native.rows.set(key, [row]);
+        native.rows.set(editingKey(row.id), [row]);
+        const options: TableOptions<typeof capabilities, Row> = {
+            initialState: { groupBy: [] },
+            columns: [column.text('title', { editor: editors.text() })],
+            editing: { enabled: true, submit: async () => ({ status: 'accepted' }) },
+        };
+        const view = render(<Harness options={options} />, { wrapper: StrictMode });
+        await waitFor(() => expect(view.getByText(row.title, { selector: 'output' })).toBeDefined());
+        act(() => {
+            table.cell(descriptor.rowId(row), 'title').begin();
+        });
+        if (source === 'metadata') {
+            vi.stubGlobal(
+                'fetch',
+                vi.fn(async () => new Response('{}', { status: 403 })),
+            );
+            act(() => table.refreshCounts());
+        } else {
+            native.denied.add(source === 'rows' ? key : editingKey(row.id));
+            act(() => native.listeners.forEach((listener) => listener()));
+        }
+        await waitFor(() => expect(table.items).toEqual([]));
+        expect(table.editingRowId).toBeUndefined();
+        expect(table.count.value).toBeUndefined();
+        expect(table.diagnostics.loadedRows).toBe(0);
+        native.denied.clear();
+        view.rerender(<Harness options={options} mounted={false} />);
+        view.rerender(<Harness options={options} />);
+        await act(async () => {});
+        expect(table.items).toEqual([]);
+        expect(view.queryByText(row.title)).toBeNull();
+        expect(table.diagnostics.metadataPending).toBe(false);
+    },
+);
 
 it('preloads bounded batches, supports live opt-out, and leaves foreground growth unrestricted', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
@@ -280,7 +494,7 @@ it('waits for synchronization and quiet, online, visible demand before backgroun
     expect(table.items.some((item) => item.kind === 'row')).toBe(false);
     view.unmount();
     await act(async () => vi.advanceTimersByTimeAsync(500));
-    expect(table.diagnostics.requestedRows).toBe(0);
+    expect(table.diagnostics.requestedRows).toBe(3); // Retained demand, not an active subscription.
     expect(native.listeners.size).toBe(0);
 });
 
@@ -519,8 +733,8 @@ it('aborts obsolete metadata across refresh, grouping, unmount and StrictMode re
     screen.unmount();
     expect(requests[3]!.signal.aborted).toBe(true);
     await act(async () => requests[3]!.deliver(response([], 777)));
-    expect(oldTable.count.value).toBeUndefined();
-    expect(oldTable.items).toHaveLength(0);
+    expect(oldTable.count).toMatchObject({ value: 7, pending: false, stale: true });
+    expect(oldTable.items.map((item) => item.kind)).toEqual(['empty']);
     expect(oldTable.diagnostics.metadataPending).toBe(false);
     render(
         <StrictMode>

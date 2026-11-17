@@ -883,27 +883,33 @@ export class TableSession<Row, C extends Capabilities = Capabilities> {
         this.emit();
         this.schedule();
     };
-    private revoke() {
-        this.allowed = false;
+    /** Stop lifecycle work without discarding snapshots already supplied by Zero. */
+    private stop() {
+        this.running = false;
         this.cancelPreload();
         this.epoch++;
         this.request?.abort();
         this.request = undefined;
+        this.pendingMore.clear();
+        this.count = { ...this.count, pending: false };
+        for (const directory of this.directories.values()) directory.pending = false;
+    }
+    private revoke() {
+        this.stop();
+        this.allowed = false;
         this.directories.clear();
         this.count = initialCount();
         this.draft = undefined;
         this.editingNotice = undefined;
         this.saved = undefined;
         this.focusedItem = undefined;
-        this.pendingMore.clear();
         for (const leaf of this.windows.values()) leaf.data = undefined;
-        this.running = false;
         this.emit();
     }
     mount() {
         if (++this.rootOwners !== 1) throw new Error('Mount exactly one DataTable.Root per table session.');
-        this.allowed = true;
-        this.running = true;
+        // Only a new identity/session may authorize again after confirmed denial.
+        this.running = this.allowed;
         this.emit();
         this.schedule();
         const refresh = () => {
@@ -931,7 +937,10 @@ export class TableSession<Row, C extends Capabilities = Capabilities> {
             window.removeEventListener('wheel', postpone);
             window.removeEventListener('scroll', postpone, true);
             document.removeEventListener('visibilitychange', postpone);
-            this.revoke();
+            // StrictMode replays effects after LeafOwner reports its cached snapshot.
+            // An unchanged native snapshot may never be reported again.
+            this.stop();
+            this.emit();
         };
     }
     private schedule() {
