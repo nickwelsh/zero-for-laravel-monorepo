@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.11.1] - 2026-11-17
+
+- Preserve cached table rows, group metadata, expanded groups, and grown row
+  windows across ordinary unmounts and React StrictMode effect replay. Render
+  incomplete cached snapshots while remote work is pending instead of leaving
+  the table loading after back navigation. Cleanup cancels background work and
+  ignores stale responses without revoking authorization; confirmed access
+  failures still clear protected data, with sessions isolated by actor/context.
+- Align the workspace and Todos demo Vite core aliases with Vite+ **1.6.0** so
+  demo setup and production builds use compatible tooling.
+- Use patched HTTP telemetry instrumentation, add credential-redaction regression
+  coverage, and refresh PHP, docs, and build-tool dependencies.
+
+Upgrade `nickwelsh/zero-for-laravel`, `@nickwelsh/zero-for-laravel`, and the optional
+`@nickwelsh/zero-table` together to **0.11.1**. No public API or table protocol
+change is required from **0.11.0**. Table protocol remains **v2**, Zero client/cache
+remain pinned to **1.11.4**, and optional Formbraid packages remain on **^0.3.0**.
+
 ## [0.11.0] - 2026-11-14
 
 - Add independent ascending or descending ordering at each table grouping level.
@@ -174,6 +192,7 @@ Deploy generated PHP and TypeScript contracts together. Supported targets are PH
 8.3+, Laravel 12/13, PostgreSQL 15+, and React 18/19. Automatic live pages require
 Inertia Laravel 3 and `@inertiajs/react` ^3.8.0.
 
+[0.11.1]: https://github.com/nickwelsh/zero-for-laravel-monorepo/releases/tag/v0.11.1
 [0.11.0]: https://github.com/nickwelsh/zero-for-laravel-monorepo/releases/tag/v0.11.0
 [0.10.0]: https://github.com/nickwelsh/zero-for-laravel-monorepo/releases/tag/v0.10.0
 [0.9.0]: https://github.com/nickwelsh/zero-for-laravel-monorepo/releases/tag/v0.9.0
