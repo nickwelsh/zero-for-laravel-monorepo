@@ -49,6 +49,8 @@ final class ControllerQueryCompiler
 
     private int $callbackId = 0;
 
+    private bool $pageShell = false;
+
     /** @var list<array{parameter: string, class: class-string<Model>, ability: string, fingerprint: string}> */
     private array $guards = [];
 
@@ -293,14 +295,15 @@ final class ControllerQueryCompiler
             }
 
             $args = $return->expr->getArgs();
-            if (count($args) !== 2 || ! $args[0]->value instanceof Scalar\String_ || ! $args[1]->value instanceof Expr\Array_) {
+            if (count($args) < 1 || count($args) > 2 || ! $args[0]->value instanceof Scalar\String_ || isset($args[1]) && ! $args[1]->value instanceof Expr\Array_) {
                 $this->unsupported($return, 'Expected a literal component name and named prop array.');
             }
 
             $component = $args[0]->value->value;
-            $items = $args[1]->value->items;
+            $items = isset($args[1]) ? $args[1]->value->items : [];
         }
 
+        $this->pageShell = $items === [];
         $variables = $this->statements($statements, $variables);
         $models = $this->models->all();
         ksort($models);
@@ -507,12 +510,29 @@ final class ControllerQueryCompiler
     private function statements(array $statements, array $variables, bool $conditional = false): array
     {
         foreach ($statements as $statement) {
+            if ($statement instanceof Stmt\Expression && $statement->expr instanceof Expr\MethodCall && ControllerAuthorization::matches($statement->expr)) {
+                $statement = new Stmt\Expression(ControllerAuthorization::gate($statement->expr, explode('@', $this->action)[0]), $statement->getAttributes());
+            }
+
             if ($statement instanceof Stmt\Expression && $statement->expr instanceof Expr\Assign && $statement->expr->var instanceof Expr\Variable && is_string($statement->expr->var->name)) {
                 $variables[$statement->expr->var->name] = $this->expression($statement->expr->expr, $variables);
             } elseif ($statement instanceof Stmt\Expression && $statement->expr instanceof Expr\StaticCall
                 && $statement->expr->class instanceof Name && $statement->expr->class->toString() === Gate::class
                 && $statement->expr->name instanceof Identifier && $statement->expr->name->name === 'authorize') {
+                ControllerAuthorization::arguments($statement->expr);
                 $args = $statement->expr->getArgs();
+                $resource = $args[1]->value;
+                if (! $conditional && $resource instanceof Expr\ClassConstFetch && $resource->class instanceof Name
+                    && $resource->name instanceof Identifier && $resource->name->name === 'class'
+                    && is_subclass_of($resource->class->toString(), Model::class)) {
+                    if (! $this->pageShell) {
+                        $this->unsupported($statement, 'Class authorization is supported on page shells; live props require captured instance authorization.');
+                    }
+
+                    // There is no query registration to replay; the HTTP shell executes this guard.
+                    continue;
+                }
+
                 if ($conditional || count($args) !== 2 || ! $args[0]->value instanceof Scalar\String_
                     || ! $args[1]->value instanceof Expr\Variable || ! is_string($args[1]->value->name)
                     || ($variables[$args[1]->value->name]->kind ?? null) !== 'bound') {

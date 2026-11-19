@@ -9,6 +9,8 @@ return [
     // Native status checks never authorize business-table reads.
     'access' => [
         'max_bindings' => 32,
+        // Model class => literal policy abilities exposed by usePermission.
+        'abilities' => [],
     ],
     // Advisory browser checks are opt-in; authority attributes stay private by default.
     'predictions' => [
@@ -23,6 +25,7 @@ return [
         'prefix' => 'user:',
         'attributes' => [],
     ],
-    // Bind database columns, not PHP accessors or request values.
+    // Bind database columns, not PHP accessors or request values. Scoped class
+    // checks also require domain.context naming an application-resolved Zero field.
     'resources' => [],
 ];

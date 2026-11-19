@@ -10,6 +10,7 @@ use Inertia\AlwaysProp;
 use Inertia\ProvidesInertiaProperties;
 use Inertia\RenderContext;
 use LogicException;
+use ZeroForLaravel\Generation\GuardedAccess;
 use ZeroForLaravel\Http\ControllerRouteDispatcher;
 use ZeroForLaravel\Metadata\ModelRegistry;
 use ZeroForLaravel\Permissions\PolicyCompiler;
@@ -97,9 +98,11 @@ final readonly class LiveProps implements ProvidesInertiaProperties
             $name = array_key_first($matches);
             $registration = $matches[$name];
             $registration->assertCurrent();
+            $access = null;
             foreach ($registration->guards as $guard) {
                 if (isset($boundProps[$prop]) && $route->parameter($guard['parameter']) === $boundProps[$prop]) {
                     $declaration = $declaration->guardedBy($context->request->user() ?? throw new LogicException('A protected prop requires an authenticated actor.'), $guard['ability']);
+                    $access = GuardedAccess::contract((new PolicyCompiler)->compile($guard['class'], $guard['ability']));
                     break;
                 }
             }
@@ -121,10 +124,8 @@ final readonly class LiveProps implements ProvidesInertiaProperties
             }
 
             $bindings[$prop] = ['query' => $name, 'args' => (object) $args];
-            if ($registration->guards !== []) {
-                $guard = $registration->guards[0];
-                $plan = (new PolicyCompiler)->compile($guard['class'], $guard['ability']);
-                $bindings[$prop]['access'] = ['status' => $plan->deniedStatus];
+            if ($access !== null) {
+                $bindings[$prop]['access'] = $access;
             }
 
             unset($props[$prop]);

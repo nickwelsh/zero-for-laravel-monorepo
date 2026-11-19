@@ -32,13 +32,7 @@ final readonly class PolicyPredicates
                 $b = self::operand($atom->children[1], $plan, $subjectId, $subjectKey);
                 $operator = $atom->kind === '==' ? '=' : $atom->kind;
                 if ($a['kind'] === 'literal' && $b['kind'] === 'literal') {
-                    $matches = match ($operator) {
-                        '=' => $a['value'] === $b['value'], '!=' => $a['value'] !== $b['value'],
-                        '<' => $a['value'] < $b['value'], '<=' => $a['value'] <= $b['value'],
-                        '>' => $a['value'] > $b['value'], '>=' => $a['value'] >= $b['value'],
-                        default => throw new LogicException('Invalid portable comparison.'),
-                    };
-                    if (! $matches) {
+                    if (! self::compare($a['value'], $operator, $b['value'])) {
                         continue 2;
                     }
                 } elseif ($a['kind'] !== 'literal' && $b['kind'] !== 'literal') {
@@ -74,6 +68,60 @@ final readonly class PolicyPredicates
         }
 
         return new self($plan, $subjectKey, $branches);
+    }
+
+    public static function compare(string|int|bool $left, string $operator, string|int|bool $right): bool
+    {
+        return match ($operator) {
+            '=' => $left === $right, '!=' => $left !== $right,
+            '<' => $left < $right, '<=' => $left <= $right,
+            '>' => $left > $right, '>=' => $left >= $right,
+            default => throw new LogicException('Invalid portable comparison.'),
+        };
+    }
+
+    /**
+     * Bind a class without inventing an object ID or instance attributes. Unknown
+     * allow branches cannot grant; potentially matching deny branches still veto.
+     *
+     * @return list<list<Comparison>>
+     */
+    public function classGrants(string $domain, bool $possible = false): array
+    {
+        $known = ['global_key' => 'global', 'domain_key' => $domain];
+        $branches = [];
+        foreach ($this->branches as $branch) {
+            $comparisons = $branch['grant'];
+            foreach ($branch['resource'] as $comparison) {
+                if (! array_key_exists($comparison['column'], $known)) {
+                    if (! $possible) {
+                        continue 2;
+                    }
+
+                    continue;
+                }
+
+                if (! self::compare($known[$comparison['column']], $comparison['operator'], $comparison['value'])) {
+                    continue 2;
+                }
+            }
+
+            foreach ($branch['correlations'] as $resource => $grant) {
+                if (! array_key_exists($resource, $known)) {
+                    if (! $possible) {
+                        continue 2;
+                    }
+
+                    continue;
+                }
+
+                $comparisons[] = ['column' => $grant, 'operator' => '=', 'value' => $known[$resource]];
+            }
+
+            $branches[] = $comparisons;
+        }
+
+        return $branches;
     }
 
     /** @return Operand */

@@ -14,5 +14,7 @@ final readonly class PolicyPlan
         public ?string $adminAttribute,
         public ?bool $constant,
         public string $fingerprint,
+        public ?Revocation $revocation = null,
+        public bool $classResource = false,
     ) {}
 }

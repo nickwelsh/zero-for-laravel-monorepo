@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vite-plus/test';
 import { router } from '@inertiajs/react';
 import { ZeroContext } from '@rocicorp/zero/react';
@@ -8,11 +8,13 @@ import { createBuilder, defineQueries, defineQuery } from '@rocicorp/zero';
 import { schema, definitions } from '../../../../tests/interop/generated';
 import { liveQuery } from '../live-query';
 import { createInertiaAdapter, type NavigationRoute } from './inertia';
+import { createNavigationLink } from './inertia-navigation';
 import type { Data } from './data';
 import { createRef, type ComponentType } from 'react';
 
 const native = vi.hoisted(() => ({ zero: undefined as any, requests: [] as any[] }));
 const http = { visit: vi.fn<typeof router.visit>(), prefetch: vi.fn<typeof router.prefetch>() };
+const replaceDocument = vi.fn<(url: string | URL) => void>();
 vi.mock('@rocicorp/zero/react', async (original) => ({
     ...(await original<typeof NativeReact>()),
     useZero: () => native.zero,
@@ -68,11 +70,35 @@ beforeEach(() => {
     http.prefetch.mockReset();
     vi.spyOn(router, 'visit').mockImplementation(http.visit);
     vi.spyOn(router, 'prefetch').mockImplementation(http.prefetch);
+    replaceDocument.mockReset();
+    const browser = window;
+    const location = new Proxy(
+        { replace: replaceDocument },
+        {
+            get(target, key) {
+                if (key === 'replace') return target.replace;
+                if (key === 'toString') return browser.location.toString.bind(browser.location);
+                return Reflect.get(browser.location, key, browser.location);
+            },
+        },
+    );
+    vi.stubGlobal(
+        'window',
+        new Proxy(browser, {
+            get(target, key) {
+                if (key === 'location') return location;
+                if (key === 'addEventListener') return target.addEventListener.bind(target);
+                if (key === 'removeEventListener') return target.removeEventListener.bind(target);
+                return Reflect.get(target, key, target);
+            },
+        }),
+    );
 });
 afterEach(() => {
     cleanup();
     adapters.splice(0).forEach((instance) => instance.dispose());
     vi.restoreAllMocks();
+    vi.unstubAllGlobals();
     vi.useRealTimers();
 });
 
@@ -116,8 +142,9 @@ it('preloads on intent without HTTP, deduplicates links, and supplies instant bi
     fireEvent.click(link);
     const visit = http.visit.mock.calls[0]![1]!;
     expect(visit.component).toBe('tasks/index');
-    const props = (visit.pageProps as Function)({}, { auth: { id: 'alice' } });
+    const props = (visit.pageProps as Function)({}, { auth: { id: 'alice' }, heading: 'Ordinary shared heading' });
     expect(props.auth).toEqual({ id: 'alice' });
+    expect(props.heading).toBe('Ordinary shared heading');
     expect(props['__zero'].bindings.tasks.args).toEqual({
         title: 'A B',
         __route: 'route-identity',
@@ -134,6 +161,39 @@ it('preloads on intent without HTTP, deduplicates links, and supplies instant bi
     );
     expect(screen.getByRole('status').textContent).toBe('A B');
     expect(native.requests.at(-1).args).toEqual(request.args);
+});
+
+it('resolves revocation parameters into document replacements even for client-capable destinations', () => {
+    const replace = vi.spyOn(router, 'replace').mockImplementation(() => {});
+    const target: NavigationRoute = { ...route, name: 'tasks.index', uri: 'tasks/{label}', domain: null, client: true };
+    const links = createNavigationLink({ tasks: factory }, [target]);
+    links.redirect('tasks.index', { label: 'A B' });
+    expect(replaceDocument).toHaveBeenCalledExactlyOnceWith(`${window.location.origin}/tasks/A%20B`);
+    links.redirect('tasks.index', {});
+    links.redirect('not.registered', {});
+    expect(replaceDocument).toHaveBeenCalledOnce();
+    expect(http.visit).not.toHaveBeenCalled();
+    expect(replace).not.toHaveBeenCalled();
+    links.dispose();
+    links.redirect('tasks.index', { label: 'disposed' });
+    expect(replaceDocument).toHaveBeenCalledOnce();
+    for (const routes of [
+        [{ ...target, client: false }],
+        [{ ...target, bindings: { tasks: { ...target.bindings.tasks!, parameters: null } } }],
+        [target, { ...target, name: 'overlap', component: null }],
+    ]) {
+        const fallback = createNavigationLink({ tasks: factory }, routes);
+        fallback.redirect('tasks.index', { label: 'B' });
+        expect(replaceDocument).toHaveBeenLastCalledWith(`${window.location.origin}/tasks/B`);
+        fallback.dispose();
+    }
+    expect(replaceDocument).toHaveBeenCalledTimes(4);
+    expect(http.visit).not.toHaveBeenCalled();
+    expect(replace).not.toHaveBeenCalled();
+    const ambiguous = createNavigationLink({}, [target, target]);
+    ambiguous.redirect('tasks.index', { label: 'C' });
+    expect(replaceDocument).toHaveBeenCalledTimes(4);
+    ambiguous.dispose();
 });
 
 it('keeps Inertia HTTP prefetch and its callbacks independent from Zero preload', () => {
@@ -164,6 +224,71 @@ it('keeps Inertia HTTP prefetch and its callbacks independent from Zero preload'
     expect(http.prefetch).toHaveBeenCalledTimes(2);
     expect(native.zero.preload).toHaveBeenCalledOnce();
 });
+
+it.each([null, 'other.example'])(
+    'requests document replacement without copying source props or once metadata (domain: %s)',
+    async (domain) => {
+        vi.useRealTimers();
+        vi.stubGlobal('scrollTo', vi.fn());
+        const initialPage = {
+            component: 'tasks/show',
+            url: '/tasks/A',
+            version: null,
+            rescuedProps: [],
+            flash: {},
+            rememberedState: {},
+            sharedProps: ['auth'],
+            onceProps: { private: { prop: 'secret' } },
+            props: {
+                auth: { id: 'alice' },
+                secret: 'private old page',
+                errors: {},
+                __zero: { version: 1, mode: 'replace', bindings: {} },
+            },
+        };
+        const swaps: { page: Parameters<typeof router.init>[0]['initialPage']; preserveState: boolean }[] = [];
+        const instance = adapter([]);
+        router.init({
+            initialPage,
+            resolveComponent: (_name, page) => instance.wrap(() => null, page),
+            swapComponent: async ({ page, preserveState }) => {
+                swaps.push({ page, preserveState });
+            },
+        });
+        await waitFor(() => expect(swaps).toHaveLength(1));
+        await waitFor(() => expect(window.history.state.page.props.secret).toBe('private old page'));
+        swaps.length = 0;
+        const links = createNavigationLink({}, [
+            {
+                ...route,
+                name: 'tasks.index',
+                uri: 'tasks',
+                domain,
+                host: domain === null ? null : '^other\\.example$',
+                pattern: '^/tasks$',
+                component: 'tasks/index',
+                bindings: {},
+                client: true,
+            },
+        ]);
+        try {
+            const history = structuredClone(window.history.state);
+            expect(history.page.onceProps).toEqual(initialPage.onceProps);
+            expect(history.page.props.auth).toEqual(initialPage.props.auth);
+            links.redirect('tasks.index', {});
+            expect(replaceDocument).toHaveBeenCalledExactlyOnceWith(
+                `${window.location.protocol}//${domain ?? window.location.host}/tasks`,
+            );
+            expect(http.visit).not.toHaveBeenCalled();
+            expect(swaps).toHaveLength(0);
+            // Capturing Location.replace does not navigate jsdom. The old document
+            // retains its state; none is copied into an in-document destination.
+            expect(window.history.state).toEqual(history);
+        } finally {
+            links.dispose();
+        }
+    },
+);
 
 it('renders unresolved live props as loading and replaces them with authoritative response arguments', () => {
     const instance = adapter([

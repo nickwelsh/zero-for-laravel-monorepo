@@ -12,15 +12,21 @@ import { createContext, useEffect, useMemo, useRef, useSyncExternalStore, type R
 import type { ClientContext } from '../contract';
 import { selectionKey } from '../validation';
 
-export interface AccessBinding {
-    query: string;
-    args: Record<string, unknown>;
-    access?: { status: 403 | 404 };
+export interface AccessContract {
+    status: 403 | 404;
+    revoked?: { route: string; message?: string };
 }
+export type AccessBinding = {
+    access?: AccessContract;
+} & (
+    | { query: string; args: Record<string, unknown>; permission?: never }
+    | { permission: { model: string; ability: string; id?: string }; query?: never; args?: never }
+);
 export interface AccessLost {
     status: 403 | 404;
     query: string;
     prop: string;
+    message?: string;
 }
 export interface AccessOptions {
     onRevoked?: (event: AccessLost) => void;
@@ -87,7 +93,10 @@ function monitor(zero: NativeZero, context: string) {
             }: {
                 args: {
                     generation: string;
-                    bindings: { binding: string; query: string; args: Record<string, ReadonlyJSONValue> }[];
+                    bindings: ({ binding: string } & (
+                        | { query: string; args: Record<string, ReadonlyJSONValue> }
+                        | { permission: { model: string; ability: string; id?: string } }
+                    ))[];
                 };
                 ctx: ClientContext;
             }) => builder.permission_access_results!.where('generation', args.generation),
@@ -169,8 +178,12 @@ function monitor(zero: NativeZero, context: string) {
                     generation: batch.generation,
                     bindings: members.map((entry) => ({
                         binding: entry.id,
-                        query: entry.binding.query,
-                        args: entry.binding.args as Record<string, ReadonlyJSONValue>,
+                        ...(entry.binding.permission
+                            ? { permission: entry.binding.permission }
+                            : {
+                                  query: entry.binding.query,
+                                  args: entry.binding.args as Record<string, ReadonlyJSONValue>,
+                              }),
                     })),
                 }),
                 { ttl: 0 },
@@ -263,7 +276,7 @@ function monitor(zero: NativeZero, context: string) {
     }
     return {
         entry(binding: AccessBinding) {
-            const key = selectionKey([binding.query, binding.args]);
+            const key = selectionKey([binding.query, binding.args, binding.permission]);
             const initial: Snapshot = {
                 state: 'unknown',
                 status: binding.access!.status,
@@ -321,22 +334,15 @@ function monitor(zero: NativeZero, context: string) {
     };
 }
 
-/** Unmounts protected content before invoking the optional confirmed-loss callback. */
-export function AccessBoundary({
-    binding,
-    prop,
-    options,
-    children,
-}: {
-    binding: AccessBinding;
-    prop: string;
-    options: AccessOptions;
-    children: ReactNode;
-}) {
+const idle: Snapshot = { state: 'unknown', status: 404, revocation: 0, generation: '' };
+const idleStore = { snapshot: () => idle, initial: () => idle, subscribe: () => () => {} };
+
+function useAccessState(binding: AccessBinding | null) {
     const zero = useZero<Schema, undefined, ClientContext>();
     const context = selectionKey(zero.context);
     const key = selectionKey(binding);
     const store = useMemo(() => {
+        if (!binding) return idleStore;
         let contexts = groups.get(zero);
         if (!contexts) groups.set(zero, (contexts = new Map()));
         let group = contexts.get(context);
@@ -345,14 +351,48 @@ export function AccessBoundary({
         // oxlint-disable-next-line react-hooks-plugin/exhaustive-deps -- Serialized binding/context identity.
     }, [zero, context, key]);
     const state = useSyncExternalStore(store.subscribe, store.snapshot, store.initial);
+    return { store, state };
+}
+
+/** Omitted ID checks a class; null waits for an instance identity without subscribing. */
+export function usePermission(model: string, ability: string, id?: string | null): boolean | undefined {
+    const { state } = useAccessState(
+        id === null
+            ? null
+            : {
+                  permission: { model, ability, ...(id === undefined ? {} : { id }) },
+                  access: { status: 404 },
+              },
+    );
+    return state.state === 'unknown' ? undefined : state.state === 'allowed';
+}
+
+/** Unmounts protected content before invoking the optional confirmed-loss callback. */
+export function AccessBoundary({
+    binding,
+    prop,
+    options,
+    children,
+}: {
+    binding: AccessBinding & { query: string };
+    prop: string;
+    options: AccessOptions;
+    children: ReactNode;
+}) {
+    const { store, state } = useAccessState(binding);
     const notified = useRef({ store, count: 0 });
     useEffect(() => {
         if (notified.current.store !== store) notified.current = { store, count: 0 };
-        if (state.revocation > notified.current.count) {
+        if (state.state === 'denied' && state.revocation > notified.current.count) {
             notified.current.count = state.revocation;
-            options.onRevoked?.({ status: state.status, query: binding.query, prop });
+            options.onRevoked?.({
+                status: state.status,
+                query: binding.query,
+                prop,
+                ...(binding.access?.revoked?.message === undefined ? {} : { message: binding.access.revoked.message }),
+            });
         }
-    }, [state, options, binding.query, prop, store]);
+    }, [state, options, binding, prop, store]);
     if (state.state === 'denied')
         return (
             options.onError?.(state.status) ?? (

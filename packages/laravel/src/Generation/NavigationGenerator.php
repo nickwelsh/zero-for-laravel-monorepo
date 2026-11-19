@@ -8,7 +8,15 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Routing\Route;
 use Illuminate\Routing\Router;
+use Inertia\Inertia;
 use LogicException;
+use PhpParser\Node;
+use PhpParser\Node\Expr;
+use PhpParser\Node\Stmt;
+use PhpParser\NodeFinder;
+use PhpParser\NodeTraverser;
+use PhpParser\NodeVisitor\NameResolver;
+use PhpParser\ParserFactory;
 use ReflectionMethod;
 use Symfony\Component\Routing\CompiledRoute;
 use ZeroForLaravel\Http\ControllerRouteDispatcher;
@@ -33,15 +41,17 @@ final class NavigationGenerator
             }
 
             $bindings = [];
-            $component = null;
+            [$component, $client] = $this->page($route);
             foreach ($queries as $query) {
                 if ($query->standalone || $query->optionSource !== null || ltrim($query->action, '\\') !== $action) {
                     continue;
                 }
 
                 $component = $query->component;
+                $client = $query->ordinary === [] && ($bindings === [] || $client);
                 $binding = ['query' => $query->name(), 'one' => $query->expression->singular,
                     'parameters' => $this->parameters($route, $query)];
+                $client = $client && $binding['parameters'] !== null;
                 foreach ($query->parameters as $type) {
                     if (str_starts_with($type, 'request:')) {
                         foreach (RequestContract::value(substr($type, 8))->fields as $field => $contract) {
@@ -52,9 +62,11 @@ final class NavigationGenerator
                     }
                 }
 
-                if ($query->guards !== []) {
-                    $guard = $query->guards[0];
-                    $binding['access'] = ['status' => (new PolicyCompiler)->compile($guard['class'], $guard['ability'])->deniedStatus];
+                if ($query->expression->kind === 'guarded') {
+                    $parameter = $query->expression->children[0]->value;
+                    $guard = array_values(array_filter($query->guards, fn (array $guard): bool => $guard['parameter'] === $parameter))[0]
+                        ?? throw new LogicException('Guarded navigation requires its captured instance authorization.');
+                    $binding['access'] = GuardedAccess::contract((new PolicyCompiler)->compile($guard['class'], $guard['ability']));
                 }
 
                 $bindings[$query->prop] = $binding;
@@ -69,12 +81,62 @@ final class NavigationGenerator
                 'protocol' => $route->httpsOnly() ? 'https:' : ($route->httpOnly() ? 'http:' : null),
                 'route' => ControllerRouteDispatcher::identity($route),
                 'component' => $component,
+                'name' => $route->getName(),
+                'uri' => $route->uri(),
+                'domain' => $route->getDomain(),
+                'client' => $component !== null && $client && $route->wheres === [] && ! $route->enforcesScopedBindings(),
                 'defaults' => (object) array_filter($route->defaults, static fn (mixed $value): bool => is_string($value) || is_int($value)),
                 'bindings' => (object) $bindings,
             ];
         }
 
         return 'export const navigation = '.json_encode($routes, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES)." as const;\n";
+    }
+
+    /** Literal shells are navigation destinations even without any live queries.
+     * @return array{string|null, bool}
+     */
+    private function page(Route $route): array
+    {
+        $class = $route->getControllerClass();
+        if ($class === null || ! class_exists($class) || ! method_exists($class, $route->getActionMethod())) {
+            return [null, false];
+        }
+
+        $method = new ReflectionMethod($class, $route->getActionMethod());
+        $file = $method->getFileName();
+        if ($file === false) {
+            return [null, false];
+        }
+
+        $source = file_get_contents($file);
+        if ($source === false) {
+            throw new LogicException('Cannot read page controller '.$file);
+        }
+
+        $nodes = (new NodeTraverser(new NameResolver))->traverse((new ParserFactory)->createForHostVersion()->parse($source) ?? []);
+        $node = (new NodeFinder)->findFirst($nodes, fn (Node $node): bool => $node instanceof Stmt\ClassMethod && $node->name->name === $method->name && $node->getEndLine() === $method->getEndLine());
+        if (! $node instanceof Stmt\ClassMethod) {
+            return [null, false];
+        }
+
+        $statements = $node->stmts ?? [];
+        $return = array_pop($statements);
+        $call = $return instanceof Stmt\Return_ ? $return->expr : null;
+        if (! $call instanceof Expr\StaticCall || ! $call->class instanceof Node\Name || $call->class->toString() !== Inertia::class
+            || ! $call->name instanceof Node\Identifier || $call->name->name !== 'render') {
+            return [null, false];
+        }
+
+        $args = $call->getArgs();
+        if (count($args) < 1 || count($args) > 2 || ! $args[0]->value instanceof Node\Scalar\String_
+            || array_filter($args, fn (Node\Arg $arg): bool => $arg->name instanceof Node\Identifier || $arg->unpack || $arg->byRef) !== []) {
+            return [null, false];
+        }
+
+        $empty = ! isset($args[1]) || $args[1]->value instanceof Expr\Array_ && $args[1]->value->items === [];
+
+        return [$args[0]->value->value, $empty && $statements === [] && $node->params === []];
     }
 
     private function pattern(string $pattern, CompiledRoute $compiled, bool $broad): string

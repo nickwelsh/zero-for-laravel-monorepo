@@ -82,7 +82,7 @@ final readonly class ControllerMutationRuntime
     }
 
     /** @param array<string,mixed> $locals */
-    private function expression(OperationNode $op, array $locals): mixed
+    private function expression(OperationNode $op, array $locals, bool $nullTolerant = false): mixed
     {
         $e = fn (OperationNode $node): mixed => $this->expression($node, $locals);
         switch ($op->string('op')) {
@@ -98,8 +98,12 @@ final readonly class ControllerMutationRuntime
                 return $merged;
             case 'local': return $locals[$op->string('name')];
             case 'get':
-                $base = $e($op->node('base'));
+                $base = $this->expression($op->node('base'), $locals, $nullTolerant);
                 $key = $e($op->node('key'));
+                if ($base === null && $nullTolerant) {
+                    return null;
+                }
+
                 if ((! is_array($base) && ! $base instanceof Model) || (! is_string($key) && ! is_int($key))) {
                     throw new LogicException('Invalid compiled property access.');
                 }
@@ -113,7 +117,7 @@ final readonly class ControllerMutationRuntime
 
                 return $request->validated();
             case 'timestamp': return $this->mutation->timestamp();
-            case 'isset': return $e($op->node('value')) !== null;
+            case 'isset': return $this->expression($op->node('value'), $locals, true) !== null;
             case 'has':
                 $key = $e($op->node('key'));
                 $base = $e($op->node('base'));
@@ -134,6 +138,7 @@ final readonly class ControllerMutationRuntime
             case 'binary': return match ($op->string('operator')) {
                 '===' => $e($op->node('left')) === $e($op->node('right')), '!==' => $e($op->node('left')) !== $e($op->node('right')),
                 '&&' => $e($op->node('left')) && $e($op->node('right')), '||' => $e($op->node('left')) || $e($op->node('right')),
+                '??' => $this->expression($op->node('left'), $locals, true) ?? $e($op->node('right')),
                 default => throw new LogicException('Unknown compiled binary operator.'),
             };
             case 'findUnique': return $this->mutation->findUnique($this->mutation->metadata($op->string('class'))->class, Input::object($e($op->node('unique')), 'unique'));

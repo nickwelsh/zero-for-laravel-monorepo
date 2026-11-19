@@ -28,7 +28,13 @@ use ZeroForLaravel\Concerns\HasPolicyVisibility;
 final class PolicyCompiler
 {
     /** @param class-string<Model> $class */
-    public function compile(string $class, string $ability = 'view'): PolicyPlan
+    public function compileClass(string $class, string $ability): PolicyPlan
+    {
+        return $this->compile($class, $ability, true);
+    }
+
+    /** @param class-string<Model> $class */
+    public function compile(string $class, string $ability = 'view', bool $classResource = false): PolicyPlan
     {
         $gate = Gate::getFacadeRoot();
         if (! $gate instanceof LaravelGate) {
@@ -42,19 +48,21 @@ final class PolicyCompiler
         }
 
         $model = new $class;
-        if (! method_exists($model, 'scopeVisibleTo')) {
+        if (! $classResource && ! method_exists($model, 'scopeVisibleTo')) {
             throw new LogicException("{$class} requires HasPolicyVisibility for portable collections.");
         }
 
-        $scope = new ReflectionMethod($model, 'scopeVisibleTo');
-        $supportedScope = new ReflectionMethod(HasPolicyVisibility::class, 'scopeVisibleTo');
-        if ($scope->getFileName() !== $supportedScope->getFileName() || $scope->getStartLine() !== $supportedScope->getStartLine()) {
-            throw new LogicException('Custom visibleTo scopes are server-only; portable queries cannot replace application SQL.');
-        }
+        if (! $classResource) {
+            $scope = new ReflectionMethod($model, 'scopeVisibleTo');
+            $supportedScope = new ReflectionMethod(HasPolicyVisibility::class, 'scopeVisibleTo');
+            if ($scope->getFileName() !== $supportedScope->getFileName() || $scope->getStartLine() !== $supportedScope->getStartLine()) {
+                throw new LogicException('Custom visibleTo scopes are server-only; portable queries cannot replace application SQL.');
+            }
 
-        foreach ($model->getGlobalScopes() as $scope) {
-            if (! $scope instanceof SoftDeletingScope && ! $scope instanceof VisibleToCurrentUser) {
-                throw new LogicException("{$class} has an unsupported global scope; portable queries must preserve every constraint.");
+            foreach ($model->getGlobalScopes() as $scope) {
+                if (! $scope instanceof SoftDeletingScope && ! $scope instanceof VisibleToCurrentUser) {
+                    throw new LogicException("{$class} has an unsupported global scope; portable queries must preserve every constraint.");
+                }
             }
         }
 
@@ -66,26 +74,37 @@ final class PolicyCompiler
         $policyClass = $policy::class;
         $method = new ReflectionMethod($policy, $ability);
         $node = $this->method($method);
-        if (count($node->params) !== 2 || count($node->stmts ?? []) !== 1 || ! $node->stmts[0] instanceof Stmt\Return_) {
+        if (count($node->params) !== ($classResource ? 1 : 2) || count($node->stmts ?? []) !== 1 || ! $node->stmts[0] instanceof Stmt\Return_) {
             throw new LogicException("{$policyClass}::{$ability} is not portable: expected a direct Casbin::inspect return.");
         }
 
         $parameters = $method->getParameters();
         $subjectType = $parameters[0]->getType();
-        $resourceType = $parameters[1]->getType();
-        if (! $subjectType instanceof ReflectionNamedType || ! $resourceType instanceof ReflectionNamedType
+        $resourceType = isset($parameters[1]) ? $parameters[1]->getType() : null;
+        if (! $subjectType instanceof ReflectionNamedType
             || ! is_a(config()->string('permissions.subject.class'), $subjectType->getName(), true)
-            || ! is_a($class, $resourceType->getName(), true)) {
+            || (! $classResource && (! $resourceType instanceof ReflectionNamedType || ! is_a($class, $resourceType->getName(), true)))) {
             throw new LogicException('Portable instance policies require the configured subject and resource parameter types.');
         }
 
         $return = $node->stmts[0]->expr;
         $status = config()->integer('permissions.denied_status');
-        if ($return instanceof Expr\MethodCall) {
-            if (! $return->name instanceof Identifier || $return->args !== [] || ! in_array($return->name->name, ['asNotFound', 'asNotAuthorized'], true)) {
+        $revocation = null;
+        $denialOverride = false;
+        while ($return instanceof Expr\MethodCall) {
+            if ($return->name instanceof Identifier && $return->name->name === 'onRevoked' && ! $revocation instanceof Revocation) {
+                $arguments = $this->arguments($return, 1);
+                $revocation = $this->revocation($arguments[0]);
+                $return = $return->var;
+
+                continue;
+            }
+
+            if (! $return->name instanceof Identifier || $return->args !== [] || $denialOverride || ! in_array($return->name->name, ['asNotFound', 'asNotAuthorized'], true)) {
                 throw new LogicException('Portable policy denial overrides are asNotFound() or asNotAuthorized().');
             }
 
+            $denialOverride = true;
             $status = $return->name->name === 'asNotFound' ? 404 : 403;
             $return = $return->var;
         }
@@ -107,7 +126,7 @@ final class PolicyCompiler
                 || ! $return->name instanceof Identifier || $return->name->name !== 'inspect' || count($arguments) !== 3
                 || ! $arguments[0] instanceof Node\Arg || ! $arguments[1] instanceof Node\Arg || ! $arguments[2] instanceof Node\Arg
                 || ! $arguments[1]->value instanceof String_ || ! $this->sameVariable($arguments[0]->value, $node->params[0]->var)
-                || ! $this->sameVariable($arguments[2]->value, $node->params[1]->var)) {
+                || ($classResource ? ! $this->classLiteral($arguments[2]->value, $class) : ! $this->sameVariable($arguments[2]->value, $node->params[1]->var))) {
                 throw new LogicException("{$policyClass}::{$ability} is not portable: expected Casbin::inspect(\$user, 'literal-action', \$resource).");
             }
 
@@ -154,7 +173,66 @@ final class PolicyCompiler
         $portable = PortableModel::compile(resolve(PermissionManager::class)->model($binding->model)->source(), $binding);
         $fingerprint = hash('sha256', json_encode([$policy::class, $this->source($method), $beforeSource, $binding, config()->array('permissions.subject'), $portable->fingerprint, $status], JSON_THROW_ON_ERROR));
 
-        return new PolicyPlan($binding, $portable, $action, $status, $admin, $constant, $fingerprint);
+        return new PolicyPlan($binding, $portable, $action, $status, $admin, $constant, $fingerprint, $revocation, $classResource);
+    }
+
+    private function classLiteral(Expr $expression, string $class): bool
+    {
+        return $expression instanceof Expr\ClassConstFetch && $expression->class instanceof Name
+            && $expression->class->toString() === $class && $expression->name instanceof Identifier && $expression->name->toLowerString() === 'class';
+    }
+
+    /** @return list<Expr> */
+    private function arguments(Expr\CallLike $call, int $count): array
+    {
+        $arguments = $call->getArgs();
+        if (count($arguments) !== $count) {
+            throw new LogicException('Portable revocation declarations require literal positional arguments.');
+        }
+
+        $values = [];
+        foreach ($arguments as $argument) {
+            if (! $argument instanceof Node\Arg || $argument->name instanceof Identifier || $argument->unpack) {
+                throw new LogicException('Portable revocation declarations require literal positional arguments.');
+            }
+
+            $values[] = $argument->value;
+        }
+
+        return $values;
+    }
+
+    private function revocation(Expr $expression): Revocation
+    {
+        $message = null;
+        if ($expression instanceof Expr\MethodCall) {
+            if (! $expression->name instanceof Identifier || $expression->name->name !== 'message') {
+                throw new LogicException('Portable revocation metadata only supports a literal message().');
+            }
+
+            $arguments = $this->arguments($expression, 1);
+            if (! $arguments[0] instanceof String_) {
+                throw new LogicException('Portable revocation messages must be string literals.');
+            }
+
+            $message = $arguments[0]->value;
+            $expression = $expression->var;
+        }
+
+        if (! $expression instanceof Expr\StaticCall || ! $expression->class instanceof Name || $expression->class->toString() !== Revocation::class
+            || ! $expression->name instanceof Identifier || $expression->name->name !== 'redirectToRoute') {
+            throw new LogicException('Portable onRevoked requires Revocation::redirectToRoute(), not callbacks or dynamic expressions.');
+        }
+
+        $arguments = $this->arguments($expression, 1);
+        if (! $arguments[0] instanceof String_) {
+            throw new LogicException('Portable revocation destinations must be literal route names.');
+        }
+
+        $revocation = Revocation::redirectToRoute($arguments[0]->value);
+        $revocation->assertDestination();
+
+        return $message === null ? $revocation : $revocation->message($message);
     }
 
     private function sameVariable(Expr $a, Expr $b): bool

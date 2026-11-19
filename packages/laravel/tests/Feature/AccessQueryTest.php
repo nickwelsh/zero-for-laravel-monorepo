@@ -31,20 +31,35 @@ use ZeroForLaravel\Generation\ZodSchemaDriver;
 use ZeroForLaravel\Http\CaptureTransportCookies;
 use ZeroForLaravel\Metadata\ModelRegistry;
 use ZeroForLaravel\Permissions\Casbin;
+use ZeroForLaravel\Permissions\EloquentVisibility;
+use ZeroForLaravel\Permissions\PermissionChecks;
 use ZeroForLaravel\Permissions\PermissionSchema;
 use ZeroForLaravel\Permissions\PermissionServiceProvider;
+use ZeroForLaravel\Permissions\PolicyCompiler;
 use ZeroForLaravel\Permissions\ProjectionManager;
+use ZeroForLaravel\Permissions\ZeroVisibility;
 use ZeroForLaravel\Publication\PublicationManager;
 use ZeroForLaravel\Query\RegisteredQueries;
 use ZeroForLaravel\Query\RegisteredQuery;
+use ZeroForLaravel\ResolvedContext;
 use ZeroForLaravel\Tests\Fixtures\ContextResolver;
 use ZeroForLaravel\Tests\Fixtures\PermissionAdminPolicy;
 use ZeroForLaravel\Tests\Fixtures\PermissionList;
+use ZeroForLaravel\Tests\Fixtures\PermissionListPolicy;
 use ZeroForLaravel\Tests\Fixtures\PermissionQueryController;
 use ZeroForLaravel\Tests\Fixtures\PermissionUser;
 use ZeroForLaravel\Tests\PostgresTestCase;
 
 uses(PostgresTestCase::class);
+
+class PermissionStringList extends PermissionList
+{
+    public $incrementing = false;
+
+    protected $table = 'permission_test_string_lists';
+
+    protected $keyType = 'string';
+}
 
 final class AccessWatchMiddleware
 {
@@ -516,3 +531,205 @@ test('native access bounds generations batches and cleanup without publishing au
     expect($generated)->not->toContain('permission_access_revision', 'dependencies');
     expect($generated)->not->toContain('permission_access_checks', 'fingerprint', 'expires_at');
 });
+
+/** @param array{model: string, ability: string, id?: string|null} $permission
+ * @return array{generation: string, bindings: list<array{binding: string, permission: array{model: string, ability: string, id?: string|null}}>}
+ */
+function accessPermissionInput(array $permission): array
+{
+    return ['generation' => (string) \Illuminate\Support\Str::uuid(), 'bindings' => [[
+        'binding' => (string) \Illuminate\Support\Str::uuid(), 'permission' => $permission,
+    ]]];
+}
+
+test('class permission subscriptions capture grant and deny transitions without any business resource rows', function (): void {
+    $policy = new class extends PermissionListPolicy
+    {
+        public function create(PermissionUser $user): \Illuminate\Auth\Access\Response
+        {
+            return Casbin::inspect($user, 'create', PermissionList::class)->asNotAuthorized();
+        }
+    };
+    Gate::policy(PermissionList::class, $policy::class);
+    config([
+        'permissions.access.abilities' => [PermissionList::class => ['create']],
+        'permissions.resources.'.PermissionList::class.'.domain.context' => 'user_id',
+    ]);
+    (new ProjectionManager)->rebuild();
+    PermissionList::query()->delete();
+    $permission = ['model' => 'PermissionList', 'ability' => 'create'];
+    $initial = accessPermissionInput($permission);
+    accessNativeQuery($initial)->assertOk()->assertJsonPath('queries.0.ast.table', 'permission_access_results')->assertJsonMissingPath('queries.0.error');
+    expect(DB::table('permission_access_results')->where('generation', $initial['generation'])->first())->toMatchObject(['state' => 'denied', 'status' => 403]);
+    $dependencies = DB::table('permission_access_checks')->where('generation', $initial['generation'])->value('dependencies');
+    expect($dependencies)->toBeString();
+    expect($dependencies)->not->toContain(\ZeroForLaravel\Permissions\Binding::resource(PermissionList::class)->projectionTable());
+
+    Casbin::addPolicy('role:creator', 'list:42', 'todo-list', 'create', 'any', 'allow');
+    Casbin::addGroupingPolicy('user:42', 'role:creator', 'list:42');
+    $allowed = accessPermissionInput($permission);
+    accessNativeQuery($allowed)->assertOk()->assertJsonMissingPath('queries.0.error');
+    expect(DB::table('permission_access_results')->where('generation', $allowed['generation'])->first())->toMatchObject(['state' => 'allowed', 'status' => null]);
+    expect(DB::table('permission_access_checks')->where('generation', $allowed['generation'])->value('dependencies'))->not->toBe($dependencies);
+    Casbin::addPolicy('role:creator', 'list:42', 'todo-list', 'create', 'owner', 'deny');
+    $denied = accessPermissionInput($permission);
+    accessNativeQuery($denied)->assertOk()->assertJsonMissingPath('queries.0.error');
+    expect(DB::table('permission_access_results')->where('generation', $denied['generation'])->first())->toMatchObject(['state' => 'denied', 'status' => 403]);
+    Casbin::removePolicy('role:creator', 'list:42', 'todo-list', 'create', 'owner', 'deny');
+    $restored = accessPermissionInput($permission);
+    accessNativeQuery($restored)->assertOk()->assertJsonMissingPath('queries.0.error');
+    expect(DB::table('permission_access_results')->where('generation', $restored['generation'])->value('state'))->toBe('allowed');
+    \Pest\Laravel\actingAs(PermissionUser::findOrFail(84));
+    $foreign = accessPermissionInput($permission);
+    accessNativeQuery($foreign)->assertOk()->assertJsonMissingPath('queries.0.error');
+    expect(DB::table('permission_access_results')->where('generation', $foreign['generation'])->value('state'))->toBe('denied');
+    expect(PermissionList::query()->count())->toBe(0);
+});
+
+test('ordinary instance permission subscriptions use authoritative fresh attributes and preserve concealed denials', function (): void {
+    config(['permissions.access.abilities' => [PermissionList::class => ['view', 'update']]]);
+    $permission = ['model' => 'PermissionList', 'ability' => 'view', 'id' => '7'];
+    $allowed = accessPermissionInput($permission);
+    accessNativeQuery($allowed)->assertOk()->assertJsonMissingPath('queries.0.error');
+    expect(DB::table('permission_access_results')->where('generation', $allowed['generation'])->value('state'))->toBe('allowed');
+    DB::table('permission_test_users')->where('id', 42)->update(['department_id' => 'support']);
+    $denied = accessPermissionInput($permission);
+    accessNativeQuery($denied)->assertOk()->assertJsonMissingPath('queries.0.error');
+    expect(DB::table('permission_access_results')->where('generation', $denied['generation'])->first())->toMatchObject(['state' => 'denied', 'status' => 403]);
+    $concealed = accessPermissionInput(['model' => 'PermissionList', 'ability' => 'update', 'id' => '7']);
+    accessNativeQuery($concealed)->assertOk()->assertJsonMissingPath('queries.0.error');
+    expect(DB::table('permission_access_results')->where('generation', $concealed['generation'])->first())->toMatchObject(['state' => 'denied', 'status' => 404]);
+    PermissionList::query()->delete();
+    $missing = accessPermissionInput(['model' => 'PermissionList', 'ability' => 'update', 'id' => '7']);
+    accessNativeQuery($missing)->assertOk()->assertJsonMissingPath('queries.0.error');
+    expect(DB::table('permission_access_results')->where('generation', $missing['generation'])->first())->toMatchObject(['state' => 'denied', 'status' => 404]);
+    expect(array_keys((array) DB::table('permission_access_results')->first()))->toBe(['id', 'generation', 'binding', 'state', 'status']);
+});
+
+test('permission subscriptions reject idle null unallowlisted abilities context injection and changed generation identities', function (): void {
+    config(['permissions.access.abilities' => [PermissionList::class => ['view']]]);
+    accessNativeQuery(accessPermissionInput(['model' => 'PermissionList', 'ability' => 'view', 'id' => null]))->assertOk()->assertJsonPath('queries.0.error', 'parse');
+    accessNativeQuery(accessPermissionInput(['model' => 'PermissionList', 'ability' => 'delete', 'id' => '7']))->assertOk()->assertJsonPath('queries.0.error', 'parse');
+    $injected = accessPermissionInput(['model' => 'PermissionList', 'ability' => 'view', 'id' => '7']);
+    $injected['bindings'][0]['permission']['actor'] = '84';
+    accessNativeQuery($injected)->assertOk()->assertJsonPath('queries.0.error', 'parse');
+    $input = accessPermissionInput(['model' => 'PermissionList', 'ability' => 'view', 'id' => '7']);
+    $first = accessNativeQuery($input)->assertOk()->assertJsonMissingPath('queries.0.error')->json('queries.0.ast');
+    expect(accessNativeQuery($input)->assertOk()->json('queries.0.ast'))->toBe($first);
+    expect(DB::table('permission_access_results')->count())->toBe(1);
+    $input['bindings'][0]['permission']['id'] = '8';
+    accessNativeQuery($input)->assertOk()->assertJsonPath('queries.0.error', 'parse');
+});
+
+test('class permission status dependencies preserve Laravel admin overrides and refresh their private facts', function (): void {
+    $policy = new class extends PermissionAdminPolicy
+    {
+        public function create(PermissionUser $user): \Illuminate\Auth\Access\Response
+        {
+            return Casbin::inspect($user, 'create', PermissionList::class)->asNotAuthorized();
+        }
+    };
+    Gate::policy(PermissionList::class, $policy::class);
+    config([
+        'permissions.access.abilities' => [PermissionList::class => ['create']],
+        'permissions.resources.'.PermissionList::class.'.domain.context' => 'user_id',
+    ]);
+    (new ProjectionManager)->rebuild();
+    DB::table('permission_test_users')->where('id', 42)->update(['is_admin' => true]);
+    $permission = ['model' => 'PermissionList', 'ability' => 'create'];
+    $allowed = accessPermissionInput($permission);
+    accessNativeQuery($allowed)->assertOk()->assertJsonMissingPath('queries.0.error');
+    expect(DB::table('permission_access_results')->where('generation', $allowed['generation'])->value('state'))->toBe('allowed');
+    $dependency = DB::table('permission_access_checks')->where('generation', $allowed['generation'])->value('dependencies');
+    expect($dependency)->toContain('s_is_admin');
+    expect(Auth::user()?->getAttribute('is_admin'))->toBeFalse();
+    DB::table('permission_test_users')->where('id', 42)->update(['is_admin' => false]);
+    $denied = accessPermissionInput($permission);
+    accessNativeQuery($denied)->assertOk()->assertJsonMissingPath('queries.0.error');
+    expect(DB::table('permission_access_results')->where('generation', $denied['generation'])->value('state'))->toBe('denied');
+    expect(DB::table('permission_access_checks')->where('generation', $denied['generation'])->value('dependencies'))->not->toBe($dependency);
+});
+
+function accessStringPermissionModel(string $storage, string $id): void
+{
+    Schema::create('permission_test_string_lists', function (Blueprint $table) use ($storage): void {
+        if ($storage === 'uuid') {
+            $table->uuid('id')->primary();
+        } else {
+            $table->string('id')->primary();
+        }
+
+        $table->string('owner_id');
+        $table->string('department_id');
+        $table->string('name');
+    });
+    config([
+        'permissions.resources.'.PermissionStringList::class => config()->array('permissions.resources.'.PermissionList::class),
+        'permissions.access.abilities' => [PermissionList::class => ['view'], PermissionStringList::class => ['view']],
+    ]);
+    Gate::policy(PermissionStringList::class, PermissionListPolicy::class);
+    PermissionStringList::create(['id' => $id, 'owner_id' => '42', 'department_id' => 'engineering', 'name' => 'String identity']);
+    app()->instance(ModelRegistry::class, new ModelRegistry([PermissionList::class, PermissionStringList::class]));
+    (new ProjectionManager)->rebuild();
+    Casbin::addPolicy('user:42', 'list:'.$id, 'todo-list', 'view', 'any', 'allow');
+}
+
+test('integer permission identities reject aliases and malformed native keys without poisoning valid bindings', function (string $id): void {
+    config(['permissions.access.abilities' => [PermissionList::class => ['view']]]);
+    $input = accessPermissionInput(['model' => 'PermissionList', 'ability' => 'view', 'id' => $id]);
+    $valid = accessPermissionInput(['model' => 'PermissionList', 'ability' => 'view', 'id' => '7']);
+    $input['bindings'][] = $valid['bindings'][0];
+    accessNativeQuery($input)->assertOk()->assertJsonMissingPath('queries.0.error');
+    expect(DB::table('permission_access_results')->where('generation', $input['generation'])
+        ->where('binding', $input['bindings'][0]['binding'])->first())->toMatchObject(['state' => 'denied', 'status' => 404]);
+    expect(DB::table('permission_access_results')->where('generation', $input['generation'])
+        ->where('binding', $input['bindings'][1]['binding'])->first())->toMatchObject(['state' => 'allowed', 'status' => null]);
+    expect(DB::transactionLevel())->toBe(0);
+})->with(['007', '+7', '7.0', '7e0', ' 7', 'not-an-integer', '9223372036854775808']);
+
+test('UUID permission identities reject aliases and malformed native keys without poisoning valid bindings', function (string $invalid): void {
+    $id = 'b0370100-3668-4cab-a765-240b4d2867a5';
+    accessStringPermissionModel('uuid', $id);
+    $input = accessPermissionInput(['model' => 'PermissionStringList', 'ability' => 'view', 'id' => $invalid]);
+    $valid = accessPermissionInput(['model' => 'PermissionStringList', 'ability' => 'view', 'id' => $id]);
+    $input['bindings'][] = $valid['bindings'][0];
+    accessNativeQuery($input)->assertOk()->assertJsonMissingPath('queries.0.error');
+    expect(DB::table('permission_access_results')->where('generation', $input['generation'])
+        ->where('binding', $input['bindings'][0]['binding'])->first())->toMatchObject(['state' => 'denied', 'status' => 404]);
+    expect(DB::table('permission_access_results')->where('generation', $input['generation'])
+        ->where('binding', $input['bindings'][1]['binding'])->first())->toMatchObject(['state' => 'allowed', 'status' => null]);
+    expect(DB::transactionLevel())->toBe(0);
+})->with(['B0370100-3668-4CAB-A765-240B4D2867A5', '{b0370100-3668-4cab-a765-240b4d2867a5}', 'b037010036684caba765240b4d2867a5', 'not-a-uuid']);
+
+test('canonical permission identities capture positive dependencies and invalidate on PostgreSQL revocation', function (string $storage, string $id): void {
+    if ($storage !== 'integer') {
+        accessStringPermissionModel($storage, $id);
+    }
+
+    $class = $storage === 'integer' ? PermissionList::class : PermissionStringList::class;
+    $name = $storage === 'integer' ? 'PermissionList' : 'PermissionStringList';
+    config(['permissions.access.abilities.'.$class => ['view']]);
+    $permission = ['model' => $name, 'ability' => 'view', 'id' => $id];
+    $input = accessPermissionInput($permission);
+    accessNativeQuery($input)->assertOk()->assertJsonMissingPath('queries.0.error');
+    expect(DB::table('permission_access_results')->where('generation', $input['generation'])->value('state'))->toBe('allowed');
+    $plan = (new PolicyCompiler)->compile($class, 'view');
+    $visibility = (new EloquentVisibility)->query($plan, '42')->where('object_id', $id);
+    expect($visibility->exists())->toBeTrue();
+    $dependencies = DB::table('permission_access_checks')->where('generation', $input['generation'])->value('dependencies');
+    expect($dependencies)->toContain(json_encode((new ZeroVisibility)->guard($plan, '42', $id, true)->toArray(), JSON_THROW_ON_ERROR));
+
+    Casbin::removePolicy('user:42', 'list:'.$id, 'todo-list', 'view', $storage === 'integer' ? 'department' : 'any', 'allow');
+    expect($visibility->exists())->toBeFalse();
+    $checks = resolve(PermissionChecks::class);
+    $updated = $checks->dependencies($checks->parse($permission), new ResolvedContext(['user_id' => '42'], '42'), PermissionUser::findOrFail(42));
+    expect(json_encode($updated, JSON_THROW_ON_ERROR))->not->toBe($dependencies)
+        ->toContain(json_encode((new ZeroVisibility)->guard($plan, '42', $id, false)->toArray(), JSON_THROW_ON_ERROR));
+    $denied = accessPermissionInput($permission);
+    accessNativeQuery($denied)->assertOk()->assertJsonMissingPath('queries.0.error');
+    expect(DB::table('permission_access_results')->where('generation', $denied['generation'])->value('state'))->toBe('denied');
+})->with([
+    'integer' => ['integer', '7'],
+    'UUID' => ['uuid', 'b0370100-3668-4cab-a765-240b4d2867a5'],
+    'text preserves leading zeroes' => ['text', '007'],
+]);

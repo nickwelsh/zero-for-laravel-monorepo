@@ -9,6 +9,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 use ZeroForLaravel\Concerns\HasPolicyVisibility;
 use ZeroForLaravel\Concerns\HasZeroQueries;
 
+/** @property string $name */
 class TaskList extends Model
 {
     use HasPolicyVisibility;

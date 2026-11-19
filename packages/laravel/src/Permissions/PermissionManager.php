@@ -8,11 +8,15 @@ use Casbin\Enforcer;
 use Casbin\Model\Model as CasbinModel;
 use Casbin\Rbac\DefaultRoleManager\DomainManager;
 use Casbin\Rbac\DefaultRoleManager\RoleManager;
+use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Connection;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use LogicException;
+use ZeroForLaravel\Context\ContextDefinition;
+use ZeroForLaravel\ResolvedContext;
 
 final readonly class PermissionManager
 {
@@ -43,15 +47,39 @@ final readonly class PermissionManager
         return $text;
     }
 
-    public function inspect(Authenticatable $user, string $action, Model $resource): AuthorizationResponse
+    /** @param Model|class-string<Model> $resource */
+    public function inspect(Authenticatable $user, string $action, Model|string $resource, ?ResolvedContext $context = null): AuthorizationResponse
     {
-        $binding = Binding::resource($resource::class);
+        $binding = Binding::resource(is_string($resource) ? $resource : $resource::class);
         $manager = $this->model($binding->model);
         // Do not cache authorization results or the caller's mutable attributes.
         $freshUser = $user instanceof Model ? $user->fresh() : null;
-        $freshResource = $resource->fresh();
+        $freshResource = $resource instanceof Model ? $resource->fresh() : null;
         $allowed = false;
-        if ($freshUser instanceof Authenticatable && $freshResource instanceof Model) {
+        if ($freshUser instanceof Authenticatable && is_string($resource)) {
+            $portable = PortableModel::compile($manager->source(), $binding);
+            $plan = new PolicyPlan($binding, $portable, $action, 403, null, null, $portable->fingerprint);
+            try {
+                if (! $context instanceof ResolvedContext) {
+                    if ($binding->domainColumn === null) {
+                        $context = new ResolvedContext([], Binding::id($freshUser->getAuthIdentifier()));
+                    } else {
+                        $request = resolve(Request::class);
+                        $requestId = $request->user()?->getAuthIdentifier();
+                        if ((! is_string($requestId) && ! is_int($requestId)) || (string) $requestId !== Binding::id($freshUser->getAuthIdentifier())) {
+                            throw new AuthorizationException('Permission actor differs from the authenticated request identity.');
+                        }
+
+                        $context = ActorScope::run($request, $freshUser, fn (): ResolvedContext => ContextDefinition::configured()->resolve($request));
+                    }
+                }
+
+                $domain = $binding->classDomain($freshUser, $context);
+                $allowed = (new ClassPermission($plan, Binding::id($freshUser->getAuthIdentifier()), $domain))->inspect($freshUser);
+            } catch (AuthorizationException) {
+                $allowed = false;
+            }
+        } elseif ($freshUser instanceof Authenticatable && $freshResource instanceof Model) {
             $subject = Binding::subject($freshUser);
             $object = $binding->object($freshResource);
             $enforcer = $manager->enforcer($binding);

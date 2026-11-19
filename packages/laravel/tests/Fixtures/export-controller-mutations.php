@@ -26,6 +26,7 @@ use ZeroForLaravel\Tables\TableURLState;
 use ZeroForLaravel\Tests\Fixtures\ChoiceQueryRequest;
 use ZeroForLaravel\Tests\Fixtures\ControllerMutationController;
 use ZeroForLaravel\Tests\Fixtures\DateQueryRequest;
+use ZeroForLaravel\Tests\Fixtures\LaravelAuthorizationController;
 use ZeroForLaravel\Tests\Fixtures\Module\TaskQueries;
 use ZeroForLaravel\Tests\Fixtures\MutationPreference;
 use ZeroForLaravel\Tests\Fixtures\PreferenceMutationController;
@@ -163,6 +164,29 @@ $fixture = new class('export') extends TestCase
             $query = $compiler->compile(QueryController::class, 'dated')[0];
 
             return (new ControllerQueryGenerator($schemas))->typescript([$query], './generated');
+        }
+
+        if ($mode === 'authorization') {
+            $models = new ModelRegistry($this->models());
+            $parser = (new ParserFactory)->createForNewestSupportedVersion();
+            $queries = new ControllerQueryCompiler($parser, $models);
+            $mutations = new ControllerMutationCompiler($parser, $models);
+            $queryGenerator = new ControllerQueryGenerator($schemas);
+            $mutationGenerator = new ControllerMutationGenerator($schemas);
+
+            return json_encode([
+                'schema.generated.ts' => (new TypeScriptGenerator)->generate($models),
+                'empty.queries.ts' => $queryGenerator->typescript([], './schema.generated'),
+                'empty.mutations.ts' => $mutationGenerator->typescript([]),
+                'authorization.queries.ts' => $queryGenerator->typescript([
+                    ...$queries->compile(LaravelAuthorizationController::class, 'show'),
+                    ...$queries->compile(LaravelAuthorizationController::class, 'literalText'),
+                ], './schema.generated'),
+                'authorization.mutations.ts' => $mutationGenerator->typescript(array_map(
+                    fn (string $method): MutationProgram => $mutations->compile(LaravelAuthorizationController::class, $method),
+                    ['store', 'update', 'defaults'],
+                )),
+            ], JSON_THROW_ON_ERROR);
         }
 
         $compiler = new ControllerMutationCompiler((new ParserFactory)->createForNewestSupportedVersion(), new ModelRegistry($this->models()));

@@ -8,8 +8,8 @@ import { liveQuery, withQueryInputs } from '../live-query';
 import { z } from 'zod';
 import { router } from '@inertiajs/react';
 import { useData, QueryAccessError, type Data, type QueryInputs } from './data';
-import { createInertiaAdapter, useLiveProps } from './inertia';
-import { AccessBoundary, AccessGeneration } from './access';
+import { createInertiaAdapter, useLiveProps, withoutLiveProps } from './inertia';
+import { AccessBoundary, AccessGeneration, usePermission } from './access';
 import { StrictMode, useContext } from 'react';
 
 const native = vi.hoisted(() => ({
@@ -222,6 +222,168 @@ it.each([403, 404] as const)(
 );
 
 const protectedBinding = { query: 'tasks', args: { title: '' }, access: { status: 403 as const } };
+
+it('checks class and instance permissions through isolated status rows and keeps null idle', async () => {
+    const hook = renderHook<boolean | undefined, { id?: string | null }>(
+        ({ id }) => usePermission('Task', 'create', id),
+        {
+            initialProps: { id: null },
+            wrapper: StrictMode,
+        },
+    );
+    await ready();
+    expect(checks()).toHaveLength(0);
+    expect(hook.result.current).toBeUndefined();
+    hook.rerender({});
+    await ready();
+    expect(checks().at(-1)!.request.args.bindings![0]).toMatchObject({
+        permission: { model: 'Task', ability: 'create' },
+    });
+    expect(checks().at(-1)!.request.args.bindings![0]).not.toHaveProperty('query');
+    await answer();
+    expect(hook.result.current).toBe(true);
+    await act(async () => native.zero.connect('disconnected'));
+    expect(hook.result.current).toBeUndefined();
+    await act(async () => native.zero.connect('connected'));
+    await answer('denied', 403);
+    expect(hook.result.current).toBe(false);
+    hook.rerender({ id: 'specific-id' });
+    await ready();
+    expect(hook.result.current).toBeUndefined();
+    expect(checks().at(-1)!.request.args.bindings![0]).toMatchObject({
+        permission: { model: 'Task', ability: 'create', id: 'specific-id' },
+    });
+    await answer();
+    expect(hook.result.current).toBe(true);
+    expect(native.requests).toHaveLength(0);
+});
+
+it.each([
+    { left: '', observe: true, message: 'Access removed.' },
+    { left: '', observe: true, message: '' },
+    { left: '', observe: false, message: 'Access removed.' },
+    { left: 'navigate', observe: true, message: 'Access removed.' },
+    { left: 'clientVisit', observe: true, message: 'Access removed.' },
+])(
+    'handles revocation once, independently of its observer, and ignores stale pages (%o)',
+    async ({ left, observe, message }) => {
+        const replace = vi.spyOn(router, 'replace').mockImplementation(() => {});
+        const visit = vi.spyOn(router, 'visit').mockImplementation(() => {});
+        const replaceDocument = vi.fn();
+        const browser = window;
+        const location = new Proxy(
+            { replace: replaceDocument },
+            {
+                get(target, key) {
+                    if (key === 'replace') return target.replace;
+                    if (key === 'toString') return browser.location.toString.bind(browser.location);
+                    return Reflect.get(browser.location, key, browser.location);
+                },
+            },
+        );
+        vi.stubGlobal(
+            'window',
+            new Proxy(browser, {
+                get(target, key) {
+                    if (key === 'location') return location;
+                    if (key === 'addEventListener') return target.addEventListener.bind(target);
+                    if (key === 'removeEventListener') return target.removeEventListener.bind(target);
+                    return Reflect.get(target, key, target);
+                },
+            }),
+        );
+        const notified = vi.fn();
+        const adapter = createInertiaAdapter(
+            { tasks: (args: { title: string }) => index.tasks.live(args) },
+            {
+                access: observe ? { onRevoked: notified } : {},
+                navigation: [
+                    {
+                        name: 'tasks.index',
+                        uri: 'tasks',
+                        domain: null,
+                        pattern: '^/tasks$',
+                        host: null,
+                        protocol: null,
+                        route: 'index',
+                        component: 'tasks/index',
+                        client: true,
+                        defaults: {},
+                        bindings: {},
+                    },
+                ],
+            },
+        );
+        const binding = {
+            query: 'tasks',
+            args: { title: '' },
+            access: { status: 404, revoked: { route: 'tasks.index', message } },
+        };
+        const page = {
+            component: 'tasks/show',
+            sharedProps: ['auth'],
+            props: { __zero: { version: 1, mode: 'replace', bindings: { first: binding, second: binding } } },
+        };
+        const Wrapped = adapter.wrap(() => <p>Protected</p>, page);
+        const view = render(
+            <StrictMode>
+                <Wrapped {...page.props} />
+            </StrictMode>,
+        );
+        try {
+            await ready();
+            await answer('denied', 404);
+            expect(notified).not.toHaveBeenCalled();
+            expect(replace).not.toHaveBeenCalled();
+            expect(visit).not.toHaveBeenCalled();
+            expect(replaceDocument).not.toHaveBeenCalled();
+            await answer();
+            await ready();
+            await answer();
+            if (left)
+                document.dispatchEvent(
+                    new CustomEvent(`inertia:${left}`, {
+                        detail: { page: { component: 'other', props: {} } },
+                    }),
+                );
+            await answer('denied', 404);
+            await answer('denied', 404);
+            expect(notified).toHaveBeenCalledTimes(left || !observe ? 0 : 1);
+            expect(replace).not.toHaveBeenCalled();
+            expect(visit).not.toHaveBeenCalled();
+            expect(replaceDocument).toHaveBeenCalledTimes(left ? 0 : 1);
+            if (!left) {
+                if (observe) expect(notified.mock.calls[0]![0]).toMatchObject({ status: 404, message });
+                expect(replaceDocument).toHaveBeenCalledExactlyOnceWith(`${window.location.origin}/tasks`);
+            }
+        } finally {
+            view.unmount();
+            adapter.dispose();
+            replace.mockRestore();
+            visit.mockRestore();
+        }
+    },
+);
+
+it('clears live bindings and their ordinary snapshots without dropping shared or unrelated props', () => {
+    const source = {
+        auth: 'shared',
+        heading: 'keep',
+        tasks: ['stale'],
+        __zero: {
+            version: 1,
+            mode: 'replace',
+            bindings: { tasks: { query: 'tasks', args: {} } },
+        },
+    };
+    expect(withoutLiveProps(source)).toEqual({
+        auth: 'shared',
+        heading: 'keep',
+        __zero: { version: 1, mode: 'replace', bindings: {} },
+    });
+    expect(source.tasks).toEqual(['stale']);
+});
+
 function BusinessIdentity() {
     return <p>Private {useContext(AccessGeneration)}</p>;
 }

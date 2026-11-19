@@ -150,6 +150,18 @@ final class MutationContracts
             return new ValueContract(in_array($field->kind, ['date', 'dateOnly'], true) ? 'string' : $field->kind, fields: $field->fields, members: $field->members, nullable: $field->nullable || $field->optional);
         }
 
+        if ($op === 'binary' && $node->string('operator') === '??') {
+            $left = $this->expression($node->node('left'), $locals, $input);
+            $right = $this->expression($node->node('right'), $locals, $input);
+            if ($left->kind === 'null') {
+                return $right;
+            }
+
+            $left = new ValueContract($left->kind, $left->fields, $left->members);
+
+            return $left->typescript() === $right->typescript() ? $left : new ValueContract('union', members: [$left, $right]);
+        }
+
         if (in_array($op, ['binary', 'not', 'isset', 'has', 'update', 'delete'], true)) {
             return new ValueContract('bool');
         }

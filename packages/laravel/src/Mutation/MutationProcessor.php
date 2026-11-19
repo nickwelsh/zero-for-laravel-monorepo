@@ -116,8 +116,10 @@ final readonly class MutationProcessor
                 });
             } catch (ValidationException $error) {
                 $failure = ['error' => 'app', 'message' => 'Validation failed.', 'details' => ['code' => 'validation', 'fields' => $error->errors()]];
-            } catch (AuthorizationException) {
-                $failure = ['error' => 'app', 'message' => 'This mutation is not authorized.', 'details' => ['code' => 'forbidden']];
+            } catch (AuthorizationException $error) {
+                $failure = $error->status() === 404
+                    ? ['error' => 'app', 'message' => 'The record is unavailable.', 'details' => ['code' => 'not_found']]
+                    : ['error' => 'app', 'message' => 'This mutation is not authorized.', 'details' => ['code' => 'forbidden']];
             } catch (OperationException $error) {
                 $failure = ['error' => 'app', 'message' => $error->getMessage(), 'details' => ['code' => $error->operationCode]];
             } catch (ModelNotFoundException) {

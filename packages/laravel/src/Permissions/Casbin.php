@@ -7,9 +7,10 @@ namespace ZeroForLaravel\Permissions;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Facade;
+use ZeroForLaravel\ResolvedContext;
 
 /**
- * @method static AuthorizationResponse inspect(Authenticatable $user, string $action, Model $resource)
+ * @method static AuthorizationResponse inspect(Authenticatable $user, string $action, Model|class-string<Model> $resource, ?ResolvedContext $context = null)
  * @method static bool addPolicy(string ...$fields)
  * @method static bool removePolicy(string ...$fields)
  * @method static bool addGroupingPolicy(string ...$fields)

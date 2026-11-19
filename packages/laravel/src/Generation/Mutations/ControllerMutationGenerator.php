@@ -20,7 +20,7 @@ final readonly class ControllerMutationGenerator
             $lines[] = var_export($program->name(), true)." => ['contract' => ".var_export($program->contract(), true).", 'guards' => [".implode(',', $program->guards).'], \'result\' => static fn (mixed $value): mixed => ('.$result->php().')->normalize($value)],';
         }
 
-        return implode("\n", [...$lines, ']);', '']);
+        return str_replace(" => \n", " =>\n", implode("\n", [...$lines, ']);', '']));
     }
 
     /** @param list<MutationProgram> $programs */
@@ -39,7 +39,7 @@ final readonly class ControllerMutationGenerator
             '/* oxlint-disable unicorn/no-thenable -- Operation trees use a JSON then branch, never a callable then. */',
             "import type {Schema} from '@rocicorp/zero';",
             'import {createControllerMutations, type ClientContext, type ModelContract'.($hasCustom ? ', type ControllerMutationOptions' : '')."} from '@nickwelsh/zero-for-laravel';",
-            $this->schemas->imports(),
+            $programs === [] ? '' : $this->schemas->imports(),
             'export const controllerMutationContracts = '.json_encode((object) $contracts, JSON_THROW_ON_ERROR | JSON_PRETTY_PRINT).' as const;',
         ];
         $inference = new MutationContracts;
@@ -64,7 +64,8 @@ final readonly class ControllerMutationGenerator
             $lines[] = 'export const inputSchema'.$index.' = '.$this->schemas->value($input).';';
             $lines[] = 'export const serverResultSchema'.$index.' = '.$this->schemas->value($server).';';
             $lines[] = 'export const clientResultSchema'.$index.' = '.$this->schemas->value($client).';';
-            $lines[] = 'const codec'.$index.' = {input: inputSchema'.$index.', encode: (input: Input'.$index.') => '.$input->encode('input').', serverResult: serverResultSchema'.$index.', clientResult: clientResultSchema'.$index.'};';
+            $parameter = $input->fields === [] ? '_input' : 'input';
+            $lines[] = 'const codec'.$index.' = {input: inputSchema'.$index.', encode: ('.$parameter.': Input'.$index.') => '.$input->encode($parameter).', serverResult: serverResultSchema'.$index.', clientResult: clientResultSchema'.$index.'};';
             if ($program->optimism === 'custom') {
                 $custom[] = json_encode($program->action, JSON_THROW_ON_ERROR).': NonNullable<ControllerMutationOptions<Input'.$index.', ServerResult'.$index.', ClientResult'.$index.', S, C>["optimistic"]>';
             }

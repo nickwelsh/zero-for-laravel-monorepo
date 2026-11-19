@@ -233,3 +233,17 @@ test('result cleanup is scoped to the current group and preserves progress', fun
     expect(DB::table('zero_test_0.mutations')->pluck('clientGroupID')->all())->toBe(['other']);
     expect(DB::table('zero_test_0.clients')->value('lastMutationID'))->toBe(1);
 });
+
+test('policy not-found denial remains a durable concealed mutation failure', function (): void {
+    Task::creating(function (): void {
+        throw (new AuthorizationException)->withStatus(404);
+    });
+    $mutation = mutationProtocolMutation(1);
+    $result = mutationProtocolProcess([$mutation]);
+    expect(data_get($result, 'mutations.0.result.details.code'))->toBe('not_found')
+        ->and(data_get($result, 'mutations.0.result.message'))->toBe('The record is unavailable.')
+        ->and(Task::count())->toBe(0)
+        ->and(DB::table('zero_test_0.clients')->value('lastMutationID'))->toBe(1)
+        ->and(DB::table('zero_test_0.mutations')->count())->toBe(1);
+    expect(data_get(mutationProtocolProcess([$mutation]), 'mutations.0.result.error'))->toBe('alreadyProcessed');
+});

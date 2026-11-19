@@ -217,12 +217,15 @@ An ordinary show route needs no query wrapper:
 ```php
 public function show(TodoList $list): \Inertia\Response
 {
-    Gate::authorize('view', $list);
+    $this->authorize('view', $list);
     return Inertia::render('lists/show', ['list' => $list]);
 }
 ```
 
-The generator captures this supported unconditional instance Gate. Initial requests
+Use Laravel's `AuthorizesRequests` trait for `$this->authorize()`. The generator
+also supports `Gate::authorize()`, but rejects custom controller authorization or
+argument-parsing implementations. Abilities must be explicit literals and arguments
+positional. Initial requests
 use normal Laravel/Inertia exception handling. Named query transforms replay binding,
 middleware and the real Gate without rerunning controller effects. Their native
 Zero predicates also include the live guard, including descendant queries.
@@ -242,24 +245,69 @@ cover middleware dependencies that do not produce database invalidations. Databa
 revocation follows commit and normal replication/network delivery, not zero latency.
 
 ```tsx
+import { bindings, navigation } from '@/zero/generated.queries';
+
 const livePages = createInertiaAdapter(bindings, {
+    navigation,
     access: {
-        onRevoked: ({ status, query, prop }) => {
-            router.visit('/lists');
-            toast.error('This list is no longer available.');
+        onRevoked: ({ message }) => {
+            if (message) toast.error(message);
         },
         // Optional: onError(status), onPending().
     },
 });
 ```
 
-Confirmed loss unmounts the protected page before the callback. Callbacks fire once
-per allowed-to-denied transition, not on initial denial, network failure, an obsolete
+Confirmed loss unmounts the protected page before the callback. The Inertia adapter
+notifies once per page, including multiple guarded props and React StrictMode,
+not on initial denial, network failure, an obsolete
 route event or an empty collection. Deleted and inaccessible resources share the
 same concealed 404 state. An unavailable expected singleton blocks while rechecking.
 A disconnected control channel is unknown and blocks protected rendering until
 fresh validation. Previously downloaded/offline data cannot be erased; native data
 predicates, not callbacks, prevent future unauthorized streaming.
+
+### Declare a revocation destination in the policy
+
+```php
+use ZeroForLaravel\Permissions\Revocation;
+
+public function view(User $user, TodoList $list): Response
+{
+    return Casbin::inspect($user, 'view', $list)
+        ->asNotFound()
+        ->onRevoked(
+            Revocation::redirectToRoute('lists.index')
+                ->message('You no longer have access to this list.')
+        );
+}
+```
+
+This is inert metadata: it neither changes the initial authorization decision nor
+redirects during policy inspection. Generation accepts literal route names and
+messages, not callbacks or resource-dependent expressions. Destinations must be
+registered GET routes. A literal Inertia page shell needs no live props to be
+discovered as a destination.
+
+On confirmed loss after an earlier approval, generated navigation runs independently
+of the optional `onRevoked` observer. All revocation destinations replace the full
+document and the current history entry, even when ordinary links can resolve the
+destination client-side. This starts a fresh JavaScript environment and reloads
+props from the server instead of carrying over the revoked page's live bindings,
+ordinary props or remembered-state fallback from browser-history startup. Inertia
+HTTP visits alone do not clear that fallback through the supported API. No pending
+Inertia revocation response remains to redirect a later page. If the committed
+page departs, unmounts or its adapter is disposed before the document loads, the
+adapter stops its pending document navigation. Ordinary links and preloading keep
+their existing client-side behavior.
+Route parameters reuse the guarded page's route arguments and destination defaults.
+Missing parameters or ambiguous route names are not guessed. Error-page rendering
+and toast presentation remain application responsibilities through `onError`,
+`onPending` and `onRevoked`.
+
+For application-owned client visits to a page shell, import `withoutLiveProps`
+from `@nickwelsh/zero-for-laravel/inertia`. Apply it to the visit's props to clear
+page-owned bindings and their snapshots without dropping unrelated props.
 
 Run the permission migrations, rebuild the projections, regenerate the client and
 synchronize the Zero publication when upgrading. The native transport uses two
@@ -275,6 +323,63 @@ per-user timing isolation. Zero-cache still makes brief internal Laravel callbac
 and each fresh check writes status/metadata rows. The private cache API key never
 belongs in the browser. `access.endpoint` and SSE polling/heartbeat settings no
 longer exist.
+
+## Live UI permissions
+
+Use `usePermission` from `@nickwelsh/zero-for-laravel/react` for authoritative live
+UI checks without subscribing to business rows or exposing permission attributes:
+
+```tsx
+const canCreate = usePermission('TodoList', 'create'); // Class permission.
+const canUpdate = usePermission('TodoList', 'update', listId ?? null);
+```
+
+Omitting the ID checks the class. A string checks that instance; `null` stays idle
+until an identity is available. The result is `true`, `false`, or `undefined` while
+pending, unknown or disconnected. Enable only the literal policy abilities your UI
+needs in `permissions.access.abilities`, keyed by model class:
+
+```php
+'access' => [
+    'max_bindings' => 32,
+    'abilities' => [TodoList::class => ['create', 'update']],
+],
+```
+
+These hooks share the guarded-page status monitor and isolated result rows, not a
+second broadcast channel. They never invoke page revocation navigation. A filtered
+collection likewise does not redirect simply because its results become empty.
+Laravel still authorizes each mutation on the server.
+
+### Class permissions in a scoped domain
+
+Laravel Gate dispatches the ordinary `create(User $user)` policy, whose Casbin
+inspection does not recursively dispatch Gate:
+
+```php
+public function create(User $user): Response
+{
+    return Casbin::inspect($user, 'create', TodoList::class)->asNotAuthorized();
+}
+```
+
+For scoped resources, add `context` to the existing domain binding, naming a
+validated application-resolved Zero context field:
+
+```php
+'domain' => ['column' => 'tenant_id', 'prefix' => 'tenant:', 'context' => 'tenant_id'],
+```
+
+The context resolver must derive this field from trusted server state and bind it
+to the current actor. Do not accept an authorization domain from browser input or
+infer one from an arbitrary membership. Actor/context mismatches reject. Class
+checks need no existing or cached resource row; rules requiring unknown instance
+attributes cannot establish a class grant. Explicit deny rules remain effective.
+
+Controller class guards are supported in mutations and empty page shells. A class
+guard before live-query props is rejected during generation; those props currently
+require captured instance authorization. Authorized page shells with a prelude use
+an ordinary Inertia visit rather than skipping their server checks.
 
 ## Optional current-user UI predictions
 

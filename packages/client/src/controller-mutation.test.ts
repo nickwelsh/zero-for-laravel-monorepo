@@ -112,7 +112,11 @@ it('validates prepared UUID and ULID overrides before native request creation', 
 });
 
 it('missing bound data declines prediction before writes without rejecting the native intent', async () => {
-    const missing = { ...contract, parameters: { task: { kind: 'model', type: 'App\\Task' } } };
+    const missing: ControllerMutationContract = {
+        ...contract,
+        parameters: { task: { kind: 'model', type: 'App\\Task' } },
+        operations: [{ op: 'expression', value: { op: 'delete', record: { op: 'local', name: 'task' } } }],
+    };
     const layer = createControllerMutations(schema, definitions, { [name]: missing }, { [name]: codecs });
     const zero = new Zero<typeof schema, undefined, ClientContext>({
         schema,
@@ -131,6 +135,126 @@ it('missing bound data declines prediction before writes without rejecting the n
         await zero.close();
     }
 });
+
+it('creates optimistically without loading a route model used only for server authorization', async () => {
+    const recipe = {
+        ...contract,
+        parameters: { ...contract.parameters, parent: { kind: 'model', type: 'App\\Task' } },
+    };
+    const layer = createControllerMutations(schema, definitions, { [name]: recipe }, { [name]: codecs });
+    const zero = new Zero<typeof schema, undefined, ClientContext>({
+        schema,
+        mutators: layer.mutators,
+        context: { user_id: 'alice' },
+        userID: 'unused-parent',
+        cacheURL: null,
+        kvStore: 'mem',
+        logLevel: 'error',
+    });
+    try {
+        const request = layer.bind(name, codecs).prepare({ title: 'Child' }, { parent: 'not-cached' });
+        expect(await zero.mutate(request).client).toEqual({
+            type: 'success',
+            data: { id: request.args.prepared.ids.s0 },
+        });
+        expect((await zero.run(createBuilder(schema).tasks.one()))?.title).toBe('Child');
+    } finally {
+        await zero.close();
+    }
+});
+
+it('does not predict writes after an ordinary read from a missing prerequisite model', async () => {
+    const recipe: ControllerMutationContract = {
+        ...contract,
+        operations: [
+            {
+                op: 'set',
+                name: 'prerequisite',
+                value: {
+                    op: 'findUnique',
+                    model: 'Task',
+                    unique: { op: 'object', items: [{ key: 'id', value: { op: 'literal', value: 'missing' } }] },
+                },
+            },
+            {
+                op: 'expression',
+                value: {
+                    op: 'get',
+                    base: { op: 'local', name: 'prerequisite' },
+                    key: { op: 'literal', value: 'title' },
+                },
+            },
+            ...contract.operations,
+        ],
+    };
+    const layer = createControllerMutations(schema, definitions, { [name]: recipe }, { [name]: codecs });
+    const zero = new Zero<typeof schema, undefined, ClientContext>({
+        schema,
+        mutators: layer.mutators,
+        context: { user_id: 'alice' },
+        userID: 'missing-prerequisite',
+        cacheURL: null,
+        kvStore: 'mem',
+        logLevel: 'error',
+    });
+    try {
+        const result = await zero.mutate(layer.bind(name, codecs).prepare({ title: 'Must not be written' })).client;
+        expect(result).toMatchObject({ type: 'error', error: { message: 'Invalid compiled property access.' } });
+        expect(await zero.run(createBuilder(schema).tasks)).toEqual([]);
+    } finally {
+        await zero.close();
+    }
+});
+
+it.each([null, '', '0', false, 0])(
+    'coalesces nested null parents and short-circuits the fallback (%s)',
+    async (value) => {
+        const recipe: ControllerMutationContract = {
+            ...contract,
+            sites: {},
+            parameters: {},
+            operations: [
+                {
+                    op: 'return',
+                    value: {
+                        op: 'binary',
+                        operator: '??',
+                        left: {
+                            op: 'get',
+                            base: {
+                                op: 'get',
+                                base: { op: 'literal', value: { settings: value === null ? null : { value } } },
+                                key: { op: 'literal', value: 'settings' },
+                            },
+                            key: { op: 'literal', value: 'value' },
+                        },
+                        right:
+                            value === null ? { op: 'literal', value: 'fallback' } : { op: 'context', field: 'missing' },
+                    },
+                },
+            ],
+        };
+        const config = { ...codecs, clientResult: z.unknown() };
+        const layer = createControllerMutations(schema, definitions, { [name]: recipe }, { [name]: config });
+        const zero = new Zero<typeof schema, undefined, ClientContext>({
+            schema,
+            mutators: layer.mutators,
+            context: { user_id: 'alice' },
+            userID: `coalesce-${String(value)}`,
+            cacheURL: null,
+            kvStore: 'mem',
+            logLevel: 'error',
+        });
+        try {
+            expect(await zero.mutate(layer.bind(name, config).prepare({ title: '' })).client).toEqual({
+                type: 'success',
+                data: value === null ? 'fallback' : value,
+            });
+        } finally {
+            await zero.close();
+        }
+    },
+);
 
 it('disabled and explicitly custom recipes use the same native protocol and honest client results', async () => {
     for (const optimism of ['disabled', 'custom'] as const) {

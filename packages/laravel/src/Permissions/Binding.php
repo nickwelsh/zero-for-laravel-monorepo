@@ -8,6 +8,8 @@ use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Model;
 use LogicException;
 use stdClass;
+use ZeroForLaravel\Context\ContextDefinition;
+use ZeroForLaravel\ResolvedContext;
 
 /** @phpstan-type Attribute array{column: string, type: 'id'|'string'|'boolean'|'integer'} */
 final readonly class Binding
@@ -23,6 +25,7 @@ final readonly class Binding
         public ?string $domainColumn,
         public string $domainPrefix,
         public array $attributes,
+        public ?string $domainContext = null,
     ) {}
 
     /** @param class-string<Model> $class */
@@ -42,11 +45,13 @@ final readonly class Binding
 
         $column = $domain['column'] ?? null;
         $prefix = $domain['prefix'] ?? '';
-        if (! is_string($model) || ($column !== null && ! is_string($column)) || ! is_string($prefix)) {
+        $context = $domain['context'] ?? null;
+        if (! is_string($model) || ($column !== null && ! is_string($column)) || ! is_string($prefix)
+            || ($context !== null && (! is_string($context) || $context === ''))) {
             throw new LogicException("Invalid permissions domain/model binding for {$class}.");
         }
 
-        return new self($class, $value['type'], $model, $column, $prefix, self::attributes($value['attributes'] ?? []));
+        return new self($class, $value['type'], $model, $column, $prefix, self::attributes($value['attributes'] ?? []), $context);
     }
 
     /** @return array<string, Attribute> */
@@ -115,6 +120,32 @@ final readonly class Binding
     public function domain(Model $resource): string
     {
         return $this->domainColumn === null ? '__global__' : $this->domainPrefix.self::id($resource->getRawOriginal($this->domainColumn));
+    }
+
+    /** Only application-resolved context, never request input or inferred memberships. */
+    public function classDomain(Authenticatable $user, ResolvedContext $context): string
+    {
+        if ($context->userId() !== self::id($user->getAuthIdentifier())) {
+            throw new \Illuminate\Auth\Access\AuthorizationException('Permission actor differs from the validated context identity.');
+        }
+
+        if ($this->domainColumn === null) {
+            return '__global__';
+        }
+
+        $definition = ContextDefinition::configured();
+        $definition->validate($context->values);
+        if ($this->domainContext === null || ! isset($definition->fields[$this->domainContext])
+            || ! in_array($definition->fields[$this->domainContext]['type'], ['string', 'int'], true)) {
+            throw new LogicException('Scoped class permissions require an explicit string or integer domain.context binding.');
+        }
+
+        $value = $context->get($this->domainContext);
+        if ($value === null) {
+            throw new \Illuminate\Auth\Access\AuthorizationException('Missing class permission domain.');
+        }
+
+        return $this->domainPrefix.self::id($value);
     }
 
     public function object(Model $resource): stdClass

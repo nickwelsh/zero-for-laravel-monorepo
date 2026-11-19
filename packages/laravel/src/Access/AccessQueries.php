@@ -4,22 +4,22 @@ declare(strict_types=1);
 
 namespace ZeroForLaravel\Access;
 
-use Closure;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Auth\AuthenticationException;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use LogicException;
 use Symfony\Component\HttpKernel\Exception\HttpExceptionInterface;
 use Throwable;
 use ZeroForLaravel\Context\ContextDefinition;
+use ZeroForLaravel\Permissions\ActorScope;
 use ZeroForLaravel\Permissions\Binding;
 use ZeroForLaravel\Permissions\EloquentVisibility;
+use ZeroForLaravel\Permissions\PermissionChecks;
 use ZeroForLaravel\Permissions\PolicyCompiler;
 use ZeroForLaravel\Permissions\ProjectionManager;
 use ZeroForLaravel\Permissions\VisibleToCurrentUser;
@@ -64,11 +64,27 @@ final readonly class AccessQueries
         $checks = [];
         foreach ($bindings as $value) {
             $binding = Input::object($value, 'binding');
-            Input::keys($binding, ['binding', 'query', 'args'], 'binding');
+            Input::keys($binding, ['binding', 'query', 'args', 'permission'], 'binding');
             $key = $binding['binding'] ?? null;
             $query = $binding['query'] ?? null;
-            if (! is_string($key) || ! Str::isUuid($key) || isset($checks[$key]) || ! is_string($query)) {
+            if (! is_string($key) || ! Str::isUuid($key) || isset($checks[$key])) {
                 Input::fail('binding', 'Unique UUID bindings and application-registered queries are required.');
+            }
+
+            if (array_key_exists('permission', $binding)) {
+                if (array_key_exists('query', $binding) || array_key_exists('args', $binding)) {
+                    Input::fail('binding', 'Permission checks cannot include a query or arguments.');
+                }
+
+                $permission = resolve(PermissionChecks::class)->parse($binding['permission']);
+                $checks[$key] = ['permission' => $permission, 'fingerprint' => hash('sha256', json_encode($permission, JSON_THROW_ON_ERROR)),
+                    'id' => hash('sha256', $owner."\0".$generation."\0".$key)];
+
+                continue;
+            }
+
+            if (! is_string($query)) {
+                Input::fail('query', 'An application-registered query is required.');
             }
 
             $registered = resolve(RegisteredQueries::class)->all()[$query] ?? null;
@@ -87,7 +103,7 @@ final readonly class AccessQueries
         }
 
         $conditions = [];
-        $this->projections->connection()->transaction(function () use ($checks, $owner, $generation, $identity, $limit, &$conditions): void {
+        $this->projections->connection()->transaction(function () use ($checks, $owner, $generation, $identity, $context, $limit, &$conditions): void {
             $this->projections->lock();
             $db = $this->projections->connection();
             $expired = $db->table('permission_access_checks')->where('expires_at', '<=', now())->limit(128)->pluck('id')->all();
@@ -126,8 +142,12 @@ final readonly class AccessQueries
                 $conditions[$check['id']] = ['type' => 'or', 'conditions' => []];
                 try {
                     $this->projections->assertReady();
-                    $conditions[$check['id']] = $this->dependencies($check['query'], $check['args'], Binding::id($identity->userId()));
-                    $this->invoke(resolve(Request::class), $check['query'], $check['args'], $identity);
+                    if (isset($check['permission'])) {
+                        $this->checkPermission($check['permission'], $context, $conditions[$check['id']]);
+                    } else {
+                        $conditions[$check['id']] = $this->dependencies($check['query'], $check['args'], Binding::id($identity->userId()));
+                        $this->invoke(resolve(Request::class), $check['query'], $check['args'], $identity);
+                    }
                 } catch (AuthorizationException $error) {
                     $state = 'denied';
                     $status = $this->deniedStatus($error);
@@ -169,6 +189,25 @@ final readonly class AccessQueries
         }
 
         return ['table' => 'permission_access_results', 'where' => ['type' => 'or', 'conditions' => $branches]];
+    }
+
+    /** @param array{class: class-string<Model>, ability: string, id?: string} $permission
+     * @param  array<string, mixed>  $dependencies
+     */
+    private function checkPermission(array $permission, ResolvedContext $identity, array &$dependencies): void
+    {
+        $request = resolve(Request::class);
+        $actor = $this->freshActor($request);
+        ActorScope::run($request, $actor, function () use ($permission, $identity, &$dependencies, $request, $actor): void {
+            $context = ContextDefinition::configured()->resolve($request);
+            if ($context->values !== $identity->values || $context->userId() !== $identity->userId()) {
+                throw new AuthorizationException('Permission context differs from the authenticated Zero identity.');
+            }
+
+            $checks = resolve(PermissionChecks::class);
+            $dependencies = $checks->dependencies($permission, $context, $actor);
+            $checks->authorize($permission, $context, $actor);
+        });
     }
 
     /** Snapshot actual portable decisions, not policy revisions or rule membership.
@@ -256,7 +295,7 @@ final readonly class AccessQueries
     private function invoke(Request $request, RegisteredQuery $query, array $args, ResolvedContext $identity): void
     {
         $actor = $this->freshActor($request);
-        $this->asActor($request, $actor, function () use ($request, $query, $args, $actor, $identity): void {
+        ActorScope::run($request, $actor, function () use ($request, $query, $args, $actor, $identity): void {
             $context = ContextDefinition::configured()->resolve($request);
             if ($context->userId() !== $identity->userId() || $identity->userId() !== Binding::id($actor->getAuthIdentifier())) {
                 throw new LogicException('Access checks require the authenticated permission subject identity.');
@@ -264,42 +303,6 @@ final readonly class AccessQueries
 
             $query->invoke($args, $context, resolve(QueryCompiler::class));
         });
-    }
-
-    /** Restore both Request and Auth even when real route middleware rejects the check. */
-    private function asActor(Request $request, Authenticatable $actor, Closure $callback): void
-    {
-        $default = Auth::getDefaultDriver();
-        $guard = Auth::guard($default);
-        $previous = $guard->user();
-        if ($previous === null && ! method_exists($guard, 'forgetUser')) {
-            throw new LogicException('Access checks require a restorable authentication guard.');
-        }
-
-        $authResolver = Auth::userResolver();
-        $resolver = $request->getUserResolver();
-        $request->setUserResolver(function (?string $name = null) use ($actor, $default, $resolver): ?Authenticatable {
-            $user = $name === null || $name === $default ? $actor : $resolver($name);
-            if ($user !== null && ! $user instanceof Authenticatable) {
-                throw new LogicException('Invalid authentication user resolver.');
-            }
-
-            return $user;
-        });
-        $guard->setUser($actor);
-        try {
-            $callback();
-        } finally {
-            $request->setUserResolver($resolver);
-            if ($previous !== null) {
-                $guard->setUser($previous);
-            } elseif (method_exists($guard, 'forgetUser')) {
-                $guard->forgetUser();
-            }
-
-            Auth::shouldUse($default);
-            Auth::resolveUsersUsing($authResolver);
-        }
     }
 
     /** @return 403|404 */

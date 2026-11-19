@@ -37,7 +37,7 @@ export type MutationNode =
       }
     | {
           readonly op: 'binary';
-          readonly operator: '===' | '!==' | '&&' | '||' | '.';
+          readonly operator: '===' | '!==' | '&&' | '||' | '.' | '??';
           readonly left: MutationNode;
           readonly right: MutationNode;
       }
@@ -222,8 +222,14 @@ export async function runControllerMutation<S extends Schema>(
     };
     // Pre-write prerequisites only. A missing bound row is an intentional no-op,
     // not an error that prevents the intent from being sent to the server.
+    const usesLocal = (value: unknown, name: string): boolean =>
+        value !== null &&
+        typeof value === 'object' &&
+        (('op' in value && value.op === 'local' && 'name' in value && value.name === name) ||
+            Object.values(value).some((child) => usesLocal(child, name)));
     for (const [name, parameter] of Object.entries(contract.parameters)) {
         if (parameter.kind === 'model') {
+            if (!usesLocal(contract.operations, name)) continue;
             const model = modelFor(parameter.type);
             const row = await native.run(builder[model.table]!.where(model.key, args.route[name]).one());
             if (!row) return undefined;
@@ -234,7 +240,11 @@ export async function runControllerMutation<S extends Schema>(
         else if (parameter.kind === 'scalar') locals[name] = args.route[name];
         else locals[name] = null;
     }
-    const expression = async (node: MutationNode, scope: Record<string, unknown>): Promise<unknown> => {
+    const expression = async (
+        node: MutationNode,
+        scope: Record<string, unknown>,
+        nullTolerant = false,
+    ): Promise<unknown> => {
         const e = (child: MutationNode) => expression(child, scope);
         switch (node.op) {
             case 'literal':
@@ -254,10 +264,10 @@ export async function runControllerMutation<S extends Schema>(
             case 'local':
                 return scope[node.name];
             case 'get': {
-                const base = await e(node.base),
+                const base = await expression(node.base, scope, nullTolerant),
                     key = await e(node.key);
-                if (base === null || base === undefined) return null;
-                if (typeof base !== 'object') throw new Error('Invalid compiled property access.');
+                if ((base === null || base === undefined) && nullTolerant) return null;
+                if (base === null || typeof base !== 'object') throw new Error('Invalid compiled property access.');
                 const property = propertyKey(key);
                 return Object.hasOwn(base, property) ? (Reflect.get(base, property) ?? null) : null;
             }
@@ -266,7 +276,7 @@ export async function runControllerMutation<S extends Schema>(
             case 'timestamp':
                 return args.prepared.timestamp;
             case 'isset':
-                return (await e(node.value)) != null;
+                return (await expression(node.value, scope, true)) != null;
             case 'has': {
                 const key = await e(node.key);
                 return Object.hasOwn(jsonObject(await e(node.base)), propertyKey(key));
@@ -284,7 +294,8 @@ export async function runControllerMutation<S extends Schema>(
                 return Object.fromEntries(entries);
             }
             case 'binary': {
-                const left = await e(node.left);
+                const left = await expression(node.left, scope, node.operator === '??');
+                if (node.operator === '??') return left ?? e(node.right);
                 if (node.operator === '&&') return mutationTruthy(left) && mutationTruthy(await e(node.right));
                 if (node.operator === '||') return mutationTruthy(left) || mutationTruthy(await e(node.right));
                 if (node.operator === '.') {

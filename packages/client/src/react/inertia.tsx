@@ -61,6 +61,14 @@ function metadata(input: unknown): Metadata {
             if (typeof binding.query !== 'string') throw new Error('Invalid live query binding.');
             const access = binding.access === undefined ? undefined : object(binding.access, 'access');
             if (access && access.status !== 403 && access.status !== 404) throw new Error('Invalid access contract.');
+            const revoked = access?.revoked === undefined ? undefined : object(access.revoked, 'revoked');
+            if (
+                revoked &&
+                (typeof revoked.route !== 'string' ||
+                    !revoked.route ||
+                    (revoked.message !== undefined && typeof revoked.message !== 'string'))
+            )
+                throw new Error('Invalid revocation response.');
             const inputOptions = Object.fromEntries(
                 Object.entries(object(binding.options ?? {}, 'options')).map(([field, choices]) => {
                     if (
@@ -74,7 +82,23 @@ function metadata(input: unknown): Metadata {
             bindings[prop] = {
                 query: binding.query,
                 args: object(binding.args, 'args'),
-                ...(access ? { access: { status: access.status as 403 | 404 } } : {}),
+                ...(access
+                    ? {
+                          access: {
+                              status: access.status as 403 | 404,
+                              ...(revoked
+                                  ? {
+                                        revoked: {
+                                            route: revoked.route as string,
+                                            ...(revoked.message === undefined
+                                                ? {}
+                                                : { message: revoked.message as string }),
+                                        },
+                                    }
+                                  : {}),
+                          },
+                      }
+                    : {}),
                 ...(binding.pending === true
                     ? { pending: true, one: binding.one === true, options: inputOptions }
                     : {}),
@@ -84,11 +108,25 @@ function metadata(input: unknown): Metadata {
     return { version: 1, mode: source.mode, bindings };
 }
 
+/** Clear page-owned live bindings when making a client-side visit to a page shell. */
+export function withoutLiveProps<P extends Record<string, unknown>>(props: P) {
+    const clean: Record<string, unknown> = { ...props };
+    for (const prop of Object.keys(metadata(props['__zero']).bindings)) delete clean[prop];
+    delete clean['__zero'];
+    return { ...clean, __zero: { version: 1 as const, mode: 'replace' as const, bindings: {} } } as Omit<
+        P,
+        '__zero'
+    > & { __zero: { version: 1; mode: 'replace'; bindings: Record<string, never> } };
+}
+
 function normalizePage(page: TransportPage, previous?: TransportPage): void {
     const incoming = metadata(page.props['__zero']);
     if (incoming.mode === 'patch' && (!previous || previous.component !== page.component)) {
         throw new Error('A partial Zero response requires the current page contract.');
     }
+    // Initial resolution and client visits can share props with the mounted
+    // page. Preparing another transport page must not mutate that snapshot.
+    const props = { ...page.props };
     const bindings: Metadata['bindings'] = Object.assign(
         Object.create(null),
         incoming.mode === 'patch' ? metadata(previous?.props['__zero']).bindings : {},
@@ -98,14 +136,14 @@ function normalizePage(page: TransportPage, previous?: TransportPage): void {
         else {
             // Inertia has merged ordinary props before beforeUpdate. A newly
             // selected live binding replaces any earlier ordinary snapshot.
-            if (incoming.mode === 'patch') delete page.props[prop];
-            else if (Object.hasOwn(page.props, prop))
-                throw new Error(`Ordinary prop ${prop} collides with a live binding.`);
+            if (incoming.mode === 'patch') delete props[prop];
+            else if (Object.hasOwn(props, prop)) throw new Error(`Ordinary prop ${prop} collides with a live binding.`);
             bindings[prop] = binding;
         }
     }
     // History stores a complete serializable contract, never a patch or live rows.
-    page.props['__zero'] = { version: 1, mode: 'replace', bindings };
+    props['__zero'] = { version: 1, mode: 'replace', bindings };
+    page.props = props;
 }
 
 function Subscription({
@@ -217,7 +255,6 @@ function InputSubscription({
 }
 
 const noop = () => {};
-const defaultAccess: AccessOptions = {};
 
 function loading(selection: Pick<ReadSelection, 'one'>): Data<unknown> {
     return {
@@ -249,40 +286,116 @@ function loading(selection: Pick<ReadSelection, 'one'>): Data<unknown> {
 export function createInertiaAdapter(factories: BindingFactories, options: InertiaInputOptions = {}) {
     const navigation = createNavigationLink(factories, options.navigation ?? []);
     let current: TransportPage | undefined;
+    let active: { mount: object; snapshot: object; handled: boolean } | undefined;
+    let disposed = false;
+    let cancelRedirect: (() => void) | undefined;
     const wrappers = new WeakMap<object, unknown>();
+    const pages = new WeakMap<object, TransportPage>();
+    function cancelNavigation() {
+        const cancel = cancelRedirect;
+        cancelRedirect = undefined;
+        cancel?.();
+    }
+    function prepare(page: TransportPage) {
+        normalizePage(page, current);
+        pages.set(object(page.props['__zero'], '__zero'), page);
+    }
+    function observePage({ detail: { page } }: { detail: { page: TransportPage } }) {
+        const snapshot = page.props['__zero'];
+        // For prepared pages, React's layout commit/cleanup owns the handoff.
+        // Inertia also announces its second bootstrap resolution without a swap.
+        if (active && snapshot && typeof snapshot === 'object' && pages.has(snapshot)) return;
+        current = page;
+        if (active && active.snapshot !== snapshot) {
+            active = undefined;
+            cancelNavigation();
+        }
+    }
+    function committed(page: TransportPage | undefined, mount: object, snapshot: object) {
+        cancelNavigation();
+        current = page ?? current;
+        const owner = { mount, snapshot, handled: false };
+        active = owner;
+        return () => {
+            if (active === owner) {
+                cancelNavigation();
+                active = undefined;
+            }
+        };
+    }
     const dispose =
         typeof window === 'undefined'
             ? []
             : [
                   inertiaURLAdapter.subscribe(noop),
-                  router.on('beforeUpdate', ({ detail }) => normalizePage(detail.page, current)),
-                  router.on('navigate', ({ detail }) => {
-                      current = detail.page;
-                  }),
+                  router.on('beforeUpdate', ({ detail }) => prepare(detail.page)),
+                  router.on('navigate', observePage),
+                  router.on('clientVisit', observePage),
               ];
     return {
         Link: navigation.Link,
         dispose: () => {
+            disposed = true;
+            cancelNavigation();
             navigation.dispose();
             dispose.forEach((unsubscribe) => unsubscribe());
         },
         wrap<P extends object>(Component: ComponentType<P>, page?: TransportPage): ComponentType<P> {
-            if (page) {
-                normalizePage(page, current);
-                current ??= page;
-            }
+            if (page) prepare(page);
             const cached = wrappers.get(Component);
             if (cached) return cached as ComponentType<P>;
             function Wrapped(props: P) {
                 const starting = useContext(StartingZero);
                 const ordinary = Object.fromEntries(Object.entries(props));
                 const contract = metadata(ordinary['__zero']);
+                const snapshot = object(ordinary['__zero'] ?? {}, '__zero');
+                const [mount] = useState(() => ({}));
+                // Resolving a lazy component is speculative: Inertia can discard
+                // it. Claim ownership only once React commits the page, before
+                // a nested boundary's passive revocation effect can run.
+                useLayoutEffect(() => committed(pages.get(snapshot) ?? page, mount, snapshot), [mount, snapshot]);
                 if (contract.mode !== 'replace')
                     throw new Error('Zero page metadata was not normalized before rendering.');
                 delete ordinary['__zero'];
                 const entries = Object.entries(contract.bindings).filter(
                     (entry): entry is [string, Binding] => entry[1] !== null,
                 );
+                function accessOptions(binding: Binding): AccessOptions {
+                    return {
+                        ...options.access,
+                        onRevoked(event) {
+                            const owner = active;
+                            if (
+                                disposed ||
+                                !owner ||
+                                owner.mount !== mount ||
+                                owner.snapshot !== snapshot ||
+                                owner.handled
+                            )
+                                return;
+                            owner.handled = true;
+                            const response = binding.access?.revoked;
+                            try {
+                                options.access?.onRevoked?.(event);
+                            } catch (error) {
+                                // An optional observer must not unmount the Inertia
+                                // app before mandatory document navigation starts.
+                                console.error(error);
+                            } finally {
+                                if (response && owner === active && !disposed) {
+                                    const cancel = navigation.redirect(
+                                        response.route,
+                                        object(binding.args['__routeArgs'] ?? {}, 'route arguments'),
+                                    );
+                                    // beforeunload can synchronously end this owner
+                                    // before location.replace returns its stop handle.
+                                    if (disposed || owner !== active) cancel?.();
+                                    else cancelRedirect = cancel;
+                                }
+                            }
+                        },
+                    };
+                }
                 function render(index: number, effective: Record<string, unknown>): ReactNode {
                     const entry = entries[index];
                     if (!entry)
@@ -356,7 +469,7 @@ export function createInertiaAdapter(factories: BindingFactories, options: Inert
                             starting={starting}
                             synchronize={synchronize}
                             prop={prop}
-                            access={options.access ?? defaultAccess}
+                            access={accessOptions(binding)}
                         >
                             {(data) => render(index + 1, { ...effective, [prop]: data })}
                         </InputSubscription>

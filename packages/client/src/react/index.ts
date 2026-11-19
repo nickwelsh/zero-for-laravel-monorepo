@@ -6,5 +6,6 @@ export type { ControllerMutationState } from './controller-mutation';
 export { createZeroProvider } from './provider';
 export type { ProviderOptions, ProviderProps } from './provider';
 export type { AccessLost, AccessOptions } from './access';
+export { usePermission } from './access';
 export { createPageURLState, usePageURLState } from './url-state';
 export type { URLStateAdapter, URLStateCodec } from './url-state';

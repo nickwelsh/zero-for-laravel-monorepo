@@ -22,6 +22,7 @@ use ReflectionNamedType;
 use ZeroForLaravel\Attributes\ZeroMutation;
 use ZeroForLaravel\Attributes\ZeroShared;
 use ZeroForLaravel\Context\ContextDefinition;
+use ZeroForLaravel\Generation\ControllerAuthorization;
 use ZeroForLaravel\Generation\ControllerQueryCompiler;
 use ZeroForLaravel\Generation\QueryExpression;
 use ZeroForLaravel\Generation\RequestContract;
@@ -52,6 +53,8 @@ final class ControllerMutationCompiler
     private array $sources = [];
 
     private string $location = '';
+
+    private string $controller = '';
 
     private bool $generated = true;
 
@@ -117,6 +120,7 @@ final class ControllerMutationCompiler
         }
 
         $this->location = $file.': '.$class.'@'.$method;
+        $this->controller = $class;
         $source = file_get_contents($file);
         if ($source === false) {
             throw new LogicException('Cannot read controller source '.$file);
@@ -169,12 +173,21 @@ final class ControllerMutationCompiler
         foreach ($statements as $statement) {
             if ($statement instanceof Stmt\Expression) {
                 $expression = $statement->expr;
+                if ($expression instanceof Expr\MethodCall && ControllerAuthorization::matches($expression)) {
+                    $expression = ControllerAuthorization::gate($expression, $this->controller);
+                }
+
                 if ($expression instanceof Expr\Assign && $expression->var instanceof Expr\Variable && is_string($expression->var->name)) {
                     $value = $this->expression($expression->expr, $variables);
                     $variables[$expression->var->name] = $value['result'] ?? ['kind' => 'value'];
                     $operations[] = ['op' => 'set', 'name' => $expression->var->name, 'value' => $value];
                 } elseif ($expression instanceof Expr\StaticCall && $expression->class instanceof Node\Name && $this->guard($expression)) {
-                    if ($expression->class->toString() === Mutation::class) {
+                    $guardClass = $expression->class->toString();
+                    if ($guardClass === Gate::class) {
+                        ControllerAuthorization::arguments($expression);
+                    }
+
+                    if ($guardClass === Mutation::class) {
                         $closure = $expression->args[0]->value ?? null;
                         if (! $closure instanceof Expr\Closure || count($expression->args) !== 1 || $closure->byRef || $closure->params !== []) {
                             $this->fail($expression, 'Server-only boundary requires a void closure without parameters.');
@@ -360,7 +373,8 @@ final class ControllerMutationCompiler
             $operator = match (true) {
                 $expr instanceof Expr\BinaryOp\Identical => '===', $expr instanceof Expr\BinaryOp\NotIdentical => '!==',
                 $expr instanceof Expr\BinaryOp\BooleanAnd => '&&', $expr instanceof Expr\BinaryOp\BooleanOr => '||',
-                default => $this->fail($expr, 'Only strict comparison and boolean operators are portable.'),
+                $expr instanceof Expr\BinaryOp\Coalesce => '??',
+                default => $this->fail($expr, 'Only strict comparison, boolean and null-coalescing operators are portable.'),
             };
             $left = $e($expr->left);
             $right = $e($expr->right);
@@ -553,6 +567,7 @@ final class ControllerMutationCompiler
 
                 $args = array_map(fn (\PhpParser\Node\Arg|\PhpParser\Node\VariadicPlaceholder|Node\ArgPlaceholder $arg): array => $e($arg->value), $expr->args);
                 $location = $this->location;
+                $controller = $this->controller;
                 $this->stack[] = $id;
                 [$node, $params] = $this->method($class, $method);
                 if (count($params) !== count($args)) {
@@ -563,6 +578,7 @@ final class ControllerMutationCompiler
                 $body = $this->statements($node->stmts ?? [], $params);
                 array_pop($this->stack);
                 $this->location = $location;
+                $this->controller = $controller;
 
                 return ['op' => 'call', 'parameters' => $names, 'args' => $args, 'body' => $body];
             }
