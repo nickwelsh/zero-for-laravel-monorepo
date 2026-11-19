@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.12.0] - 2026-11-19
+
+- Use Laravel controller authorization in generated queries and mutations. Mutations
+  still run their authorization checks on the server.
+- Check allowlisted class and instance abilities with the React `usePermission`
+  hook without subscribing to business rows. Scoped class checks use a domain
+  resolved from trusted server context rather than an arbitrary resource row.
+- Declare a guarded page's revocation destination in its policy. When an approved
+  page loses access, the Inertia adapter unmounts protected content and replaces
+  the document so the destination does not restore the previous page's drafts.
+  Initial denial does not redirect.
+
+Upgrade `nickwelsh/zero-for-laravel`, `@nickwelsh/zero-for-laravel`, and the optional
+`@nickwelsh/zero-table` together to **0.12.0**. Regenerate and deploy the PHP and
+TypeScript contracts together. Table protocol **v2** and Zero **1.11.4** are unchanged.
+
 ## [0.11.1] - 2026-11-17
 
 - Preserve cached table rows, group metadata, expanded groups, and grown row
@@ -192,6 +208,7 @@ Deploy generated PHP and TypeScript contracts together. Supported targets are PH
 8.3+, Laravel 12/13, PostgreSQL 15+, and React 18/19. Automatic live pages require
 Inertia Laravel 3 and `@inertiajs/react` ^3.8.0.
 
+[0.12.0]: https://github.com/nickwelsh/zero-for-laravel-monorepo/releases/tag/v0.12.0
 [0.11.1]: https://github.com/nickwelsh/zero-for-laravel-monorepo/releases/tag/v0.11.1
 [0.11.0]: https://github.com/nickwelsh/zero-for-laravel-monorepo/releases/tag/v0.11.0
 [0.10.0]: https://github.com/nickwelsh/zero-for-laravel-monorepo/releases/tag/v0.10.0
