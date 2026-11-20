@@ -13,6 +13,11 @@ final class MutationContracts
 {
     public function server(MutationProgram $program): ValueContract
     {
+        if ($program->navigateAfter !== null) {
+            // The native envelope carries navigation, not a public action result.
+            return new ValueContract('void');
+        }
+
         $contract = $program->serverResult === null
             ? $this->output($program->operations, $program->returnType, $this->input($program->parameters))
             : ValueContract::parse($program->serverResult);
@@ -126,6 +131,10 @@ final class MutationContracts
 
         if ($op === 'validated') {
             return $input;
+        }
+
+        if ($op === 'safeExcept') {
+            return new ValueContract('object', fields: array_diff_key($input->fields, array_flip($node->strings('keys'))));
         }
 
         if ($op === 'local') {

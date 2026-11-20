@@ -1,11 +1,12 @@
 import type { FieldDefinition, FormDefinition, FormDescriptor, GroupDefinition } from '@formbraid/core';
 import type { Schema } from '@rocicorp/zero';
 import type { ClientContext } from './contract';
-import type {
-    ControllerMutationAction,
-    ControllerMutationBinding,
-    ControllerMutationWire,
-    MutationPreparation,
+import {
+    decodeControllerResult,
+    type ControllerMutationAction,
+    type ControllerMutationBinding,
+    type ControllerMutationWire,
+    type MutationPreparation,
 } from './controller-mutation';
 import { completeMutation, MutationResultError, validationFields, type MutationClient } from './operation';
 
@@ -48,11 +49,7 @@ export function createControllerForm<
                     const input = action.inputSchema.parse(values);
                     const call = client.mutate(binding.prepare(input, route, preparation));
                     const raw = await completeMutation(call, signal);
-                    try {
-                        return { status: 'success', value: action.serverResultSchema.parse(raw) };
-                    } catch (error) {
-                        throw new MutationResultError(error);
-                    }
+                    return { status: 'success', value: decodeControllerResult(binding, raw) };
                 } catch (error) {
                     if (signal.aborted) return { status: 'cancelled' };
                     if (!(error instanceof MutationResultError)) {

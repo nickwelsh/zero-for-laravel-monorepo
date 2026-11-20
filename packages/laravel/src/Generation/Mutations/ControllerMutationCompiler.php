@@ -6,6 +6,8 @@ namespace ZeroForLaravel\Generation\Mutations;
 
 use BackedEnum;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Http\RedirectResponse;
+use Illuminate\Routing\Router;
 use Illuminate\Support\Facades\Gate;
 use LogicException;
 use PhpParser\Node;
@@ -69,7 +71,11 @@ final class ControllerMutationCompiler
         $reflection = new ReflectionMethod($controller, $method);
         $attribute = $reflection->getAttributes(ZeroMutation::class)[0] ?? throw new LogicException('Mutation action must opt in with #[ZeroMutation].');
         $config = $attribute->newInstance();
-        $this->generated = $config->optimism === 'generated';
+        $return = $reflection->getReturnType();
+        $redirect = $return instanceof ReflectionNamedType && $return->getName() === RedirectResponse::class;
+        // Even without prediction we must lower redirect actions: executing an arbitrary
+        // HTTP response cannot establish a trusted named destination or a stable create site.
+        $this->generated = $config->optimism === 'generated' || $redirect;
         $this->sites = [];
         $this->guards = [];
         $this->stack = [];
@@ -77,19 +83,41 @@ final class ControllerMutationCompiler
         $this->inLoop = false;
         $this->hasLoops = false;
         [$node, $parameters] = $this->method($controller, $method);
-        $return = $reflection->getReturnType();
-        if (! $return instanceof ReflectionNamedType || ! in_array($return->getName(), ['void', 'array', 'string', 'int', 'float', 'bool', 'null', 'mixed'], true) || ($return->allowsNull() && ! in_array($return->getName(), ['null', 'mixed'], true))) {
-            $this->fail($node, 'Declare void or an explicit JSON return type.');
+        if (! $return instanceof ReflectionNamedType || (! $redirect && ! in_array($return->getName(), ['void', 'array', 'string', 'int', 'float', 'bool', 'null', 'mixed'], true)) || ($return->allowsNull() && ! in_array($return->getName(), ['null', 'mixed'], true))) {
+            $this->fail($node, 'Declare void, an explicit JSON return type, or RedirectResponse.');
         }
 
-        $variables = $parameters;
+        if (! $redirect && $config->navigateAfter !== null || $redirect && ($config->clientResult !== null || $config->serverResult !== null)) {
+            $this->fail($node, 'Only RedirectResponse actions accept navigateAfter; their public result is always void.');
+        }
+
         foreach ($parameters as $parameter) {
             if ($this->generated && $parameter['kind'] === 'scalar' && ($parameter['type'] ?? '') !== 'string') {
                 $this->fail($node, 'Controller route scalars currently require string parameters.');
             }
         }
 
-        $operations = $config->optimism === 'generated' ? $this->statements($node->stmts ?? [], $variables) : [];
+        $body = $node->stmts ?? [];
+        $variables = $parameters;
+        if ($redirect) {
+            $destinations = new RedirectCompiler(resolve(Router::class), $this->modelClasses(), $controller.'@'.$method);
+            foreach ($parameters as $name => $parameter) {
+                if ($parameter['kind'] === 'model') {
+                    $parameters[$name]['predictBinding'] = $destinations->predictsBinding($name, $parameter['type'] ?? '');
+                }
+            }
+
+            $last = array_pop($body);
+            if (! $last instanceof Stmt\Return_ || ! $last->expr instanceof Expr || (new NodeFinder)->findFirstInstanceOf($body, Stmt\Return_::class) instanceof Node) {
+                $this->fail($node, 'Redirect actions require one final return with a checked destination.');
+            }
+
+            $operations = $this->statements($body, $variables);
+            $operations[] = ['op' => 'return', 'value' => $destinations->destination($last->expr, $variables)];
+        } else {
+            $operations = $this->generated ? $this->statements($body, $variables) : [];
+        }
+
         $this->validateSeeds($node);
         $data = ['mutable-scopes-v1', ContextDefinition::configured()->contract(), $controller, $method, $config, $parameters, $operations, $this->sources,
             array_map(function (ModelMetadata $model): array {
@@ -102,8 +130,9 @@ final class ControllerMutationCompiler
             }, $this->models->all())];
 
         return new MutationProgram($controller.'@'.$method, $config->optimism, $config->conceal,
-            $return->getName() !== 'void', $parameters, $operations, $this->sites, $this->guards,
-            hash('sha256', serialize($data)), $return->getName(), $config->serverResult, $config->clientResult);
+            ! $redirect && $return->getName() !== 'void', $parameters, $operations, $this->sites, $this->guards,
+            hash('sha256', serialize($data)), $return->getName(), $config->serverResult, $config->clientResult,
+            $redirect ? ($config->navigateAfter ?? ($config->optimism === 'generated' ? 'local' : 'server')) : null);
     }
 
     /** @return array{Stmt\ClassMethod, array<string,VariableType>} */
@@ -410,6 +439,26 @@ final class ControllerMutationCompiler
         }
 
         if ($expr instanceof Expr\MethodCall && $expr->name instanceof Node\Identifier) {
+            if ($expr->name->name === 'except' && $expr->var instanceof Expr\MethodCall && $expr->var->name instanceof Node\Identifier && $expr->var->name->name === 'safe' && $expr->var->args === []) {
+                $base = $e($expr->var->var);
+                $arg = $expr->args[0] ?? null;
+                if (($base['result']['kind'] ?? null) !== 'request' || count($expr->args) !== 1 || ! $arg instanceof Node\Arg || $arg->name instanceof Node\Identifier || $arg->unpack || $arg->byRef || ! $arg->value instanceof Expr\Array_) {
+                    $this->fail($expr, 'Expected FormRequest safe()->except([literal field names]).');
+                }
+
+                $fields = RequestContract::value($base['result']['type'] ?? '')->fields;
+                $keys = [];
+                foreach ($arg->value->items as $item) {
+                    if ($item === null || $item->unpack || $item->byRef || $item->key !== null || ! $item->value instanceof Node\Scalar\String_ || ! isset($fields[$item->value->value])) {
+                        $this->fail($expr, 'except() requires literal top-level validated field names.');
+                    }
+
+                    $keys[] = $item->value->value;
+                }
+
+                return ['op' => 'safeExcept', 'base' => $base, 'keys' => $keys];
+            }
+
             if ($expr->name->name === 'create' && ($expr->var instanceof Expr\StaticCall || $expr->var instanceof Expr\MethodCall)) {
                 $inputs = [];
                 foreach ($variables as $name => $type) {

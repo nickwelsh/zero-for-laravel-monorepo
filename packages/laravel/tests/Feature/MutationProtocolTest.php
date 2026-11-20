@@ -24,6 +24,8 @@ use ZeroForLaravel\Mutation\ControllerMutationRegistry;
 use ZeroForLaravel\Mutation\MutationProcessor;
 use ZeroForLaravel\ResolvedContext;
 use ZeroForLaravel\Tests\Fixtures\ControllerMutationController;
+use ZeroForLaravel\Tests\Fixtures\RedirectMutationController;
+use ZeroForLaravel\Tests\Fixtures\RedirectMutationRoutes;
 use ZeroForLaravel\Tests\Fixtures\Task;
 use ZeroForLaravel\Tests\OwnerPostgresTestCase as PostgresTestCase;
 
@@ -40,6 +42,9 @@ beforeEach(function (): void {
         Route::post('/protocol/'.$method, [ControllerMutationController::class, $method]);
         $programs[] = mutationProtocolProgram($method);
     }
+
+    RedirectMutationRoutes::register();
+    $programs[] = mutationProtocolProgram('confirmed', RedirectMutationController::class);
 
     $file = tempnam(sys_get_temp_dir(), 'protocol-mutations-');
     try {
@@ -59,10 +64,10 @@ afterEach(function (): void {
     Task::flushEventListeners();
 });
 
-function mutationProtocolProgram(string $method): MutationProgram
+function mutationProtocolProgram(string $method, string $controller = ControllerMutationController::class): MutationProgram
 {
     return (new ControllerMutationCompiler((new ParserFactory)->createForNewestSupportedVersion(), resolve(ModelRegistry::class)))
-        ->compile(ControllerMutationController::class, $method);
+        ->compile($controller, $method);
 }
 
 /** @param list<array<string, mixed>> $mutations
@@ -87,9 +92,9 @@ function mutationProtocolProcess(array $mutations, ?array $params = null, int $v
 /** @param array<string, mixed> $input
  * @return array<string, mixed>
  */
-function mutationProtocolMutation(int $id, array $input = ['title' => 'Hello'], string $method = 'store'): array
+function mutationProtocolMutation(int $id, array $input = ['title' => 'Hello'], string $method = 'store', string $controller = ControllerMutationController::class): array
 {
-    $program = mutationProtocolProgram($method);
+    $program = mutationProtocolProgram($method, $controller);
     $ids = [];
     foreach (array_keys($program->sites) as $index => $site) {
         $ids[$site] = '019a0000-0000-7000-8000-'.str_pad((string) ($id * 10 + $index), 12, '0', STR_PAD_LEFT);
@@ -106,6 +111,18 @@ test('cancelled eloquent events are durable rejections', function (): void {
     expect(Task::count())->toBe(0);
     expect(DB::table('zero_test_0.clients')->value('lastMutationID'))->toBe(1);
     expect(DB::table('zero_test_0.mutations')->count())->toBe(1);
+});
+
+test('the committed redirect instruction survives retry without creating another row', function (): void {
+    $mutation = mutationProtocolMutation(1, ['title' => 'Open'], 'confirmed', RedirectMutationController::class);
+    $result = mutationProtocolProcess([$mutation]);
+    $data = ['kind' => 'visit', 'route' => 'todos.show', 'parameters' => ['todo' => Task::firstOrFail()->id]];
+    expect(data_get($result, 'mutations.0.result.data'))->toBe($data);
+    expect(data_get(mutationProtocolProcess([$mutation]), 'mutations.0.result.error'))->toBe('alreadyProcessed');
+
+    $persisted = DB::table('zero_test_0.mutations')->value('result');
+    expect(is_string($persisted) ? json_decode($persisted, true, flags: JSON_THROW_ON_ERROR) : null)->toEqual(['data' => $data]);
+    expect(Task::count())->toBe(1);
 });
 
 test('controller results are persisted and duplicate invocations never execute or dispatch twice', function (): void {

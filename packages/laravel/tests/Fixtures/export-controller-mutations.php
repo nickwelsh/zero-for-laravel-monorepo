@@ -31,6 +31,8 @@ use ZeroForLaravel\Tests\Fixtures\Module\TaskQueries;
 use ZeroForLaravel\Tests\Fixtures\MutationPreference;
 use ZeroForLaravel\Tests\Fixtures\PreferenceMutationController;
 use ZeroForLaravel\Tests\Fixtures\QueryController;
+use ZeroForLaravel\Tests\Fixtures\RedirectMutationController;
+use ZeroForLaravel\Tests\Fixtures\RedirectMutationRoutes;
 use ZeroForLaravel\Tests\Fixtures\TasksTable;
 use ZeroForLaravel\Tests\OwnerTestCase as TestCase;
 
@@ -190,6 +192,11 @@ $fixture = new class('export') extends TestCase
         }
 
         $compiler = new ControllerMutationCompiler((new ParserFactory)->createForNewestSupportedVersion(), new ModelRegistry($this->models()));
+        if ($mode === 'redirects') {
+            RedirectMutationRoutes::register();
+
+            return (new ControllerMutationGenerator($schemas))->typescript(array_map(fn (string $method): MutationProgram => $compiler->compile(RedirectMutationController::class, $method), RedirectMutationRoutes::METHODS));
+        }
         if ($mode === 'options') {
             $models = new ModelRegistry($this->models());
             app()->instance(ModelRegistry::class, $models);

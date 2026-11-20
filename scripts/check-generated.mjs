@@ -13,6 +13,7 @@ console.log('Generated contracts match the PHP model definitions.');
 
 for (const [mode, path] of [
     ['mutations', 'packages/client/src/controller-mutation.fixture.ts'],
+    ['redirects', 'tests/interop/redirect-mutations.generated.ts'],
     ['assignment', 'tests/interop/assignment.generated.ts'],
     ['react', 'tests/interop/controller-react.generated.ts'],
     ['options', 'tests/interop/options.generated.ts'],

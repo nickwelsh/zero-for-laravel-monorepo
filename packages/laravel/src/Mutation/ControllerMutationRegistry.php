@@ -103,7 +103,7 @@ final readonly class ControllerMutationRegistry
                 }
 
                 $mutation = new Mutation($this->models, $prepared, $resolved, fn (Model $locked): Model => $this->rebind($route, $locked));
-                if ($contract['optimism'] !== 'generated') {
+                if ($contract['optimism'] !== 'generated' && ! isset($contract['navigateAfter'])) {
                     $previous = app()->bound(Mutation::class) ? resolve(Mutation::class) : null;
                     app()->instance(Mutation::class, $mutation);
                     try {
@@ -132,6 +132,14 @@ final readonly class ControllerMutationRegistry
 
                 return (new ControllerMutationRuntime($mutation, $entry['guards'] ?? []))->run($contract['operations'], $locals);
             });
+            if (isset($contract['navigateAfter'])) {
+                // Only a checked redirect return can reach here. Persist the native
+                // instruction for the submitting observer, not a public PHP response.
+                self::json($result, declaredObjects: true);
+
+                return ['data' => $result];
+            }
+
             if (! $contract['returns']) {
                 if ($result !== null) {
                     throw new OperationException('invalid_result', 'Void mutation returned data.');

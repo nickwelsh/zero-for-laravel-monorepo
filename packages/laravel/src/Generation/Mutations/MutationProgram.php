@@ -7,9 +7,9 @@ namespace ZeroForLaravel\Generation\Mutations;
 /**
  * One checked operation tree used by both authoritative and native optimistic execution.
  *
- * @phpstan-type VariableType array{kind:string, type?:string, nullable?:bool, path?:string}
+ * @phpstan-type VariableType array{kind:string, type?:string, nullable?:bool, path?:string, predictBinding?:bool}
  * @phpstan-type Expression array{op:string, value?:mixed, result?:VariableType, ...}
- * @phpstan-type Contract array{action:string, optimism:string, conceal:bool, returns:bool, parameters:array<string,VariableType>, operations:list<array<string,mixed>>, sites:array<string,string>, version:string, returnType:string}
+ * @phpstan-type Contract array{action:string, optimism:string, conceal:bool, returns:bool, parameters:array<string,VariableType>, operations:list<array<string,mixed>>, sites:array<string,string>, version:string, returnType:string, navigateAfter?:string}
  */
 final readonly class MutationProgram
 {
@@ -32,6 +32,7 @@ final readonly class MutationProgram
         public string $returnType,
         public ?string $serverResult = null,
         public ?string $clientResult = null,
+        public ?string $navigateAfter = null,
     ) {}
 
     public function name(): string
@@ -44,6 +45,7 @@ final readonly class MutationProgram
     {
         return ['action' => $this->action, 'optimism' => $this->optimism, 'conceal' => $this->conceal,
             'returns' => $this->returns, 'parameters' => $this->parameters, 'operations' => $this->operations,
-            'sites' => $this->sites, 'version' => $this->fingerprint, 'returnType' => $this->returnType];
+            'sites' => $this->sites, 'version' => $this->fingerprint, 'returnType' => $this->returnType,
+            ...($this->navigateAfter === null ? [] : ['navigateAfter' => $this->navigateAfter])];
     }
 }

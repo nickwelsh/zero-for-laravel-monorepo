@@ -86,6 +86,32 @@ final readonly class ControllerMutationRuntime
     {
         $e = fn (OperationNode $node): mixed => $this->expression($node, $locals);
         switch ($op->string('op')) {
+            case 'stay': return ['kind' => 'stay'];
+            case 'redirectWhen':
+                $request = $locals[$op->string('request')];
+                if (! $request instanceof FormRequest) {
+                    throw new LogicException('Expected resolved FormRequest.');
+                }
+
+                return $e($op->node($request->boolean($op->string('field')) ? 'yes' : 'no'));
+            case 'visit':
+                $parameters = [];
+                foreach ($op->nodes('parameters') as $parameter) {
+                    $value = $e($parameter->node('value'));
+                    if ($parameter->value('model') === true) {
+                        $record = $this->model($value);
+                        $field = $parameter->value('bindingField');
+                        $value = is_string($field) ? $record->getAttribute($field) : $record->getRouteKey();
+                    }
+
+                    if ((! is_string($value) || $value === '') && ! is_int($value)) {
+                        throw new OperationException('invalid_result', 'Redirect requires a nonempty route key.');
+                    }
+
+                    $parameters[$parameter->string('name')] = is_int($value) && abs($value) > 9007199254740991 ? (string) $value : $value;
+                }
+
+                return ['kind' => 'visit', 'route' => $op->string('route'), 'parameters' => $parameters === [] ? (object) [] : $parameters];
             case 'literal': return $op->value('value');
             case 'context': return $this->mutation->context($op->string('field'));
             case 'conditional': return $e($op->node($e($op->node('condition')) ? 'yes' : 'no'));
@@ -109,13 +135,14 @@ final readonly class ControllerMutationRuntime
                 }
 
                 return $base[$key] ?? null;
+            case 'safeExcept':
             case 'validated':
                 $request = $e($op->node('base'));
                 if (! $request instanceof FormRequest) {
                     throw new LogicException('Expected resolved FormRequest.');
                 }
 
-                return $request->validated();
+                return $op->string('op') === 'safeExcept' ? $request->safe()->except($op->strings('keys')) : $request->validated();
             case 'timestamp': return $this->mutation->timestamp();
             case 'isset': return $this->expression($op->node('value'), $locals, true) !== null;
             case 'has':

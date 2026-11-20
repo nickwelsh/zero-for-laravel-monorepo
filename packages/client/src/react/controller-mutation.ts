@@ -2,11 +2,12 @@ import type { Schema, Zero } from '@rocicorp/zero';
 import { ZeroContext } from '@rocicorp/zero/react';
 import { createContext, useContext, useEffect, useRef, useState } from 'react';
 import type { ClientContext } from '../contract';
-import type {
-    ControllerMutationAction,
-    ControllerMutationBinding,
-    ControllerMutationWire,
-    MutationPreparation,
+import {
+    decodeControllerResult,
+    type ControllerMutationAction,
+    type ControllerMutationBinding,
+    type ControllerMutationWire,
+    type MutationPreparation,
 } from '../controller-mutation';
 import { completeMutation, MutationResultError, validationFields } from '../operation';
 import { selectionKey } from '../validation';
@@ -73,12 +74,7 @@ export function useControllerMutation<Input, Result, S extends Schema, C extends
             );
             const raw = await completeMutation(call);
             progress.completed = true;
-            let result: Result;
-            try {
-                result = binding.serverResultSchema.parse(raw);
-            } catch (error) {
-                throw new MutationResultError(error);
-            }
+            const result = decodeControllerResult(action, raw);
             update({ ...idle, status: 'success', locallyApplied: progress.locallyApplied });
             return result;
         } catch (error) {

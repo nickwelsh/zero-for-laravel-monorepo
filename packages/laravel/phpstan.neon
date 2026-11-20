@@ -13,3 +13,8 @@ parameters:
     paths:
         - src
         - tests
+
+services:
+    -
+        class: ZeroForLaravel\Tests\FormRequestExceptReturnType
+        tags: [phpstan.broker.dynamicMethodReturnTypeExtension]

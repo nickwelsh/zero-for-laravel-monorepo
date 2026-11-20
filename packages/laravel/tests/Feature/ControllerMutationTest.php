@@ -28,6 +28,9 @@ use ZeroForLaravel\Mutation\ControllerMutationRegistry;
 use ZeroForLaravel\Mutation\OperationException;
 use ZeroForLaravel\ResolvedContext;
 use ZeroForLaravel\Tests\Fixtures\ControllerMutationController;
+use ZeroForLaravel\Tests\Fixtures\InvalidRedirectMutationController;
+use ZeroForLaravel\Tests\Fixtures\RedirectMutationController;
+use ZeroForLaravel\Tests\Fixtures\RedirectMutationRoutes;
 use ZeroForLaravel\Tests\Fixtures\Task;
 use ZeroForLaravel\Tests\OwnerTestCase as TestCase;
 
@@ -39,7 +42,7 @@ beforeEach(function (): void {
 });
 
 /** @return array{ModelRegistry,MutationProgram,ControllerMutationRegistry,array{version:string,input:array<string,mixed>,route:array<string,string>,prepared:array{timestamp:int,ids:array<string,string>}}} */
-function mutationRegistration(mixed $test, string $method): array
+function mutationRegistration(mixed $test, string $method, string $controller = ControllerMutationController::class): array
 {
     if (! $test instanceof TestCase) {
         throw new LogicException('Expected booted test case.');
@@ -48,7 +51,7 @@ function mutationRegistration(mixed $test, string $method): array
     app()->register(SurveyorServiceProvider::class);
     $models = new ModelRegistry($test->models());
     $compiler = new ControllerMutationCompiler((new ParserFactory)->createForNewestSupportedVersion(), $models);
-    $program = $compiler->compile(ControllerMutationController::class, $method);
+    $program = $compiler->compile($controller, $method);
     $path = tempnam(sys_get_temp_dir(), 'mutation-manifest-');
     try {
         file_put_contents($path, (new ControllerMutationGenerator)->php([$program]));
@@ -70,6 +73,51 @@ function mutationRegistration(mixed $test, string $method): array
 
     return [$models, $program, $registry, $wire];
 }
+
+test('checked redirects return native instructions after real authorization, validation and prepared writes', function (): void {
+    RedirectMutationRoutes::register();
+    [$models, $program, $registry, $wire] = mutationRegistration($this, 'store', RedirectMutationController::class);
+    $run = fn (array $wire): array => $models->connection()->transaction(fn () => $registry->execute($program->name(), $wire, new ResolvedContext(['user_id' => 'alice'], 'alice')));
+    Gate::define('create', fn (): bool => false);
+    $wire['input'] = ['title' => 'Created', 'open_after_saving' => true];
+    expect(fn (): array => $run($wire))->toThrow(AuthorizationException::class);
+    Gate::define('create', fn (): bool => true);
+    expect(fn (): array => $run([...$wire, 'input' => ['title' => 'forbidden']]))->toThrow(AuthorizationException::class);
+    expect(fn (): array => $run([...$wire, 'input' => ['open_after_saving' => true]]))->toThrow(ValidationException::class);
+    expect(Task::count())->toBe(0);
+    expect($run($wire))->toBe(['data' => ['kind' => 'visit', 'route' => 'todos.show', 'parameters' => ['todo' => $wire['prepared']['ids']['s0']]]]);
+    expect(Task::findOrFail($wire['prepared']['ids']['s0'])->title)->toBe('Created');
+    $wire['prepared']['ids']['s0'] = (string) Str::uuid();
+    unset($wire['input']['open_after_saving']);
+    expect($run($wire))->toBe(['data' => ['kind' => 'stay']]);
+});
+
+test('checked redirects use Laravel route keys and retain checked authority without local navigation', function (): void {
+    RedirectMutationRoutes::register();
+    foreach (['slug', 'disabled', 'confirmed', 'projected'] as $method) {
+        [$models, $program, $registry, $wire] = mutationRegistration($this, $method, RedirectMutationController::class);
+        $wire['input'] = ['title' => 'ByTitle'];
+        $result = $models->connection()->transaction(fn () => $registry->execute($program->name(), $wire, new ResolvedContext(['user_id' => 'alice'], 'alice')));
+        $expected = match ($method) {
+            'slug' => ['kind' => 'visit', 'route' => 'todos.title', 'parameters' => ['todo' => 'ByTitle']],
+            'disabled' => ['kind' => 'stay'],
+            'confirmed' => ['kind' => 'visit', 'route' => 'todos.show', 'parameters' => ['todo' => $wire['prepared']['ids']['s0']]],
+            default => ['kind' => 'visit', 'route' => 'todos.index', 'parameters' => (object) []],
+        };
+        expect(json_encode($result))->toBe(json_encode(['data' => $expected]));
+        expect($program->navigateAfter)->toBe($method === 'slug' ? 'local' : 'server');
+    }
+});
+
+test('redirect actions reject unchecked helpers, destinations and argument shapes at compile time', function (): void {
+    /** @var TestCase $this */
+    app()->register(SurveyorServiceProvider::class);
+    RedirectMutationRoutes::register();
+    $compiler = new ControllerMutationCompiler((new ParserFactory)->createForNewestSupportedVersion(), new ModelRegistry($this->models()));
+    foreach (['dynamic' => 'literal name', 'missingParameter' => 'every redirect route parameter', 'extraParameter' => 'without query extras', 'unsupported' => 'Expected back()', 'invalidCondition' => 'validated boolean', 'wrongMethod' => 'named GET route', 'json' => 'Only RedirectResponse'] as $method => $message) {
+        expect(fn (): MutationProgram => $compiler->compile(InvalidRedirectMutationController::class, $method))->toThrow(LogicException::class, $message);
+    }
+});
 
 test('lowered controller creates once with stable identities, validation and atomic child writes', function (): void {
     Route::post('/mutation-tasks', [ControllerMutationController::class, 'store']);

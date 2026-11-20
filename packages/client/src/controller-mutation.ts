@@ -15,8 +15,33 @@ import type { ClientContext, ModelContract } from './contract';
 import { completeMutation, MutationResultError, type MutationClient } from './operation';
 import { columnValue, encodeDate, freeze } from './validation';
 
+export type NavigateAfter = 'local' | 'server';
+export type MutationDestination =
+    | { kind: 'stay' }
+    | { kind: 'visit'; route: string; parameters: Record<string, string | number> };
+
 /** Compiler-owned JSON nodes. Never accept these from mutation arguments. */
 export type MutationNode =
+    | { readonly op: 'stay' }
+    | {
+          readonly op: 'redirectWhen';
+          readonly request: string;
+          readonly field: string;
+          readonly predict: boolean;
+          readonly yes: MutationNode;
+          readonly no: MutationNode;
+      }
+    | {
+          readonly op: 'visit';
+          readonly route: string;
+          readonly parameters: readonly {
+              readonly name: string;
+              readonly value: MutationNode;
+              readonly model?: boolean;
+              readonly predictKey?: string | null;
+          }[];
+      }
+    | { readonly op: 'safeExcept'; readonly base: MutationNode; readonly keys: readonly string[] }
     | { readonly op: 'literal'; readonly value: ReadonlyJSONValue }
     | { readonly op: 'context'; readonly field: string }
     | { readonly op: 'merge'; readonly values: readonly MutationNode[] }
@@ -86,8 +111,11 @@ export interface ControllerMutationContract {
     readonly action: string;
     readonly version: string;
     readonly optimism: 'generated' | 'custom' | 'disabled';
+    readonly navigateAfter?: NavigateAfter;
     readonly returns: boolean;
-    readonly parameters: Readonly<Record<string, { readonly kind: string; readonly type: string }>>;
+    readonly parameters: Readonly<
+        Record<string, { readonly kind: string; readonly type: string; readonly predictBinding?: boolean }>
+    >;
     readonly operations: readonly MutationStatement[];
     readonly sites: Readonly<Record<string, 'uuid' | 'ulid'>>;
 }
@@ -113,12 +141,25 @@ export interface ControllerMutationAction<Input, Result> {
     readonly serverResultSchema: MutationCodec<Result>;
 }
 export interface ControllerMutationBinding<Input, Result, S extends Schema, C extends ClientContext> {
+    readonly navigateAfter?: NavigateAfter;
     prepare(
         input: Input,
         route?: ControllerMutationWire['route'],
         preparation?: MutationPreparation,
     ): MutateRequest<ControllerMutationWire, S, C>;
     serverResultSchema: MutationCodec<Result>;
+}
+
+/** Navigation instructions belong to the submitting observer, never to the public result codec. */
+export function decodeControllerResult<Result>(
+    binding: { navigateAfter?: NavigateAfter; serverResultSchema: MutationCodec<Result> },
+    data: unknown,
+): Result {
+    try {
+        return binding.serverResultSchema.parse(binding.navigateAfter ? undefined : data);
+    } catch (error) {
+        throw new MutationResultError(error);
+    }
 }
 export type InferMutationInput<M extends { inputSchema: MutationCodec<unknown> }> = ReturnType<
     M['inputSchema']['parse']
@@ -227,9 +268,30 @@ export async function runControllerMutation<S extends Schema>(
         typeof value === 'object' &&
         (('op' in value && value.op === 'local' && 'name' in value && value.name === name) ||
             Object.values(value).some((child) => usesLocal(child, name)));
+    // A missing scope/context prerequisite must decline the whole prediction,
+    // not leave an earlier native write applied or reject the intent locally.
+    const missingContext = (node: unknown): boolean => {
+        if (!node || typeof node !== 'object') return false;
+        if ('op' in node) {
+            if (node.op === 'literal') return false;
+            if (node.op === 'context' && 'field' in node && typeof node.field === 'string')
+                return !Object.hasOwn(ctx, node.field) || ctx[node.field] === undefined;
+            if (
+                (node.op === 'create' || node.op === 'upsertUnique' || node.op === 'insertUnlessExists') &&
+                !('defaults' in node) &&
+                'model' in node &&
+                typeof node.model === 'string' &&
+                missingContext(models[node.model]?.creationDefaults)
+            )
+                return true;
+        }
+        return Object.values(node).some(missingContext);
+    };
+    if (contract.navigateAfter && missingContext(contract.operations)) return undefined;
     for (const [name, parameter] of Object.entries(contract.parameters)) {
         if (parameter.kind === 'model') {
-            if (!usesLocal(contract.operations, name)) continue;
+            if (contract.navigateAfter && (!parameter.predictBinding || args.route[name] == null)) return undefined;
+            if (!contract.navigateAfter && !usesLocal(contract.operations, name)) continue;
             const model = modelFor(parameter.type);
             const row = await native.run(builder[model.table]!.where(model.key, args.route[name]).one());
             if (!row) return undefined;
@@ -237,8 +299,10 @@ export async function runControllerMutation<S extends Schema>(
             locals[name] = loaded;
             records.set(loaded, model);
         } else if (parameter.kind === 'request') locals[name] = args.input;
-        else if (parameter.kind === 'scalar') locals[name] = args.route[name];
-        else locals[name] = null;
+        else if (parameter.kind === 'scalar') {
+            if (contract.navigateAfter && typeof args.route[name] !== 'string') return undefined;
+            locals[name] = args.route[name];
+        } else locals[name] = null;
     }
     const expression = async (
         node: MutationNode,
@@ -247,6 +311,39 @@ export async function runControllerMutation<S extends Schema>(
     ): Promise<unknown> => {
         const e = (child: MutationNode) => expression(child, scope);
         switch (node.op) {
+            case 'stay':
+                return { kind: 'stay' } satisfies MutationDestination;
+            case 'redirectWhen': {
+                if (!node.predict) return undefined;
+                const flag = jsonObject(scope[node.request])[node.field];
+                if (flag != null && typeof flag !== 'boolean') return undefined;
+                return e(flag === true ? node.yes : node.no);
+            }
+            case 'visit': {
+                const entries: [string, string | number][] = [];
+                for (const parameter of node.parameters) {
+                    let value = await e(parameter.value);
+                    if (parameter.model) {
+                        if (!parameter.predictKey || !value || typeof value !== 'object') return undefined;
+                        value = Reflect.get(value, parameter.predictKey);
+                    }
+                    if (
+                        !(typeof value === 'string' && value !== '') &&
+                        !(typeof value === 'number' && Number.isSafeInteger(value))
+                    )
+                        return undefined;
+                    entries.push([parameter.name, value]);
+                }
+                return {
+                    kind: 'visit',
+                    route: node.route,
+                    parameters: Object.fromEntries(entries),
+                } satisfies MutationDestination;
+            }
+            case 'safeExcept':
+                return Object.fromEntries(
+                    Object.entries(jsonObject(await e(node.base))).filter(([key]) => !node.keys.includes(key)),
+                );
             case 'literal':
                 return node.value;
             case 'context': {
@@ -477,7 +574,11 @@ export async function runControllerMutation<S extends Schema>(
         return undefined;
     };
     const value = (await block(contract.operations, locals))?.value;
-    if (!contract.returns) return undefined;
+    if (
+        contract.navigateAfter === 'server' ||
+        (contract.navigateAfter === 'local' ? value === undefined : !contract.returns)
+    )
+        return undefined;
     const result = value ?? null;
     json(result);
     return result;
@@ -515,7 +616,7 @@ export function createControllerMutations<S extends Schema, C extends ClientCont
                           ? await config.optimistic!({ tx, args, ctx })
                           : await runControllerMutation(schema, models, contract, tx, args, ctx);
                 if (result !== undefined) json(result);
-                config.clientResult.parse(result);
+                if (!contract.navigateAfter || contract.optimism !== 'generated') config.clientResult.parse(result);
                 return result === undefined ? undefined : result;
             },
         );
@@ -532,6 +633,7 @@ export function createControllerMutations<S extends Schema, C extends ClientCont
             if (!contract) throw new Error('Unknown controller mutation.');
             const mutator = mutators[name] as unknown as Mutator<ControllerMutationWire, S, C>;
             return {
+                ...(contract.navigateAfter ? { navigateAfter: contract.navigateAfter } : {}),
                 inputSchema: config.input,
                 serverResultSchema: config.serverResult,
                 clientResultSchema: config.clientResult,
@@ -580,11 +682,7 @@ export function createControllerMutations<S extends Schema, C extends ClientCont
                     preparation: MutationPreparation = {},
                 ): Promise<ServerResult> {
                     const data = await completeMutation(client.mutate(this.prepare(input, route, preparation)));
-                    try {
-                        return config.serverResult.parse(data);
-                    } catch (error) {
-                        throw new MutationResultError(error);
-                    }
+                    return decodeControllerResult(this, data);
                 },
             };
         },
