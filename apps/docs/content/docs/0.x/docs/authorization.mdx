@@ -382,10 +382,11 @@ global scope registered on `Todo`, `Todo::zeroQuery()->all()` still applies the
 row-level `view` policy. An allowed user can see an empty index. Losing one
 row's `view` removes that row; losing `viewAny` denies the page and stops its
 query from streaming rows even if the user retains `view` on some Todos.
-The class guard must be unconditional and portable; an ordinary arbitrary PHP
-Gate is not a maintainable live predicate. Use the same guard on the initial
-Laravel request and the generated live route. Authorized empty page shells with
-a prelude still use an ordinary Inertia visit.
+Use one unconditional, portable class guard for the action. The generator
+rejects combined class and instance guards and paths it cannot maintain,
+including unprotected resource models and intermediate relation tables. An
+arbitrary PHP Gate cannot become a live predicate. Authorized empty page shells
+with a prelude still use an ordinary Inertia visit.
 
 ## Optional current-user UI predictions
 

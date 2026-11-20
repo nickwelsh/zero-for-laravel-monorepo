@@ -46,6 +46,7 @@ final class PublicApiGenerator
                 $fields = (new MutationContracts)->input($mutation->parameters)->fields;
                 $reference = 'controllerForm('.$reference.', '.json_encode($route, JSON_THROW_ON_ERROR).' as const, '.json_encode((object) array_map($this->field(...), $fields), JSON_THROW_ON_ERROR).')';
             }
+
             $controllers[$path][] = 'const action'.$index.' = '.$reference.';';
             $exports[$path][$method] = 'action'.$index;
             $controllers[$path][] = 'export {action'.$index.' as '.$method.'};';
@@ -104,16 +105,18 @@ final class PublicApiGenerator
     /** @return list<array{string,string}>|null */
     private function routeFields(MutationProgram $mutation): ?array
     {
-        $routes = array_values(array_filter(resolve(Router::class)->getRoutes()->getRoutes(), static fn ($route): bool => ltrim($route->getActionName(), '\\') === $mutation->action));
+        $routes = array_values(array_filter(resolve(Router::class)->getRoutes()->getRoutes(), static fn (\Illuminate\Routing\Route $route): bool => ltrim($route->getActionName(), '\\') === $mutation->action));
         if (count($routes) !== 1) {
             return null;
         }
+
         $route = $routes[0];
         $fields = [];
         foreach ($route->parameterNames() as $name) {
             if (! is_string($name)) {
                 throw new LogicException('Expected a named route parameter.');
             }
+
             $type = $mutation->parameters[$name]['type'] ?? '';
             $fields[] = [$name, $route->bindingFieldFor($name) ?? (is_subclass_of($type, Model::class) ? (new $type)->getRouteKeyName() : 'id')];
         }
