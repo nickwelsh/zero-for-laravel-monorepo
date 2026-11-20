@@ -268,7 +268,7 @@ function InputSubscription({
             {(data) => children({ ...data, inputs })}
         </Subscription>
     );
-    return binding.access ? (
+    return binding.access && binding.access.scope !== 'page' ? (
         <AccessBoundary binding={{ ...binding, args: state.args }} prop={prop} options={access}>
             {subscription}
         </AccessBoundary>
@@ -391,12 +391,14 @@ export function createInertiaAdapter(factories: BindingFactories, options: Inert
                 const entries = Object.entries(contract.bindings).filter(
                     (entry): entry is [string, Binding] => entry[1] !== null,
                 );
+                // Every registration for this action replays the same class Gate
+                // and route. One representative watches it for the mounted page.
+                const pageGuard = entries.find(([, binding]) => binding.access?.scope === 'page');
                 if (
                     contract.awaitingMutation ||
                     // An unresolved instant visit can arrive with only shared
                     // props. An absent contract is not a class approval.
-                    (guardedPages.has((pages.get(snapshot) ?? page)?.component ?? null) &&
-                        !entries.some(([, binding]) => binding.access?.scope === 'page')) ||
+                    (guardedPages.has((pages.get(snapshot) ?? page)?.component ?? null) && !pageGuard) ||
                     entries.some(([, binding]) => binding.access && (starting || binding.pending))
                 ) {
                     return <output data-zero-access="unknown">Checking access…</output>;
@@ -516,7 +518,14 @@ export function createInertiaAdapter(factories: BindingFactories, options: Inert
                         </InputSubscription>
                     );
                 }
-                return render(0, { ...ordinary, ...contract.pageProps });
+                const body = render(0, { ...ordinary, ...contract.pageProps });
+                if (!pageGuard) return body;
+                const [prop, binding] = pageGuard;
+                return (
+                    <AccessBoundary binding={binding} prop={prop} options={accessOptions(binding)}>
+                        {body}
+                    </AccessBoundary>
+                );
             }
             // Preserve Inertia persistent layouts and component statics.
             Object.assign(Wrapped, Component);

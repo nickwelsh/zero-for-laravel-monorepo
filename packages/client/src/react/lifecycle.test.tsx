@@ -3,7 +3,7 @@ import { act, cleanup, fireEvent, render, renderHook, screen } from '@testing-li
 import { afterEach, beforeEach, expect, it, vi } from 'vite-plus/test';
 import { createBuilder, defineQueries, defineQuery } from '@rocicorp/zero';
 import { schema, definitions } from '../../../../tests/interop/generated';
-import { index } from '../../../../tests/interop/controller-api/ZeroForLaravel/Tests/Fixtures/QueryController';
+import { index, show } from '../../../../tests/interop/controller-api/ZeroForLaravel/Tests/Fixtures/QueryController';
 import { liveQuery, withQueryInputs } from '../live-query';
 import { z } from 'zod';
 import { router } from '@inertiajs/react';
@@ -222,6 +222,61 @@ it.each([403, 404] as const)(
 );
 
 const protectedBinding = { query: 'tasks', args: { title: '' }, access: { status: 403 as const } };
+
+it('owns one class check for two distinct business registrations and revokes the whole page once', async () => {
+    const list = index.tasks.live({ title: '' });
+    const detail = show.task.live({ task: 'a' });
+    const listName = list.request().query.queryName;
+    const detailName = detail.request().query.queryName;
+    expect(listName).not.toBe(detailName);
+    const access = { scope: 'page', status: 403 };
+    const page = {
+        component: 'tasks',
+        props: {
+            __zero: {
+                version: 1,
+                mode: 'replace',
+                pageProps: { heading: 'Private heading' },
+                bindings: {
+                    tasks: { query: listName, args: { title: '' }, access },
+                    task: { query: detailName, args: { task: 'a' }, access },
+                },
+            },
+        },
+    };
+    const revoked = vi.fn(() => expect(screen.queryByText('Private heading')).toBeNull());
+    const adapter = createInertiaAdapter(
+        { [listName]: () => list, [detailName]: () => detail },
+        { access: { onRevoked: revoked } },
+    );
+    const Page = adapter.wrap((props: Record<string, unknown>) => <p>{String(props.heading)}</p>, page);
+    const host = render(<Page {...page.props} />);
+    try {
+        await ready();
+        expect(native.requests).toHaveLength(0);
+        expect(checks()).toHaveLength(1);
+        const [watch] = checks();
+        expect(watch!.request.args.bindings?.map((binding) => binding.query)).toEqual([listName]);
+        await answer();
+        const first = native.requests.at(-1)!.args;
+        put(first, rows);
+        host.rerender(<Page {...page.props} />);
+        await ready();
+        expect(checks()).toHaveLength(1);
+        const second = native.requests.at(-1)!.args;
+        expect(second).toMatchObject({ task: 'a', __generation: first['__generation'] });
+        put(second, rows[0]);
+        host.rerender(<Page {...page.props} />);
+        expect(screen.getByText('Private heading')).toBeTruthy();
+        await answer('denied', 403, watch);
+        expect(screen.queryByText('Private heading')).toBeNull();
+        expect(revoked).toHaveBeenCalledOnce();
+        expect(checks()).toHaveLength(1);
+    } finally {
+        host.unmount();
+        adapter.dispose();
+    }
+});
 
 it('keeps watching the current class approval until renewal completes, and hides a loss during handoff', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date', 'performance'] });

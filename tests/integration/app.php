@@ -91,7 +91,11 @@ class FixtureReads
     {
         $this->authorize('viewAny', Todo::class);
 
-        return Inertia::render('fixture/todos', ['heading' => 'Private heading', 'todos' => Todo::zeroQuery()]);
+        return Inertia::render('fixture/todos', [
+            'heading' => 'Private heading',
+            'todos' => Todo::zeroQuery(),
+            'latest' => Todo::zeroQuery()->orderBy('title', 'desc')->limit(1),
+        ]);
     }
 
     public function index(): Response

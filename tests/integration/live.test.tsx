@@ -440,10 +440,15 @@ it.skipIf(!enabled)(
             }
             try {
                 await until(() => complete && result.length === 2, 'Authorized query never completed');
-                const todoSelection = (
-                    module.exports.actions['FixtureReads@todos.todos'] as (args: object) => ReturnType<typeof tasks>
-                )({});
-                const todoName = todoSelection.request().query.queryName;
+                const todoRequests = ['todos', 'latest'].map((prop) =>
+                    (
+                        module.exports.actions[`FixtureReads@todos.${prop}`] as (
+                            args: object,
+                        ) => ReturnType<typeof tasks>
+                    )({}).request(),
+                );
+                const todoName = todoRequests[0]!.query.queryName;
+                expect(todoRequests[1]!.query.queryName).not.toBe(todoName);
                 const todoPage = () =>
                     fetch(`${base}/fixture/todos`, {
                         headers: { Authorization: 'Bearer alice', 'X-Inertia': 'true', Accept: 'text/html' },
@@ -461,7 +466,10 @@ it.skipIf(!enabled)(
                     props: Record<string, unknown>;
                 };
                 expect(todoContract.props['__zero']).toMatchObject({
-                    bindings: { todos: { access: { scope: 'page', status: 404 } } },
+                    bindings: {
+                        todos: { access: { scope: 'page', status: 404 } },
+                        latest: { access: { scope: 'page', status: 404 } },
+                    },
                     pageProps: { heading: 'Private heading' },
                 });
                 expect(todoContract.props).not.toHaveProperty('heading'); // Not delivered as a shared/layout prop.
@@ -479,15 +487,22 @@ it.skipIf(!enabled)(
                     ),
                     todoContract,
                 );
-                // Keep the original business view subscribed independently of the page.
+                // Keep both original business views subscribed independently of the page.
                 // Hiding the React tree is not evidence the server stopped its stream.
-                const raw = zero.materialize(todoSelection.request(), { ttl: 0 });
-                let todoTitles: string[] = [];
-                const detachRaw = raw.addListener((rows) => {
-                    todoTitles = rows.map((row) => row.title);
+                const todoZero = zero;
+                const todoTitles: string[][] = [[], []];
+                const rawCleanup = todoRequests.map((request, i) => {
+                    const raw = todoZero.materialize(request, { ttl: 0 });
+                    const detach = raw.addListener((rows) => {
+                        todoTitles[i] = rows.map((row) => row.title);
+                    });
+                    return () => {
+                        detach();
+                        raw.destroy();
+                    };
                 });
                 const todoHost = render(
-                    <ZeroProvider zero={zero}>
+                    <ZeroProvider zero={todoZero}>
                         <Todos {...todoContract.props} />
                     </ZeroProvider>,
                 );
@@ -498,7 +513,7 @@ it.skipIf(!enabled)(
                     await shows('Private heading:');
                     psql(`INSERT INTO todos (id,title) VALUES ('${alice}','Visible todo')`);
                     await shows('Private heading:Visible todo');
-                    expect(todoTitles).toEqual(['Visible todo']);
+                    expect(todoTitles).toEqual([['Visible todo'], ['Visible todo']]);
                     permission('revoke-row');
                     await shows('Private heading:');
                     expect(classLoss).not.toHaveBeenCalled();
@@ -507,7 +522,7 @@ it.skipIf(!enabled)(
                     permission('revoke-class');
                     await shows('Not found');
                     expect(classLoss).toHaveBeenCalledTimes(1);
-                    expect(todoTitles).toEqual([]);
+                    expect(todoTitles).toEqual([[], []]);
                     const afterLoss = frames.length;
                     psql(
                         `UPDATE todos SET title='Revoked secret' WHERE id='${alice}'; INSERT INTO todos (id,title) VALUES ('${third}','Later secret'); UPDATE tasks SET title='Class WAL barrier' WHERE id='${alice}'`,
@@ -516,7 +531,7 @@ it.skipIf(!enabled)(
                         () => result[0]?.title === 'Class WAL barrier',
                         'Class revocation WAL barrier did not replicate',
                     );
-                    expect(todoTitles).toEqual([]);
+                    expect(todoTitles).toEqual([[], []]);
                     expect(Buffer.concat(frames.slice(afterLoss)).toString('utf8')).not.toMatch(
                         /Revoked secret|Later secret/,
                     );
@@ -527,8 +542,7 @@ it.skipIf(!enabled)(
                 } finally {
                     todoHost.unmount();
                     todoAdapter.dispose();
-                    detachRaw();
-                    raw.destroy();
+                    rawCleanup.forEach((close) => close());
                 }
                 expect(
                     (await zero.run(standalone.exports.search({ input: {} }), { type: 'complete' })).map(
