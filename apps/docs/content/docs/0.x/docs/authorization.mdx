@@ -376,10 +376,16 @@ infer one from an arbitrary membership. Actor/context mismatches reject. Class
 checks need no existing or cached resource row; rules requiring unknown instance
 attributes cannot establish a class grant. Explicit deny rules remain effective.
 
-Controller class guards are supported in mutations and empty page shells. A class
-guard before live-query props is rejected during generation; those props currently
-require captured instance authorization. Authorized page shells with a prelude use
-an ordinary Inertia visit rather than skipping their server checks.
+In a live index, `$this->authorize('viewAny', Todo::class)` guards the page;
+it does **not** grant access to every Todo. With the `VisibleToCurrentUser`
+global scope registered on `Todo`, `Todo::zeroQuery()->all()` still applies the
+row-level `view` policy. An allowed user can see an empty index. Losing one
+row's `view` removes that row; losing `viewAny` denies the page and stops its
+query from streaming rows even if the user retains `view` on some Todos.
+The class guard must be unconditional and portable; an ordinary arbitrary PHP
+Gate is not a maintainable live predicate. Use the same guard on the initial
+Laravel request and the generated live route. Authorized empty page shells with
+a prelude still use an ordinary Inertia visit.
 
 ## Optional current-user UI predictions
 

@@ -110,14 +110,86 @@ null, and structured JSON remain distinct. Model and HTTP-response serialization
 are not implicit result contracts.
 
 The hook tracks pending state, field errors, local application, server acceptance,
-and committed-but-undecodable results separately. Navigate and show authoritative
-success only after server acceptance. Unmounting stops observation, not the queued
-write. Unmodified Inertia forms do not automatically submit through Zero.
+and committed-but-undecodable results separately. Unmounting the hook stops its
+observer, not the queued write. Use the generated form or direct action below for
+automatic navigation. Neither the hook nor a replayed mutator drives the router.
 
 Business changes, native progress, and returned data commit atomically. Application
 rejections roll back business writes and persist an error outcome. Duplicate
 delivery does not rerun the action; a lost callback response can recover through
 native persisted results. These are not durable JavaScript promises across reloads.
+
+## Migrate an Inertia form by changing two imports
+
+With a generated `ZeroProvider` and the Zero Inertia page adapter installed, change
+the form and controller imports. Keep the named inputs, submit button and render props:
+
+```diff
+-import { Form } from '@inertiajs/react';
+-import TodoController from '@/wayfinder/App/Http/Controllers/TodoController';
++import { Form } from '@nickwelsh/zero-for-laravel/react';
++import TodoController from '@/zero/App/Http/Controllers/TodoController';
+```
+
+```tsx
+<Form {...TodoController.update.form(todo.id)}>
+    {({ errors, processing }) => <>
+        <input name="title" defaultValue={todo.title} />
+        {errors.title && <p role="alert">{errors.title}</p>}
+        <button disabled={processing}>Save</button>
+    </>}
+</Form>
+```
+
+`store.form()` takes no route arguments. A single binding accepts its scalar route
+key, a model containing that key, or a named argument. Use named arguments for
+nested routes. To submit without a form, `await TodoController.destroy.mutate(todo.id)`.
+These helpers require an unambiguous registered route and enqueue one native write.
+Formbraid is a separate, optional API.
+
+The form reads successful DOM controls, including the submitter, runs `transform`,
+normalizes values using the request contract and validates before enqueue. An
+unchecked checkbox is absent, not `false`; declare optional flags accordingly.
+Use `onSuccess` for server acceptance, not local application. Mounted forms can
+show field errors and use `reset`, `defaults` and `isDirty`. No files, upload
+progress, HTTP visit options, cancellation or Precognition: keep using ordinary
+Inertia routes for forms that need those features.
+
+### Navigate after a local write
+
+```php
+#[ZeroMutation]
+public function store(StoreTodoRequest $request): RedirectResponse
+{
+    $this->authorize('create', Todo::class);
+    $todo = Todo::create($request->safe()->except(['open_after_saving']));
+
+    return $request->boolean('open_after_saving')
+        ? to_route('todos.show', ['todo' => $todo])
+        : back();
+}
+```
+
+`back()` means stay: it does not go back in history or drop query parameters.
+`to_route()` names a registered GET route. The redirect is an instruction, not
+an HTTP response, flash payload, or public return value. The form and `.mutate()`
+observe it in the originating tab. A predictable local write can open the show
+URL before the server accepts it. A guarded destination shows a pending shell,
+not the new private row. On acceptance the guarded page starts its authorized
+subscriptions; pages that need server props use a GET. Neither pushes the same
+history entry twice. A server-only key, missing
+local row or non-predictable destination waits for the authoritative result.
+Use `#[ZeroMutation(navigateAfter: 'server')]` to delay **navigation** for a
+sensitive action without disabling its optimistic write.
+
+If Laravel rejects the write while the submission still owns its speculative
+page, the form returns to its original URL with the draft and errors. If you
+have navigated elsewhere, it leaves the new page in place and shows a status
+message. To supply your own notification, handle the window event
+`zero:mutation-error` and call `event.preventDefault()`. Drafts live
+only in memory for the same session; reloading does not rerun the submission.
+Pending while disconnected does not mean rejected. JSON and void controller
+results continue to work as before.
 
 ## Formbraid 0.3
 
