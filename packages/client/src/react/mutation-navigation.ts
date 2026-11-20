@@ -16,8 +16,23 @@ export function installMutationNavigation(
         generation++;
     };
     let ownSwap = '';
-    const observe = (event: { detail: { page: { url: string } } }) => {
-        if (new URL(event.detail.page.url, window.location.href).href !== ownSwap) depart();
+    const observe = ({ detail: { page } }: { detail: { page: { url: string; props: Record<string, unknown> } } }) => {
+        const url = new URL(page.url, window.location.href);
+        if (url.href === ownSwap) return;
+        depart();
+        const metadata = page.props['__zero'];
+        if (
+            metadata &&
+            typeof metadata === 'object' &&
+            'awaitingMutation' in metadata &&
+            metadata.awaitingMutation === true
+        ) {
+            // A history entry outlived its submitting visit. Re-read it; never replay its write or draft.
+            const owner = generation;
+            queueMicrotask(() => {
+                if (generation === owner && window.location.href === url.href) router.visit(url, { replace: true });
+            });
+        }
     };
     const listeners = [router.on('before', depart), router.on('navigate', observe), router.on('clientVisit', observe)];
     window.addEventListener('popstate', depart);
@@ -102,7 +117,8 @@ export function installMutationNavigation(
                 await swap(origin, source.component, source.props, true);
                 predicted = undefined;
             },
-            finish() {
+            finish(committedWarning) {
+                if (committedWarning && predicted && owns()) router.visit(predicted, { replace: true });
                 if (id === generation) depart();
             },
         };

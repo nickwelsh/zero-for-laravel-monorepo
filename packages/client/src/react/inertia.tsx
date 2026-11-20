@@ -307,8 +307,8 @@ function loading(selection: Pick<ReadSelection, 'one'>): Data<unknown> {
 
 /** Install once before createInertiaApp; wrap components in its resolve callback. */
 export function createInertiaAdapter(factories: BindingFactories, options: InertiaInputOptions = {}) {
-    const navigation = createNavigationLink(factories, options.navigation ?? []);
     let current: TransportPage | undefined;
+    const navigation = createNavigationLink(factories, options.navigation ?? [], () => current);
     let active: { mount: object; snapshot: object; handled: boolean } | undefined;
     let disposed = false;
     let cancelRedirect: (() => void) | undefined;

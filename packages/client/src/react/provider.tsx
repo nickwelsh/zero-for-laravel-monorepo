@@ -41,10 +41,12 @@ export function createZeroProvider<C extends ClientContext = ClientContext>(
     const clients = new Set<Zero<Schema, undefined, C>>();
     function Client({ children }: { children: ReactNode }) {
         const zero = useContext(ZeroContext) as Zero<Schema, undefined, C>;
+        const [notice, setNotice] = useState('');
         useLayoutEffect(() => {
             clients.add(zero);
             const release = mountFormSession({
                 actions: controllers.actions,
+                notify: setNotice,
                 invoke(name, input, route) {
                     const action = controllers.actions[name] as ControllerMutationBinding<unknown, unknown, Schema, C>;
                     return zero.mutate(action.prepare(input, route, controllers.preparation));
@@ -55,7 +57,12 @@ export function createZeroProvider<C extends ClientContext = ClientContext>(
                 clients.delete(zero);
             };
         }, [zero]);
-        return children;
+        return (
+            <>
+                {children}
+                {notice && <output data-zero-mutation-error="">{notice}</output>}
+            </>
+        );
     }
     function Session({ userID, context, auth, children }: ProviderProps<C>) {
         const [ready, setReady] = useState(false);

@@ -36,12 +36,13 @@ final class PublicApiGenerator
 
             $path = implode('/', $segments).'.ts';
             $import = (count($segments) === 1 ? './' : str_repeat('../', count($segments) - 1)).$base.'.mutations';
-            $controllers[$path] ??= [self::HEADER, "import {controllerForm, type ControllerMutationAction} from '@nickwelsh/zero-for-laravel';"];
+            $controllers[$path] ??= [self::HEADER, "import type {ControllerMutationAction} from '@nickwelsh/zero-for-laravel';"];
             $controllers[$path][] = 'import {inputSchema'.$index.', serverResultSchema'.$index.'} from '.json_encode($import, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES).';';
             $controllers[$path][] = 'import type {Input'.$index.', ServerResult'.$index.'} from '.json_encode($import, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES).';';
             $reference = '{action: '.json_encode($mutation->action, JSON_THROW_ON_ERROR).', inputSchema: inputSchema'.$index.', serverResultSchema: serverResultSchema'.$index.'} as const satisfies ControllerMutationAction<Input'.$index.', ServerResult'.$index.'>';
             $route = $this->routeFields($mutation);
             if ($route !== null) {
+                $controllers[$path][1] = "import {controllerForm, type ControllerMutationAction} from '@nickwelsh/zero-for-laravel';";
                 $fields = (new MutationContracts)->input($mutation->parameters)->fields;
                 $reference = 'controllerForm('.$reference.', '.json_encode($route, JSON_THROW_ON_ERROR).' as const, '.json_encode((object) array_map($this->field(...), $fields), JSON_THROW_ON_ERROR).')';
             }

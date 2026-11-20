@@ -18,13 +18,14 @@ export interface MutationVisit {
     owns(): boolean;
     apply(target: MutationDestination, confirmed: boolean): Promise<void>;
     recover(save: () => void): Promise<void>;
-    finish(): void;
+    finish(committedWarning?: boolean): void;
 }
 export const mutationNavigators = new Set<() => MutationVisit>();
 
 interface Session {
     actions: Readonly<Record<string, unknown>>;
     invoke(action: string, input: unknown, route: Route): MutatorResult;
+    notify?(message: string): void;
 }
 const sessions = new Set<Session>();
 const recoveries = new WeakMap<Session, { url: string; key: string; value: Recovery }>();
@@ -140,6 +141,7 @@ export function controllerForm<
                 let local: Promise<void> = Promise.resolve();
                 let settled = false;
                 let committed = false;
+                let committedWarning = false;
                 try {
                     if (binding.navigateAfter && !nav)
                         throw new Error('Redirecting native forms require one active Zero Inertia adapter.');
@@ -175,18 +177,27 @@ export function controllerForm<
                     await local;
                     const error = committed ? new MutationResultError(cause) : cause;
                     if (active() === session) {
+                        committedWarning = committed;
                         if (!committed && nav?.owns())
                             await nav.recover(() => {
                                 if (draft) recoveries.set(session, { url: origin, key, value: { ...draft, error } });
                             });
-                        if (!draft || !nav?.owns() || committed)
-                            window.dispatchEvent(
-                                new CustomEvent('zero:mutation-error', { detail: { action: reference.action, error } }),
-                            );
+                        if (!draft || (nav && !nav.owns()) || committed) {
+                            const event = new CustomEvent('zero:mutation-error', {
+                                cancelable: true,
+                                detail: { action: reference.action, error },
+                            });
+                            if (window.dispatchEvent(event))
+                                session.notify?.(
+                                    committed
+                                        ? 'Saved, but the response could not be applied.'
+                                        : 'A previous change could not be saved.',
+                                );
+                        }
                     }
                     throw error;
                 } finally {
-                    nav?.finish();
+                    nav?.finish(committedWarning);
                 }
             },
         };
