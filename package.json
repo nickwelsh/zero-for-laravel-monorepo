@@ -5,7 +5,7 @@
     "scripts": {
         "test": "vp test run",
         "test:integration": "ZERO_LIVE_TESTS=1 vp test run tests/integration/live.test.tsx",
-        "typecheck": "tsc --noEmit && pnpm docs:typecheck",
+        "typecheck": "tsc --noEmit && tsc -p tests/integration/todo-migration && pnpm docs:typecheck",
         "build": "pnpm --filter @nickwelsh/zero-for-laravel build && pnpm --filter @nickwelsh/zero-table build && pnpm docs:build",
         "docs:dev": "pnpm --filter @zero-for-laravel/docs dev",
         "docs:build": "pnpm --filter @zero-for-laravel/docs build",

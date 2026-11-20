@@ -23,5 +23,6 @@
             "@nickwelsh/zero-for-laravel/react": ["./packages/client/src/react/index.ts"]
         }
     },
-    "include": ["packages", "tests/interop", "tests/integration", "vite.config.ts"]
+    "include": ["packages", "tests/interop", "tests/integration", "vite.config.ts"],
+    "exclude": ["tests/integration/todo-migration/forms.tsx", "tests/integration/todo-migration/forms.test.tsx"]
 }

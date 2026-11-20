@@ -1,0 +1,7 @@
+{
+    "extends": "../../../tsconfig.json",
+    // The ordinary app uses Wayfinder's component?: undefined with Inertia's component?: string.
+    "compilerOptions": { "exactOptionalPropertyTypes": false },
+    "include": ["forms.tsx", "forms.test.tsx"],
+    "exclude": []
+}
