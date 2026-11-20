@@ -1,12 +1,13 @@
 // Generated Zero public API. Do not edit.
-import type {ControllerMutationAction} from '@nickwelsh/zero-for-laravel';
+import {controllerForm, type ControllerMutationAction} from '@nickwelsh/zero-for-laravel';
 import {inputSchema0, serverResultSchema0} from "../../../generated.mutations";
 import type {Input0, ServerResult0} from "../../../generated.mutations";
-const action0 = {action: "App\\Http\\Controllers\\ShareListController@destroy", inputSchema: inputSchema0, serverResultSchema: serverResultSchema0} as const satisfies ControllerMutationAction<Input0, ServerResult0>;
+const action0 = controllerForm({action: "App\\Http\\Controllers\\ShareListController@destroy", inputSchema: inputSchema0, serverResultSchema: serverResultSchema0} as const satisfies ControllerMutationAction<Input0, ServerResult0>, [["list","id"]] as const, {"email":{"kind":"string","required":true}});
 export {action0 as destroy};
 export type {Input0 as DestroyInput, ServerResult0 as DestroyResult} from "../../../generated.mutations";
 import {inputSchema1, serverResultSchema1} from "../../../generated.mutations";
 import type {Input1, ServerResult1} from "../../../generated.mutations";
-const action1 = {action: "App\\Http\\Controllers\\ShareListController@store", inputSchema: inputSchema1, serverResultSchema: serverResultSchema1} as const satisfies ControllerMutationAction<Input1, ServerResult1>;
+const action1 = controllerForm({action: "App\\Http\\Controllers\\ShareListController@store", inputSchema: inputSchema1, serverResultSchema: serverResultSchema1} as const satisfies ControllerMutationAction<Input1, ServerResult1>, [["list","id"]] as const, {"email":{"kind":"string","required":true}});
 export {action1 as store};
 export type {Input1 as StoreInput, ServerResult1 as StoreResult} from "../../../generated.mutations";
+export default {destroy: action0, store: action1};

@@ -12,7 +12,7 @@ import type { Schema, Zero } from '@rocicorp/zero';
 import type { ClientContext } from '@nickwelsh/zero-for-laravel';
 import type { choices } from './controller-api/ZeroForLaravel/Tests/Fixtures/QueryController';
 import { index, show, dated } from './controller-api/ZeroForLaravel/Tests/Fixtures/QueryController';
-import { store } from './controller-api/ZeroForLaravel/Tests/Fixtures/ControllerMutationController';
+import Controller, { store } from './controller-api/ZeroForLaravel/Tests/Fixtures/ControllerMutationController';
 import { search, detail } from './controller-api/ZeroForLaravel/Tests/Fixtures/Module/TaskQueries';
 import type { schema, Context } from './generated';
 import tasks from './table.generated';
@@ -29,6 +29,18 @@ function useContracts() {
     const save = useControllerMutation(store);
     const input: InferMutationInput<typeof store> = { title: 'Hello' };
     const saved: Promise<{ id: string }> = save(input);
+    /* oxlint-disable import/no-named-as-default-member -- The two-import migration uses Wayfinder's default controller shape. */
+    Controller.store.form();
+    Controller.complete.form('id');
+    Controller.complete.form({ task: { id: 'id' } });
+    const direct: Promise<{ id: string }> = Controller.store.mutate(input);
+    // @ts-expect-error a bound action needs the route argument
+    Controller.complete.form();
+    // @ts-expect-error a row or named binding must contain the route key
+    Controller.complete.form({ title: 'not an ID' });
+    // @ts-expect-error direct submission retains the FormRequest contract
+    void Controller.store.mutate({});
+    /* oxlint-enable import/no-named-as-default-member */
     // @ts-expect-error hidden columns never appear in the generated schema
     rows[0]?.secret;
     // @ts-expect-error controller route selectors keep their types
@@ -37,7 +49,7 @@ function useContracts() {
     void save({ title: 'Hello', user_id: 'forged' });
     // @ts-expect-error required FormRequest fields remain required
     void save({});
-    return { date, title, saved };
+    return { date, title, saved, direct };
 }
 
 function immutableRows(rows: InferLiveQueryResult<typeof index.tasks>) {

@@ -7,6 +7,7 @@ import { selectionKey } from '../validation';
 import type { ReadSelection } from './data';
 import { StartingZero } from './provider';
 import type { AccessContract } from './access';
+import { installMutationNavigation } from './mutation-navigation';
 
 export interface PageBinding {
     query: string;
@@ -53,7 +54,11 @@ type Factories = Record<string, (args: never) => ReadSelection>;
 type NativeZero = Zero<Schema, undefined, ClientContext>;
 type NativeRequest = QueryRequest<string, ReadonlyJSONValue, ReadonlyJSONValue, Schema, unknown, ClientContext>;
 
-export function createNavigationLink(factories: Factories, navigation: readonly NavigationRoute[]) {
+export function createNavigationLink(
+    factories: Factories,
+    navigation: readonly NavigationRoute[],
+    currentPage: Parameters<typeof installMutationNavigation>[0] = () => undefined,
+) {
     const routes = navigation.map((route) => ({
         ...route,
         path: new RegExp(route.pattern),
@@ -272,50 +277,66 @@ export function createNavigationLink(factories: Factories, navigation: readonly 
             />
         );
     });
+    function namedDestination(name: string, parameters: Record<string, unknown>) {
+        const candidates = routes.filter((route) => route.name === name);
+        if (disposed || candidates.length !== 1 || typeof window === 'undefined') return undefined;
+        const route = candidates[0]!;
+        if (route.uri === undefined || route.domain === undefined) return undefined;
+        const values = { ...route.defaults, ...parameters };
+        function interpolate(template: string, separator: string) {
+            return template
+                .split(separator)
+                .flatMap((part) => {
+                    const optional = /^\{([^{}?]+)\?\}$/.exec(part);
+                    if (optional && values[optional[1]!] == null) return [];
+                    return [
+                        part.replace(/\{([^{}?]+)\??\}/g, (_, key: string) => {
+                            const value = values[key];
+                            if (typeof value !== 'string' && typeof value !== 'number')
+                                throw new Error('Missing revocation route parameter.');
+                            return encodeURIComponent(String(value));
+                        }),
+                    ];
+                })
+                .join(separator);
+        }
+        let url: URL;
+        try {
+            const host = route.domain === null ? window.location.host : interpolate(route.domain, '.');
+            url = new URL(`${route.protocol ?? window.location.protocol}//${host}/${interpolate(route.uri, '/')}`);
+            if (!route.path.test(url.pathname) || (route.hostname && !route.hostname.test(url.hostname)))
+                return undefined;
+        } catch {
+            return undefined;
+        }
+        return { route, url };
+    }
+    const uninstall = installMutationNavigation(currentPage, (name, parameters) => {
+        const next = namedDestination(name, parameters);
+        if (!next) return undefined;
+        return {
+            ...next,
+            bindings: next.route.component
+                ? destination({ href: next.url.href, component: next.route.component })
+                : undefined,
+        };
+    });
     return {
         Link,
         redirect(name: string, parameters: Record<string, unknown>): (() => void) | undefined {
-            const candidates = routes.filter((route) => route.name === name);
-            if (disposed || candidates.length !== 1 || typeof window === 'undefined') return undefined;
-            const route = candidates[0]!;
-            if (route.uri === undefined || route.domain === undefined) return undefined;
-            const values = { ...route.defaults, ...parameters };
-            function interpolate(template: string, separator: string) {
-                return template
-                    .split(separator)
-                    .flatMap((part) => {
-                        const optional = /^\{([^{}?]+)\?\}$/.exec(part);
-                        if (optional && values[optional[1]!] == null) return [];
-                        return [
-                            part.replace(/\{([^{}?]+)\??\}/g, (_, key: string) => {
-                                const value = values[key];
-                                if (typeof value !== 'string' && typeof value !== 'number')
-                                    throw new Error('Missing revocation route parameter.');
-                                return encodeURIComponent(String(value));
-                            }),
-                        ];
-                    })
-                    .join(separator);
-            }
-            let url: URL;
-            try {
-                const host = route.domain === null ? window.location.host : interpolate(route.domain, '.');
-                url = new URL(`${route.protocol ?? window.location.protocol}//${host}/${interpolate(route.uri, '/')}`);
-                if (!route.path.test(url.pathname) || (route.hostname && !route.hostname.test(url.hostname)))
-                    return undefined;
-            } catch {
-                return undefined;
-            }
+            const next = namedDestination(name, parameters);
+            if (!next) return undefined;
             // Even an Inertia HTTP visit can restore private remembered state
             // from its initial history snapshot. Start a fresh document instead,
             // without leaving an Inertia response that can outlive this page.
-            window.location.replace(url.href);
+            window.location.replace(next.url.href);
             // A document response can also arrive after an in-app departure.
             // Its committed page owner must stop that load before releasing it.
             return () => window.stop();
         },
         dispose: () => {
             disposed = true;
+            uninstall();
             for (const stop of stops) stop();
         },
     };

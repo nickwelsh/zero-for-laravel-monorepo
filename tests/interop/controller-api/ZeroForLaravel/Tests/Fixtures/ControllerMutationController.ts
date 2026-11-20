@@ -1,13 +1,13 @@
 // Generated Zero public API. Do not edit.
-import type {ControllerMutationAction} from '@nickwelsh/zero-for-laravel';
+import {controllerForm, type ControllerMutationAction} from '@nickwelsh/zero-for-laravel';
 import {inputSchema0, serverResultSchema0} from "../../../generated.mutations";
 import type {Input0, ServerResult0} from "../../../generated.mutations";
-const action0 = {action: "ZeroForLaravel\\Tests\\Fixtures\\ControllerMutationController@store", inputSchema: inputSchema0, serverResultSchema: serverResultSchema0} as const satisfies ControllerMutationAction<Input0, ServerResult0>;
+const action0 = controllerForm({action: "ZeroForLaravel\\Tests\\Fixtures\\ControllerMutationController@store", inputSchema: inputSchema0, serverResultSchema: serverResultSchema0} as const satisfies ControllerMutationAction<Input0, ServerResult0>, [] as const, {"title":{"kind":"string","required":true},"done":{"kind":"bool","required":true},"reference":{"kind":"string","required":true}});
 export {action0 as store};
 export type {Input0 as StoreInput, ServerResult0 as StoreResult} from "../../../generated.mutations";
 import {inputSchema1, serverResultSchema1} from "../../../generated.mutations";
 import type {Input1, ServerResult1} from "../../../generated.mutations";
-const action1 = {action: "ZeroForLaravel\\Tests\\Fixtures\\ControllerMutationController@complete", inputSchema: inputSchema1, serverResultSchema: serverResultSchema1} as const satisfies ControllerMutationAction<Input1, ServerResult1>;
+const action1 = controllerForm({action: "ZeroForLaravel\\Tests\\Fixtures\\ControllerMutationController@complete", inputSchema: inputSchema1, serverResultSchema: serverResultSchema1} as const satisfies ControllerMutationAction<Input1, ServerResult1>, [["task","id"]] as const, {"title":{"kind":"string","required":true},"done":{"kind":"bool","required":true},"reference":{"kind":"string","required":true}});
 export {action1 as complete};
 export type {Input1 as CompleteInput, ServerResult1 as CompleteResult} from "../../../generated.mutations";
 import {inputSchema2, serverResultSchema2} from "../../../generated.mutations";
@@ -40,3 +40,4 @@ import type {Input7, ServerResult7} from "../../../generated.mutations";
 const action7 = {action: "ZeroForLaravel\\Tests\\Fixtures\\ControllerMutationController@bulk", inputSchema: inputSchema7, serverResultSchema: serverResultSchema7} as const satisfies ControllerMutationAction<Input7, ServerResult7>;
 export {action7 as bulk};
 export type {Input7 as BulkInput, ServerResult7 as BulkResult} from "../../../generated.mutations";
+export default {store: action0, complete: action1, authoritative: action2, noResult: action3, explicit: action4, structured: action5, projected: action6, bulk: action7};

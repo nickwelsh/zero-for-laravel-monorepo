@@ -13,6 +13,8 @@ import type { AnyMutatorRegistry, Schema, Zero, ZeroOptions } from '@rocicorp/ze
 import type { ClientContext, ContextContract } from '../contract';
 import { validateContext } from '../validation';
 import { ControllerMutations } from './controller-mutation';
+import { mountFormSession } from './form-action';
+import type { ControllerMutationBinding } from '../controller-mutation';
 
 export type ProviderOptions<C extends ClientContext = ClientContext> = Omit<
     ZeroOptions<Schema, undefined, C>,
@@ -41,7 +43,15 @@ export function createZeroProvider<C extends ClientContext = ClientContext>(
         const zero = useContext(ZeroContext) as Zero<Schema, undefined, C>;
         useLayoutEffect(() => {
             clients.add(zero);
+            const release = mountFormSession({
+                actions: controllers.actions,
+                invoke(name, input, route) {
+                    const action = controllers.actions[name] as ControllerMutationBinding<unknown, unknown, Schema, C>;
+                    return zero.mutate(action.prepare(input, route, controllers.preparation));
+                },
+            });
             return () => {
+                release();
                 clients.delete(zero);
             };
         }, [zero]);

@@ -8,6 +8,7 @@ export type {
     InferLiveQueryOptions,
 } from './live-query';
 export { createControllerMutations, runControllerMutation } from './controller-mutation';
+export { controllerForm } from './react/form-action';
 export type {
     ControllerMutationContract,
     ControllerMutationOptions,

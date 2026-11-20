@@ -204,6 +204,8 @@ $fixture = new class('export') extends TestCase
         $programs = array_map(fn (string $method): MutationProgram => $compiler->compile(ControllerMutationController::class, $method), ['store', 'complete', 'authoritative', 'noResult', 'explicit', 'structured', 'projected', 'bulk']);
 
         if ($mode === 'public') {
+            Illuminate\Support\Facades\Route::post('tasks', [ControllerMutationController::class, 'store']);
+            Illuminate\Support\Facades\Route::patch('tasks/{task}', [ControllerMutationController::class, 'complete']);
             $queryCompiler = new ControllerQueryCompiler((new ParserFactory)->createForNewestSupportedVersion(), new ModelRegistry($this->models()));
             $queries = [...$queryCompiler->compile(QueryController::class, 'index'), ...$queryCompiler->compile(QueryController::class, 'show'), ...$queryCompiler->compile(QueryController::class, 'dated'), ...$queryCompiler->compile(QueryController::class, 'choices')];
             foreach (['search', 'dated', 'window', 'pages', 'detail'] as $method) {
