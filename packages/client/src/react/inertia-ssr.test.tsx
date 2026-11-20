@@ -8,9 +8,36 @@ import { schema, definitions } from '../../../../tests/interop/generated';
 import { createControllerMutationBindings } from '../controller-mutation.fixture';
 import { liveQuery } from '../live-query';
 import { createInertiaAdapter, useLiveProps } from './inertia';
-import { createZeroProvider } from './provider';
+import { StartingZero, createZeroProvider } from './provider';
 import { useControllerMutation } from './controller-mutation';
 import type { Data } from './data';
+
+it('does not render ordinary guarded props while Zero is initializing on the server', () => {
+    const adapter = createInertiaAdapter({});
+    const page = {
+        component: 'tasks',
+        props: {
+            heading: 'Private heading',
+            __zero: {
+                version: 1,
+                mode: 'replace',
+                bindings: { tasks: { query: 'tasks', args: {}, access: { status: 404, scope: 'page' } } },
+            },
+        },
+    };
+    const Wrapped = adapter.wrap(({ heading }: { heading: string }) => <h1>{heading}</h1>, page);
+    try {
+        const html = renderToString(
+            <StartingZero.Provider value>
+                <Wrapped {...page.props} />
+            </StartingZero.Provider>,
+        );
+        expect(html).toContain('Checking access');
+        expect(html).not.toContain('Private heading');
+    } finally {
+        adapter.dispose();
+    }
+});
 
 it('renders stable live-prop shells and hydrates before exposing native cached rows', async () => {
     const mutations = createControllerMutationBindings(schema, definitions, {

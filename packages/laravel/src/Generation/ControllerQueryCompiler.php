@@ -51,7 +51,7 @@ final class ControllerQueryCompiler
 
     private bool $pageShell = false;
 
-    /** @var list<array{parameter: string, class: class-string<Model>, ability: string, fingerprint: string}> */
+    /** @var list<array{parameter: ?string, class: class-string<Model>, ability: string, fingerprint: string}> */
     private array $guards = [];
 
     /** @var list<string> */
@@ -73,6 +73,8 @@ final class ControllerQueryCompiler
         $this->action = $request.'::fields';
         $this->prop = $field;
         $this->callbackId = 0;
+        $this->guards = [];
+        $this->pageShell = false;
         $nodes = (new NodeTraverser(new NameResolver))->traverse($this->parser->parse(file_get_contents($this->file) ?: '') ?? []);
         $node = (new NodeFinder)->findFirst($nodes, fn (Node $candidate): bool => $candidate instanceof Stmt\ClassMethod && $candidate->name->name === 'fields' && $candidate->getEndLine() === $reflection->getEndLine());
         if (! $node instanceof Stmt\ClassMethod) {
@@ -304,7 +306,7 @@ final class ControllerQueryCompiler
         }
 
         $this->pageShell = $items === [];
-        $variables = $this->statements($statements, $variables);
+        $variables = $this->statements($statements, $variables, pageAction: ! $standalone);
         $models = $this->models->all();
         ksort($models);
         $schemaFingerprint = hash('sha256', json_encode([
@@ -404,6 +406,11 @@ final class ControllerQueryCompiler
 
     private function coverage(QueryExpression $expression, bool $inherited = false): void
     {
+        $classGuarded = $this->guards !== [] && $this->guards[0]['parameter'] === null;
+        if ($classGuarded && $expression->type === 'query' && ! $expression->model?->policyVisibility) {
+            throw new LogicException('Class-guarded live paths require a portable permission resource.');
+        }
+
         if ($expression->kind === 'conditional') {
             $this->coverage($expression->children[1], $inherited);
             $this->coverage($expression->children[2], $inherited);
@@ -418,12 +425,20 @@ final class ControllerQueryCompiler
                 $this->coverage($child->kind === 'callback' ? $child->children[0] : $child, $group && $covered);
             }
 
-            if ($node->kind === 'method' && in_array($node->value, ['with', 'whereHas', 'whereDoesntHave', 'whereExists', 'exists'], true)
-                && (! isset($node->children[2]) || $node->children[2]->kind !== 'callback')) {
+            if ($node->kind === 'method' && in_array($node->value, ['with', 'whereHas', 'whereDoesntHave', 'whereExists', 'exists'], true)) {
                 $name = $node->children[1]->value;
                 if ($node->model !== null && is_string($name)) {
-                    $target = $this->models->get($this->models->relation($node->model, $name)['model']);
-                    if ($target->policyVisibility && ! $this->automaticVisibility(new QueryExpression('query', model: $target, type: 'query'))) {
+                    $relation = $this->models->relation($node->model, $name);
+                    if ($classGuarded && count($relation['path']) !== 1) {
+                        throw new LogicException('Class-guarded live paths cannot maintain authorization on intermediate tables.');
+                    }
+
+                    $target = $this->models->get($relation['model']);
+                    if ($classGuarded && ! $target->policyVisibility) {
+                        throw new LogicException('Class-guarded live paths require a portable permission resource.');
+                    }
+
+                    if ((! isset($node->children[2]) || $node->children[2]->kind !== 'callback') && $target->policyVisibility && ! $this->automaticVisibility(new QueryExpression('query', model: $target, type: 'query'))) {
                         throw new LogicException('Protected related paths require an explicit visibleTo refinement.');
                     }
                 }
@@ -507,7 +522,7 @@ final class ControllerQueryCompiler
      * @param  array<string, QueryExpression>  $variables
      * @return array<string, QueryExpression>
      */
-    private function statements(array $statements, array $variables, bool $conditional = false): array
+    private function statements(array $statements, array $variables, bool $conditional = false, bool $pageAction = false): array
     {
         foreach ($statements as $statement) {
             if ($statement instanceof Stmt\Expression && $statement->expr instanceof Expr\MethodCall && ControllerAuthorization::matches($statement->expr)) {
@@ -522,14 +537,25 @@ final class ControllerQueryCompiler
                 ControllerAuthorization::arguments($statement->expr);
                 $args = $statement->expr->getArgs();
                 $resource = $args[1]->value;
+                if (! $this->pageShell && $this->guards !== [] && ($this->guards[0]['parameter'] === null || $resource instanceof Expr\ClassConstFetch)) {
+                    $this->unsupported($statement, 'A live page class guard cannot be combined with other controller guards.');
+                }
+
                 if (! $conditional && $resource instanceof Expr\ClassConstFetch && $resource->class instanceof Name
                     && $resource->name instanceof Identifier && $resource->name->name === 'class'
                     && is_subclass_of($resource->class->toString(), Model::class)) {
-                    if (! $this->pageShell) {
-                        $this->unsupported($statement, 'Class authorization is supported on page shells; live props require captured instance authorization.');
+                    if (! $pageAction || ! $args[0]->value instanceof Scalar\String_) {
+                        $this->unsupported($statement, 'Class authorization requires an unconditional live Inertia page action.');
                     }
 
-                    // There is no query registration to replay; the HTTP shell executes this guard.
+                    if (! $this->pageShell) {
+                        $class = $resource->class->toString();
+                        $ability = $args[0]->value->value;
+                        $plan = (new PolicyCompiler)->compileClass($class, $ability);
+                        $plan->binding->classDomainField();
+                        $this->guards[] = ['parameter' => null, 'class' => $class, 'ability' => $ability, 'fingerprint' => $plan->fingerprint];
+                    }
+
                     continue;
                 }
 

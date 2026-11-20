@@ -21,7 +21,10 @@ use ZeroForLaravel\Generation\ControllerQueryCompiler;
 use ZeroForLaravel\Generation\Mutations\ValueContract;
 use ZeroForLaravel\Http\ControllerRouteDispatcher;
 use ZeroForLaravel\Metadata\ModelRegistry;
+use ZeroForLaravel\Permissions\ActorScope;
 use ZeroForLaravel\Permissions\Binding;
+use ZeroForLaravel\Permissions\ClassPermission;
+use ZeroForLaravel\Permissions\PolicyCompiler;
 use ZeroForLaravel\ResolvedContext;
 use ZeroForLaravel\Support\Input;
 
@@ -32,7 +35,7 @@ final readonly class RegisteredQuery
      * @param  array<string, string>  $parameters
      * @param  Closure(array<string, mixed>): ZeroQuery  $factory
      * @param  array<string,ValueContract>  $inputContracts
-     * @param  list<array{parameter: string, class: class-string<Model>, ability: string, fingerprint: string}>  $guards
+     * @param  list<array{parameter: ?string, class: class-string<Model>, ability: string, fingerprint: string}>  $guards
      */
     public function __construct(
         public string $action,
@@ -66,6 +69,10 @@ final readonly class RegisteredQuery
     /** @return array<string, mixed> */
     public function compile(mixed $arguments, ResolvedContext $context, QueryCompiler $compiler): array
     {
+        if ($this->guards !== []) {
+            return $this->invoke($arguments, $context, $compiler);
+        }
+
         return $compiler->compileDeclaration($this->declaration($arguments), $context);
     }
 
@@ -116,6 +123,25 @@ final readonly class RegisteredQuery
             return $this->invokeStandalone($arguments, $identity, $compiler);
         }
 
+        if ($this->guards !== [] && $this->guards[0]['parameter'] === null) {
+            $request = resolve(Request::class);
+
+            return ActorScope::run($request, ActorScope::fresh($request), function () use ($request, $identity, $arguments, $compiler): array {
+                $context = ContextDefinition::configured()->resolve($request);
+                if ($context->userId() !== $identity->userId() || $identity->values !== [] && $context->values !== $identity->values) {
+                    throw new AuthorizationException('Class guard requires the authenticated Zero context.');
+                }
+
+                return $this->invokeRoute($arguments, $context, $compiler);
+            });
+        }
+
+        return $this->invokeRoute($arguments, $identity, $compiler);
+    }
+
+    /** @return array<string, mixed> */
+    private function invokeRoute(mixed $arguments, ResolvedContext $identity, QueryCompiler $compiler): array
+    {
         $wire = Input::object($arguments, 'args');
         $args = $wire;
         unset($args['__route'], $args['__routeArgs'], $args['__window'], $args['__cursor'], $args['__generation']);
@@ -155,6 +181,21 @@ final readonly class RegisteredQuery
             $this->assertCurrent();
             $guards = [];
             foreach ($this->guards as $guard) {
+                if ($guard['parameter'] === null) {
+                    $actor = $request->user();
+                    $subject = config()->string('permissions.subject.class');
+                    if ($actor === null || ! $actor instanceof $subject || $context->values !== $identity->values) {
+                        throw new AuthorizationException('Class guard requires the authenticated Zero context.');
+                    }
+
+                    $plan = (new PolicyCompiler)->compileClass($guard['class'], $guard['ability']);
+                    $domain = $plan->binding->classDomain($actor, $context);
+                    Gate::forUser($actor)->authorize($guard['ability'], $guard['class']);
+                    $guards[] = new ClassPermission($plan, Binding::id($context->userId()), $domain);
+
+                    continue;
+                }
+
                 $resource = $route->parameter($guard['parameter']);
                 if (! $resource instanceof Model || ! $resource instanceof $guard['class']) {
                     throw new LogicException('Captured Gate resource differs from the bound route model.');

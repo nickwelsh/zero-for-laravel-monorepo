@@ -39,6 +39,7 @@ use ZeroForLaravel\Tests\Fixtures\OwnerUser;
 use ZeroForLaravel\Tests\Fixtures\Task;
 use ZeroForLaravel\Tests\Fixtures\TaskList;
 use ZeroForLaravel\Tests\Fixtures\TasksTable;
+use ZeroForLaravel\Tests\Fixtures\VisibleTask;
 use ZeroForLaravel\Tests\OwnerTestCase as TestCase;
 
 uses(TestCase::class);
@@ -77,6 +78,27 @@ test('query and mutation authorization reject overridden trait methods and argum
     foreach (['dynamicMutation', 'namedMutation'] as $method) {
         expect(fn () => $mutations->compile(LaravelAuthorizationController::class, $method))->toThrow(LogicException::class);
     }
+});
+
+test('a live class guard fingerprints the class policy and requires maintainable page paths and a trusted domain', function (): void {
+    Route::get('/class-index', [LaravelAuthorizationController::class, 'classIndex'])->name('tasks.index');
+    Route::get('/class-shell', [LaravelAuthorizationController::class, 'shell'])->name('tasks.shell');
+    Gate::policy(Task::class, LaravelRevocationPolicy::class);
+    $compiler = resolve(ControllerQueryCompiler::class);
+    expect(fn () => $compiler->compile(LaravelAuthorizationController::class, 'classIndex'))->toThrow(LogicException::class, 'domain.context');
+    config(['permissions.resources.'.Task::class.'.domain.context' => 'user_id']);
+    $queries = $compiler->compile(LaravelAuthorizationController::class, 'classIndex');
+    $guard = $queries[0]->guards[0];
+    expect($guard['parameter'])->toBeNull()
+        ->and($guard['fingerprint'])->toBe((new \ZeroForLaravel\Permissions\PolicyCompiler)->compileClass(Task::class, 'viewAny')->fingerprint)
+        ->and((new NavigationGenerator)->typescript($queries))->toContain('"scope":"page","revoked":{"route":"tasks.shell"}');
+    expect(fn () => $compiler->compile(LaravelAuthorizationController::class, 'conditionalClassIndex'))->toThrow(LogicException::class, 'unconditional')
+        ->and(fn () => $compiler->compile(LaravelAuthorizationController::class, 'classPivotIndex'))->toThrow(LogicException::class, 'intermediate tables')
+        ->and(fn () => $compiler->compile(LaravelAuthorizationController::class, 'classStandalone'))->toThrow(LogicException::class, 'Inertia page action');
+
+    // Public roots have no maintained permission projection to anchor a class guard.
+    app()->instance(ModelRegistry::class, new ModelRegistry([VisibleTask::class]));
+    expect(fn () => resolve(ControllerQueryCompiler::class)->compile(LaravelAuthorizationController::class, 'classPublicIndex'))->toThrow(LogicException::class, 'portable permission resource');
 });
 
 test('generated navigation discovers literal page shells but does not speculate required ordinary props', function (): void {

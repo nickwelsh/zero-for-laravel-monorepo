@@ -12,6 +12,13 @@ use ZeroForLaravel\Permissions\Revocation;
 
 class LaravelRevocationPolicy
 {
+    public function viewAny(Authenticatable $user): Response
+    {
+        return Casbin::inspect($user, 'viewAny', Task::class)->asNotFound()->onRevoked(
+            Revocation::redirectToRoute('tasks.shell')
+        );
+    }
+
     public function view(Authenticatable $user, Model $resource): Response
     {
         return Casbin::inspect($user, 'view', $resource)->asNotFound()->onRevoked(

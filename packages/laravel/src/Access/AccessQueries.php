@@ -18,12 +18,8 @@ use Throwable;
 use ZeroForLaravel\Context\ContextDefinition;
 use ZeroForLaravel\Permissions\ActorScope;
 use ZeroForLaravel\Permissions\Binding;
-use ZeroForLaravel\Permissions\EloquentVisibility;
 use ZeroForLaravel\Permissions\PermissionChecks;
-use ZeroForLaravel\Permissions\PolicyCompiler;
 use ZeroForLaravel\Permissions\ProjectionManager;
-use ZeroForLaravel\Permissions\VisibleToCurrentUser;
-use ZeroForLaravel\Permissions\ZeroVisibility;
 use ZeroForLaravel\Query\QueryCompiler;
 use ZeroForLaravel\Query\QueryInput;
 use ZeroForLaravel\Query\RegisteredQueries;
@@ -89,7 +85,7 @@ final readonly class AccessQueries
 
             $registered = resolve(RegisteredQueries::class)->all()[$query] ?? null;
             if (! $registered instanceof RegisteredQuery || $registered->guards === []) {
-                Input::fail('query', 'An application-registered query with captured instance Gates is required.');
+                Input::fail('query', 'An application-registered query with captured Gates is required.');
             }
 
             $args = Input::object($binding['args'] ?? null, 'args');
@@ -103,7 +99,7 @@ final readonly class AccessQueries
         }
 
         $conditions = [];
-        $this->projections->connection()->transaction(function () use ($checks, $owner, $generation, $identity, $context, $limit, &$conditions): void {
+        $this->projections->connection()->transaction(function () use ($checks, $owner, $generation, $context, $limit, &$conditions): void {
             $this->projections->lock();
             $db = $this->projections->connection();
             $expired = $db->table('permission_access_checks')->where('expires_at', '<=', now())->limit(128)->pluck('id')->all();
@@ -145,8 +141,7 @@ final readonly class AccessQueries
                     if (isset($check['permission'])) {
                         $this->checkPermission($check['permission'], $context, $conditions[$check['id']]);
                     } else {
-                        $conditions[$check['id']] = $this->dependencies($check['query'], $check['args'], Binding::id($identity->userId()));
-                        $this->invoke(resolve(Request::class), $check['query'], $check['args'], $identity);
+                        $this->invoke(resolve(Request::class), $check['query'], $check['args'], $context, $conditions[$check['id']]);
                     }
                 } catch (AuthorizationException $error) {
                     $state = 'denied';
@@ -197,7 +192,7 @@ final readonly class AccessQueries
     private function checkPermission(array $permission, ResolvedContext $identity, array &$dependencies): void
     {
         $request = resolve(Request::class);
-        $actor = $this->freshActor($request);
+        $actor = ActorScope::fresh($request);
         ActorScope::run($request, $actor, function () use ($permission, $identity, &$dependencies, $request, $actor): void {
             $context = ContextDefinition::configured()->resolve($request);
             if ($context->values !== $identity->values || $context->userId() !== $identity->userId()) {
@@ -214,40 +209,19 @@ final readonly class AccessQueries
      * @param  array<string, mixed>  $args
      * @return array<string, mixed>
      */
-    private function dependencies(RegisteredQuery $query, array $args, string $subjectId): array
+    private function dependencies(RegisteredQuery $query, array $args, ResolvedContext $context, Authenticatable $actor): array
     {
         $query->assertCurrent();
-        $db = $this->projections->connection();
-        $subject = config()->string('permissions.subject.prefix').$subjectId;
-        $conditions = [$this->exists('permission_subjects', 'global_key', 'global_key', $this->equal('id', $subject),
-            $db->table('permission_subjects')->where('id', $subject)->exists() ? 'EXISTS' : 'NOT EXISTS')];
-        $zero = new ZeroVisibility;
+        $conditions = [];
         foreach ($query->guards as $guard) {
-            QueryInput::validate($query->parameters[$guard['parameter']], $args[$guard['parameter']] ?? null, $guard['parameter']);
-            $id = Binding::id($args[$guard['parameter']]);
-            $class = $guard['class'];
-            $resource = new $class;
-            $abilities = [$guard['ability']];
-            if ($resource->hasGlobalScope(VisibleToCurrentUser::class)) {
-                $abilities[] = 'view';
+            $permission = ['class' => $guard['class'], 'ability' => $guard['ability']];
+            if ($guard['parameter'] !== null) {
+                QueryInput::validate($query->parameters[$guard['parameter']], $args[$guard['parameter']] ?? null, $guard['parameter']);
+                $permission['id'] = Binding::id($args[$guard['parameter']]);
             }
 
-            foreach (array_unique($abilities) as $ability) {
-                $plan = (new PolicyCompiler)->compile($guard['class'], $ability);
-                $conditions[] = $zero->guard($plan, $subjectId, $id,
-                    (new EloquentVisibility)->query($plan, $subjectId)->where('object_id', $id)->exists())->toArray();
-                $conditions[] = $this->exists($plan->binding->projectionTable(), 'global_key', 'global_key', $this->equal('object_id', $id),
-                    $db->table($plan->binding->projectionTable())->where('object_id', $id)->exists() ? 'EXISTS' : 'NOT EXISTS');
-            }
+            $conditions[] = resolve(PermissionChecks::class)->dependencies($permission, $context, $actor);
         }
-
-        // Deployment/readiness changes fail closed; ordinary rule revisions do not.
-        $fingerprint = $db->table('permission_installation')->value('fingerprint');
-        if (! is_string($fingerprint)) {
-            throw new LogicException('Permission installation is missing.');
-        }
-
-        $conditions[] = $this->exists('permission_installation', 'global_key', 'global_key', $this->equal('fingerprint', $fingerprint));
 
         return ['type' => 'and', 'conditions' => $conditions];
     }
@@ -269,38 +243,19 @@ final readonly class AccessQueries
         ], JSON_THROW_ON_ERROR));
     }
 
-    private function freshActor(Request $request): Model&Authenticatable
+    /** @param array<string, mixed> $args
+     * @param  array<string, mixed>  $dependencies
+     */
+    private function invoke(Request $request, RegisteredQuery $query, array $args, ResolvedContext $identity, array &$dependencies): void
     {
-        $class = config()->string('permissions.subject.class');
-        if (! is_subclass_of($class, Model::class) || ! is_subclass_of($class, Authenticatable::class)) {
-            throw new LogicException('Access checks require an authenticatable permission subject model.');
-        }
-
-        $user = $request->user();
-        if (! $user instanceof $class) {
-            throw new AuthenticationException;
-        }
-
-        $subject = new $class;
-        $this->projections->assertConnection($subject);
-        $actor = $subject->newQuery()->whereKey($user->getAuthIdentifier())->first();
-        if (! $actor instanceof Model || ! $actor instanceof Authenticatable) {
-            throw new AuthenticationException;
-        }
-
-        return $actor;
-    }
-
-    /** @param array<string, mixed> $args */
-    private function invoke(Request $request, RegisteredQuery $query, array $args, ResolvedContext $identity): void
-    {
-        $actor = $this->freshActor($request);
-        ActorScope::run($request, $actor, function () use ($request, $query, $args, $actor, $identity): void {
+        $actor = ActorScope::fresh($request);
+        ActorScope::run($request, $actor, function () use ($request, $query, $args, $actor, $identity, &$dependencies): void {
             $context = ContextDefinition::configured()->resolve($request);
-            if ($context->userId() !== $identity->userId() || $identity->userId() !== Binding::id($actor->getAuthIdentifier())) {
+            if ($context->values !== $identity->values || $context->userId() !== $identity->userId() || $identity->userId() !== Binding::id($actor->getAuthIdentifier())) {
                 throw new LogicException('Access checks require the authenticated permission subject identity.');
             }
 
+            $dependencies = $this->dependencies($query, $args, $context, $actor);
             $query->invoke($args, $context, resolve(QueryCompiler::class));
         });
     }

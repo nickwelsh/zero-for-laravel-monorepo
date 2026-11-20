@@ -22,6 +22,8 @@ type Binding = PageBinding;
 interface Metadata {
     version: 1;
     mode: 'replace' | 'patch';
+    awaitingMutation?: true;
+    pageProps?: Record<string, unknown>;
     bindings: Record<string, Binding | null>;
 }
 interface TransportPage {
@@ -61,6 +63,7 @@ function metadata(input: unknown): Metadata {
             if (typeof binding.query !== 'string') throw new Error('Invalid live query binding.');
             const access = binding.access === undefined ? undefined : object(binding.access, 'access');
             if (access && access.status !== 403 && access.status !== 404) throw new Error('Invalid access contract.');
+            if (access?.scope !== undefined && access.scope !== 'page') throw new Error('Invalid access scope.');
             const revoked = access?.revoked === undefined ? undefined : object(access.revoked, 'revoked');
             if (
                 revoked &&
@@ -86,6 +89,7 @@ function metadata(input: unknown): Metadata {
                     ? {
                           access: {
                               status: access.status as 403 | 404,
+                              ...(access.scope === 'page' ? { scope: 'page' as const } : {}),
                               ...(revoked
                                   ? {
                                         revoked: {
@@ -105,7 +109,17 @@ function metadata(input: unknown): Metadata {
             };
         }
     }
-    return { version: 1, mode: source.mode, bindings };
+    const pageProps = source.pageProps === undefined ? undefined : object(source.pageProps, '__zero.pageProps');
+    if (pageProps && !Object.values(bindings).some((binding) => binding?.access?.scope === 'page')) {
+        throw new Error('Protected ordinary props require a class guard.');
+    }
+    return {
+        version: 1,
+        mode: source.mode,
+        bindings,
+        ...(pageProps ? { pageProps } : {}),
+        ...(source.awaitingMutation === true ? { awaitingMutation: true } : {}),
+    };
 }
 
 /** Clear page-owned live bindings when making a client-side visit to a page shell. */
@@ -119,7 +133,7 @@ export function withoutLiveProps<P extends Record<string, unknown>>(props: P) {
     > & { __zero: { version: 1; mode: 'replace'; bindings: Record<string, never> } };
 }
 
-function normalizePage(page: TransportPage, previous?: TransportPage): void {
+function normalizePage(page: TransportPage, previous?: TransportPage): Metadata {
     const incoming = metadata(page.props['__zero']);
     if (incoming.mode === 'patch' && (!previous || previous.component !== page.component)) {
         throw new Error('A partial Zero response requires the current page contract.');
@@ -127,6 +141,7 @@ function normalizePage(page: TransportPage, previous?: TransportPage): void {
     // Initial resolution and client visits can share props with the mounted
     // page. Preparing another transport page must not mutate that snapshot.
     const props = { ...page.props };
+    for (const key of Object.keys(incoming.pageProps ?? {})) delete props[key];
     const bindings: Metadata['bindings'] = Object.assign(
         Object.create(null),
         incoming.mode === 'patch' ? metadata(previous?.props['__zero']).bindings : {},
@@ -142,17 +157,21 @@ function normalizePage(page: TransportPage, previous?: TransportPage): void {
         }
     }
     // History stores a complete serializable contract, never a patch or live rows.
-    props['__zero'] = { version: 1, mode: 'replace', bindings };
+    const snapshot: Metadata = { ...incoming, mode: 'replace', bindings };
+    props['__zero'] = snapshot;
     page.props = props;
+    return snapshot;
 }
 
 function Subscription({
     selection,
     access,
+    pageGuard,
     children,
 }: {
     selection: ReadSelection;
     access?: AccessOptions | undefined;
+    pageGuard: boolean;
     children: (data: Data<unknown>) => ReactNode;
 }) {
     const data = useData(selection);
@@ -165,7 +184,7 @@ function Subscription({
                     </div>
                 )
             );
-        if (!data.complete || data.error || (selection.one && data.data === undefined))
+        if (!data.complete || data.error || (!pageGuard && selection.one && data.data === undefined))
             return access.onPending?.() ?? <output data-zero-access="unknown">Checking access…</output>;
     }
     return children(data);
@@ -241,7 +260,11 @@ function InputSubscription({
     // oxlint-disable-next-line react/refs -- Only input event handlers access the ref; rendering reads immutable values.
     if (starting) return children({ ...loading(selection), inputs });
     const subscription = (
-        <Subscription selection={selection} access={binding.access ? access : undefined}>
+        <Subscription
+            selection={selection}
+            access={binding.access ? access : undefined}
+            pageGuard={binding.access?.scope === 'page'}
+        >
             {(data) => children({ ...data, inputs })}
         </Subscription>
     );
@@ -291,14 +314,22 @@ export function createInertiaAdapter(factories: BindingFactories, options: Inert
     let cancelRedirect: (() => void) | undefined;
     const wrappers = new WeakMap<object, unknown>();
     const pages = new WeakMap<object, TransportPage>();
+    const guardedPages = new Set(
+        options.navigation
+            ?.filter((route) => Object.values(route.bindings).some((binding) => binding.access?.scope === 'page'))
+            .map((route) => route.component),
+    );
     function cancelNavigation() {
         const cancel = cancelRedirect;
         cancelRedirect = undefined;
         cancel?.();
     }
     function prepare(page: TransportPage) {
-        normalizePage(page, current);
-        pages.set(object(page.props['__zero'], '__zero'), page);
+        const snapshot = normalizePage(page, current);
+        if (Object.values(snapshot.bindings).some((binding) => binding?.access?.scope === 'page')) {
+            guardedPages.add(page.component);
+        }
+        pages.set(snapshot, page);
     }
     function observePage({ detail: { page } }: { detail: { page: TransportPage } }) {
         const snapshot = page.props['__zero'];
@@ -360,6 +391,16 @@ export function createInertiaAdapter(factories: BindingFactories, options: Inert
                 const entries = Object.entries(contract.bindings).filter(
                     (entry): entry is [string, Binding] => entry[1] !== null,
                 );
+                if (
+                    contract.awaitingMutation ||
+                    // An unresolved instant visit can arrive with only shared
+                    // props. An absent contract is not a class approval.
+                    (guardedPages.has((pages.get(snapshot) ?? page)?.component ?? null) &&
+                        !entries.some(([, binding]) => binding.access?.scope === 'page')) ||
+                    entries.some(([, binding]) => binding.access && (starting || binding.pending))
+                ) {
+                    return <output data-zero-access="unknown">Checking access…</output>;
+                }
                 function accessOptions(binding: Binding): AccessOptions {
                     return {
                         ...options.access,
@@ -475,7 +516,7 @@ export function createInertiaAdapter(factories: BindingFactories, options: Inert
                         </InputSubscription>
                     );
                 }
-                return render(0, ordinary);
+                return render(0, { ...ordinary, ...contract.pageProps });
             }
             // Preserve Inertia persistent layouts and component statics.
             Object.assign(Wrapped, Component);

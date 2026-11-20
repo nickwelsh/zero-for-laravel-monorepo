@@ -10,6 +10,7 @@ use LogicException;
 use ZeroForLaravel\Context\ContextReference;
 use ZeroForLaravel\Metadata\ModelMetadata;
 use ZeroForLaravel\Metadata\ModelRegistry;
+use ZeroForLaravel\Permissions\ClassPermission;
 use ZeroForLaravel\Permissions\ProjectionManager;
 use ZeroForLaravel\Permissions\ZeroVisibility;
 use ZeroForLaravel\ResolvedContext;
@@ -23,11 +24,11 @@ use ZeroForLaravel\Support\Input;
  */
 final readonly class QueryCompiler
 {
-    /** @param list<array{class: class-string<Model>, id: string, ability: string}> $guards */
+    /** @param list<ClassPermission|array{class: class-string<Model>, id: string, ability: string}> $guards */
     public function __construct(private ModelRegistry $registry, private array $guards = [], private bool $serving = false) {}
 
     /** Compile an application-owned declaration, never an AST supplied over HTTP.
-     * @param  list<array{class: class-string<Model>, id: string, ability: string}>  $guards
+     * @param  list<ClassPermission|array{class: class-string<Model>, id: string, ability: string}>  $guards
      * @return array<string, mixed>
      */
     public function compileDeclaration(ZeroQuery $query, ResolvedContext $context, array $guards = [], bool $serving = false): array
@@ -90,6 +91,10 @@ final readonly class QueryCompiler
 
         if (! is_string($ast['table']) || ! isset($this->registry->pivots()[$ast['table']])) {
             throw new LogicException('Query references a table outside the registered model schema.');
+        }
+
+        if (($this->guards[0] ?? null) instanceof ClassPermission) {
+            throw new LogicException('Class-guarded live paths cannot maintain authorization on intermediate tables.');
         }
 
         return $ast;

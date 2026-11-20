@@ -223,6 +223,92 @@ it.each([403, 404] as const)(
 
 const protectedBinding = { query: 'tasks', args: { title: '' }, access: { status: 403 as const } };
 
+it('keeps watching the current class approval until renewal completes, and hides a loss during handoff', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date', 'performance'] });
+    const binding = { ...protectedBinding, access: { ...protectedBinding.access, scope: 'page' as const } };
+    render(
+        <AccessBoundary binding={binding} prop="tasks" options={{}}>
+            <BusinessIdentity />
+        </AccessBoundary>,
+    );
+    await ready();
+    await answer();
+    const identity = screen.getByText(/^Private/).textContent;
+    await act(() => vi.advanceTimersByTime(15_000));
+    expect(checks()[0]!.destroy).not.toHaveBeenCalled();
+    await answer();
+    expect(screen.getByText(/^Private/).textContent).toBe(identity);
+    expect(checks()[0]!.destroy).toHaveBeenCalledOnce();
+    await act(() => vi.advanceTimersByTime(15_000));
+    act(() => checks()[1]!.send([]));
+    expect(screen.queryByText(/^Private/)).toBeNull();
+    await answer('allowed', undefined, checks()[2]); // Detached pending renewal cannot bring the page back.
+    expect(screen.queryByText(/^Private/)).toBeNull();
+});
+
+it.each(['pending', 'awaitingMutation', 'missing instant metadata'] as const)(
+    'does not subscribe or expose ordinary props for a %s guarded entry',
+    async (state) => {
+        const factory = vi.fn(() => index.tasks.live({ title: '' }));
+        const adapter = createInertiaAdapter(
+            { tasks: factory },
+            {
+                navigation: [
+                    {
+                        component: 'tasks',
+                        route: 'index',
+                        pattern: '^/tasks$',
+                        protocol: null,
+                        host: null,
+                        defaults: {},
+                        bindings: {
+                            tasks: {
+                                query: 'tasks',
+                                one: false,
+                                parameters: {},
+                                access: { status: 403, scope: 'page' },
+                            },
+                        },
+                    },
+                ],
+            },
+        );
+        const page = {
+            component: 'tasks',
+            props: {
+                heading: 'Private heading',
+                __zero: {
+                    version: 1,
+                    mode: 'replace',
+                    awaitingMutation: state === 'awaitingMutation',
+                    bindings:
+                        state === 'missing instant metadata'
+                            ? {}
+                            : {
+                                  tasks: {
+                                      ...protectedBinding,
+                                      access: { status: 403, scope: 'page' },
+                                      pending: state === 'pending',
+                                  },
+                              },
+                },
+            },
+        };
+        const Wrapped = adapter.wrap(({ heading }: { heading: string }) => <p>{heading}</p>, page);
+        try {
+            render(<Wrapped {...page.props} />);
+            await ready();
+            expect(screen.queryByText('Private heading')).toBeNull();
+            expect(screen.getByText('Checking access…')).toBeTruthy();
+            expect(factory).not.toHaveBeenCalled();
+            expect(checks()).toHaveLength(0);
+            expect(native.requests).toHaveLength(0);
+        } finally {
+            adapter.dispose();
+        }
+    },
+);
+
 it('checks class and instance permissions through isolated status rows and keeps null idle', async () => {
     const hook = renderHook<boolean | undefined, { id?: string | null }>(
         ({ id }) => usePermission('Task', 'create', id),

@@ -14,12 +14,18 @@ final class ZeroVisibility
 {
     private int $alias = 0;
 
-    /** @param list<array{class: class-string<Model>, id: string, ability: string}> $guards */
+    /** @param list<ClassPermission|array{class: class-string<Model>, id: string, ability: string}> $guards */
     public function condition(ModelMetadata $model, string $subjectId, string $ability = 'view', array $guards = []): Condition
     {
         $plan = (new PolicyCompiler)->compile($model->class, $ability);
         $conditions = [$this->decision($plan, $subjectId)];
         foreach ($guards as $guard) {
+            if ($guard instanceof ClassPermission) {
+                $conditions[] = $guard->condition(true);
+
+                continue;
+            }
+
             $guardPlan = (new PolicyCompiler)->compile($guard['class'], $guard['ability']);
             $conditions[] = $this->exists($guardPlan->binding->projectionTable(), ['global_key' => 'global_key'], new Condition('and', conditions: [
                 $this->comparison('object_id', '=', $guard['id']), $this->decision($guardPlan, $subjectId),

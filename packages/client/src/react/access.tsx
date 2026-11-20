@@ -14,6 +14,7 @@ import { selectionKey } from '../validation';
 
 export interface AccessContract {
     status: 403 | 404;
+    scope?: 'page';
     revoked?: { route: string; message?: string };
 }
 export type AccessBinding = {
@@ -54,6 +55,7 @@ interface Entry {
     due: number;
     failures: number;
     batch?: Batch | undefined;
+    previous?: Batch | undefined;
 }
 interface Batch {
     generation: string;
@@ -116,13 +118,15 @@ function monitor(zero: NativeZero, context: string) {
         entry.pending = { ...entry.snapshot, state: 'unknown' };
         entry.listeners.forEach((listener) => listener());
     }
-    function detach(entry: Entry) {
-        const batch = entry.batch;
-        entry.batch = undefined;
-        if (batch && !batch.entries.some((member) => member.batch === batch)) batch.stop?.();
+    function detach(entry: Entry, slot: 'batch' | 'previous' = 'batch') {
+        const batch = entry[slot];
+        entry[slot] = undefined;
+        if (batch && !batch.entries.some((member) => member.batch === batch || member.previous === batch))
+            batch.stop?.();
     }
     function invalidate(entry: Entry) {
         detach(entry);
+        detach(entry, 'previous');
         entry.lease = 0;
         entry.due = 0;
         emit(entry, 'unknown');
@@ -160,6 +164,17 @@ function monitor(zero: NativeZero, context: string) {
             answered: new Set(),
         };
         for (const entry of members) {
+            // Overlap class-page watches during renewal. Never keep ordinary
+            // props visible on the strength of a detached approval, or unmount
+            // the user's form just because an unchanged approval was renewed.
+            if (
+                entry.binding.access?.scope === 'page' &&
+                entry.batch?.answered.has(entry) &&
+                entry.lease > batch.start
+            ) {
+                detach(entry, 'previous');
+                entry.previous = entry.batch;
+            }
             detach(entry);
             entry.batch = batch;
             entry.due = batch.start + renewalMS;
@@ -192,7 +207,7 @@ function monitor(zero: NativeZero, context: string) {
                 if (!active || !connected()) return;
                 const rows = type === 'complete' && Array.isArray(data) ? data.map(record) : [];
                 for (const entry of members) {
-                    if (entry.batch !== batch) continue;
+                    if (entry.batch !== batch && entry.previous !== batch) continue;
                     const matching = rows.filter(
                         (row) => row?.generation === batch.generation && row.binding === entry.id,
                     );
@@ -203,6 +218,8 @@ function monitor(zero: NativeZero, context: string) {
                         ((row.state === 'allowed' && (row.status === undefined || row.status === null)) ||
                             (row.state === 'denied' && (row.status === 403 || row.status === 404)));
                     if (valid && performance.now() < batch.start + leaseMS) {
+                        if (entry.previous === batch) continue; // Observes loss only, never renews the old lease.
+                        detach(entry, 'previous');
                         batch.answered.add(entry);
                         entry.lease = batch.start + leaseMS;
                         entry.failures = 0;
@@ -220,6 +237,11 @@ function monitor(zero: NativeZero, context: string) {
                             invalidate(entry);
                             queue();
                         } else if (type === 'error' || type === 'complete') {
+                            if (entry.previous) {
+                                detach(entry, 'previous');
+                                entry.lease = 0;
+                                emit(entry, 'unknown');
+                            }
                             retry(entry);
                         }
                     }
@@ -318,6 +340,7 @@ function monitor(zero: NativeZero, context: string) {
                         selected.listeners.delete(listener);
                         if (selected.listeners.size) return;
                         detach(selected);
+                        detach(selected, 'previous');
                         entries.delete(key);
                         schedule();
                         // React replaces subscriptions within one commit when

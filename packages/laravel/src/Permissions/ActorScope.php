@@ -5,7 +5,9 @@ declare(strict_types=1);
 namespace ZeroForLaravel\Permissions;
 
 use Closure;
+use Illuminate\Auth\AuthenticationException;
 use Illuminate\Contracts\Auth\Authenticatable;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use LogicException;
@@ -13,6 +15,28 @@ use LogicException;
 /** Invocation-local Request/Auth identity, restored even when authorization throws. */
 final class ActorScope
 {
+    public static function fresh(Request $request): Model&Authenticatable
+    {
+        $class = config()->string('permissions.subject.class');
+        if (! is_subclass_of($class, Model::class) || ! is_subclass_of($class, Authenticatable::class)) {
+            throw new LogicException('Access checks require an authenticatable permission subject model.');
+        }
+
+        $user = $request->user();
+        if (! $user instanceof $class) {
+            throw new AuthenticationException;
+        }
+
+        $subject = new $class;
+        (new ProjectionManager)->assertConnection($subject);
+        $actor = $subject->newQuery()->whereKey($user->getAuthIdentifier())->first();
+        if (! $actor instanceof Model || ! $actor instanceof Authenticatable) {
+            throw new AuthenticationException;
+        }
+
+        return $actor;
+    }
+
     /**
      * @template T
      *

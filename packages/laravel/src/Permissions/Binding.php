@@ -129,23 +129,33 @@ final readonly class Binding
             throw new \Illuminate\Auth\Access\AuthorizationException('Permission actor differs from the validated context identity.');
         }
 
-        if ($this->domainColumn === null) {
+        $field = $this->classDomainField();
+        if ($field === null) {
             return '__global__';
         }
 
-        $definition = ContextDefinition::configured();
-        $definition->validate($context->values);
-        if ($this->domainContext === null || ! isset($definition->fields[$this->domainContext])
-            || ! in_array($definition->fields[$this->domainContext]['type'], ['string', 'int'], true)) {
-            throw new LogicException('Scoped class permissions require an explicit string or integer domain.context binding.');
-        }
-
-        $value = $context->get($this->domainContext);
+        ContextDefinition::configured()->validate($context->values);
+        $value = $context->get($field);
         if ($value === null) {
             throw new \Illuminate\Auth\Access\AuthorizationException('Missing class permission domain.');
         }
 
         return $this->domainPrefix.self::id($value);
+    }
+
+    public function classDomainField(): ?string
+    {
+        if ($this->domainColumn === null) {
+            return null;
+        }
+
+        $fields = ContextDefinition::configured()->fields;
+        if ($this->domainContext === null || ! isset($fields[$this->domainContext])
+            || ! in_array($fields[$this->domainContext]['type'], ['string', 'int'], true)) {
+            throw new LogicException('Scoped class permissions require an explicit string or integer domain.context binding.');
+        }
+
+        return $this->domainContext;
     }
 
     public function object(Model $resource): stdClass

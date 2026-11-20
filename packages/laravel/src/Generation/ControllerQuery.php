@@ -18,7 +18,7 @@ final readonly class ControllerQuery
 {
     /** @param array<string, string> $parameters
      * @param  array<string, string>  $ordinary
-     * @param  list<array{parameter: string, class: class-string<Model>, ability: string, fingerprint: string}>  $guards
+     * @param  list<array{parameter: ?string, class: class-string<Model>, ability: string, fingerprint: string}>  $guards
      * @param  OptionMetadata|null  $optionSource
      */
     public function __construct(

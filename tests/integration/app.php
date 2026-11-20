@@ -9,7 +9,7 @@ require_once __DIR__.'/../../packages/laravel/tests/Fixtures/QueryController.php
 
 use Illuminate\Contracts\Http\Kernel;
 use Illuminate\Foundation\Application;
-use Illuminate\Foundation\Auth\User;
+use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Foundation\Bootstrap\LoadConfiguration;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Middleware\SubstituteBindings;
@@ -34,23 +34,15 @@ use ZeroForLaravel\Tests\Fixtures\ContextResolver;
 use ZeroForLaravel\Tests\Fixtures\ControllerMutationRequest;
 use ZeroForLaravel\Tests\Fixtures\Module\TaskQueries;
 use ZeroForLaravel\Tests\Fixtures\OwnerPermissions;
+use ZeroForLaravel\Tests\Fixtures\OwnerUser;
 use ZeroForLaravel\Tests\Fixtures\QueryController;
 use ZeroForLaravel\Tests\Fixtures\Tag;
 use ZeroForLaravel\Tests\Fixtures\Task;
 use ZeroForLaravel\Tests\Fixtures\TaskList;
+use ZeroForLaravel\Tests\Fixtures\Todos\Todo;
+use ZeroForLaravel\Tests\Fixtures\Todos\TodoPolicy;
 use ZeroForLaravel\Tests\Fixtures\ZeroContext;
 use ZeroForLaravel\ZeroServiceProvider;
-
-// Access checks reload this configured model rather than trusting the request's
-// deliberately incomplete identity. Eloquent must not coerce alice/bob to ints.
-class FixtureUser extends User
-{
-    public $incrementing = false;
-
-    protected $table = 'users';
-
-    protected $keyType = 'string';
-}
 
 class FixtureIdentity
 {
@@ -59,7 +51,7 @@ class FixtureIdentity
         $identity = $request->bearerToken();
         abort_unless(in_array($identity, ['alice', 'bob'], true), 401);
         if (! $request->attributes->get('zero.controller.dispatch')) {
-            $user = (new FixtureUser)->forceFill(['id' => $identity, 'access_blocked' => false]);
+            $user = (new OwnerUser)->forceFill(['id' => $identity, 'access_blocked' => false]);
             $user->exists = true; // These fixture identities have persisted users; Gates may call fresh().
             auth()->setUser($user);
             $request->setUserResolver(fn () => $user);
@@ -93,6 +85,15 @@ class FixtureAccessMiddleware
 
 class FixtureReads
 {
+    use AuthorizesRequests;
+
+    public function todos(): Response
+    {
+        $this->authorize('viewAny', Todo::class);
+
+        return Inertia::render('fixture/todos', ['heading' => 'Private heading', 'todos' => Todo::zeroQuery()]);
+    }
+
     public function index(): Response
     {
         return Inertia::render('fixture/related', [
@@ -171,10 +172,13 @@ ini_set('error_log', $root.'/php.log');
 $kernel = $app->make(PHP_SAPI === 'cli' ? Illuminate\Contracts\Console\Kernel::class : Kernel::class);
 $kernel->bootstrap();
 app()->instance(ZeroForLaravel\Support\ApplicationClasses::class, new ZeroForLaravel\Tests\Fixtures\DiscoveredClasses([
-    Task::class, TaskList::class, Tag::class, Comment::class, TasksTable::class, TaskQueries::class,
+    Task::class, TaskList::class, Tag::class, Comment::class, TasksTable::class, TaskQueries::class, Todo::class,
 ]));
 OwnerPermissions::configure();
-config(['permissions.subject.class' => FixtureUser::class]);
+config(['permissions.subject.class' => OwnerUser::class,
+    'permissions.models.default' => __DIR__.'/../../packages/laravel/config/permissions/global-acl.conf',
+    'permissions.resources.'.Todo::class => ['type' => 'todo']]);
+Gate::policy(Todo::class, TodoPolicy::class);
 Task::addGlobalScope(new VisibleToCurrentUser);
 Tag::addGlobalScope(new VisibleToCurrentUser);
 Route::post('/fixture/tasks', [FixtureMutations::class, 'store'])->middleware(FixtureIdentity::class);
@@ -182,10 +186,21 @@ Route::put('/fixture/tasks/{task}', [FixtureMutations::class, 'update'])->middle
 Route::get('/fixture/tasks/sorted/{direction}', [QueryController::class, 'sorted'])->middleware([FixtureIdentity::class, SubstituteBindings::class]);
 Route::get('/fixture/tasks/{task}', [QueryController::class, 'show'])->middleware([FixtureIdentity::class, FixtureAccessMiddleware::class, SubstituteBindings::class]);
 Route::get('/fixture/related', [FixtureReads::class, 'index'])->middleware(FixtureIdentity::class);
+Route::get('/fixture/todos', [FixtureReads::class, 'todos'])->middleware([FixtureIdentity::class, FixtureAccessMiddleware::class]);
 foreach (['create', 'update', 'delete', 'restore', 'forceDelete'] as $ability) {
     Gate::define($ability, fn ($user, $model) => $ability === 'create' || ($model->user_id === $user->getAuthIdentifier() && $model->title !== 'Locked'));
 }
 if (PHP_SAPI === 'cli') {
+    if (in_array($argv[1] ?? null, ['revoke-class', 'restore-class', 'revoke-row', 'restore-row'], true)) {
+        $fields = ['user:alice', 'todo', str_ends_with($argv[1], '-class') ? 'viewAny' : 'view', 'any', 'allow'];
+        if (str_starts_with($argv[1], 'restore')) {
+            Casbin::addPolicy(...$fields);
+        } else {
+            Casbin::removePolicy(...$fields);
+        }
+        exit(0);
+    }
+
     if (in_array($argv[1] ?? null, ['revoke', 'restore', 'revoke-rollback', 'revoke-related', 'restore-related'], true)) {
         if ($argv[1] === 'revoke-rollback') {
             DB::beginTransaction();

@@ -62,7 +62,14 @@ final class NavigationGenerator
                     }
                 }
 
-                if ($query->expression->kind === 'guarded') {
+                if ($query->guards !== [] && $query->guards[0]['parameter'] === null) {
+                    $guard = $query->guards[0];
+                    $binding['access'] = GuardedAccess::contract((new PolicyCompiler)->compileClass($guard['class'], $guard['ability']));
+                    if ($query->ordinary !== []) {
+                        // Even fully resolved URL inputs cannot supply guarded ordinary props.
+                        $binding['parameters'] = null;
+                    }
+                } elseif ($query->expression->kind === 'guarded') {
                     $parameter = $query->expression->children[0]->value;
                     $guard = array_values(array_filter($query->guards, fn (array $guard): bool => $guard['parameter'] === $parameter))[0]
                         ?? throw new LogicException('Guarded navigation requires its captured instance authorization.');

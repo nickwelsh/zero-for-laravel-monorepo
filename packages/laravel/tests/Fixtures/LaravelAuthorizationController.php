@@ -10,6 +10,7 @@ use Inertia\Inertia;
 use Inertia\Response;
 use ZeroForLaravel\Attributes\ZeroMutation;
 use ZeroForLaravel\Mutation\Mutation;
+use ZeroForLaravel\Query\ZeroQuery;
 
 class LaravelAuthorizationController
 {
@@ -32,6 +33,43 @@ class LaravelAuthorizationController
     public function literalText(Request $request): Response
     {
         return Inertia::render('tasks/index', ['tasks' => Task::zeroQuery()->visibleTo($request->user())->where('title', 'args[ ctx[ encodeDate(')]);
+    }
+
+    public function classIndex(Request $request): Response
+    {
+        $this->authorize('viewAny', Task::class);
+
+        return Inertia::render('tasks/index', ['tasks' => Task::zeroQuery()->visibleTo($request->user())]);
+    }
+
+    public function conditionalClassIndex(Request $request, bool $check): Response
+    {
+        if ($check) {
+            $this->authorize('viewAny', Task::class);
+        }
+
+        return Inertia::render('tasks/index', ['tasks' => Task::zeroQuery()->visibleTo($request->user())]);
+    }
+
+    public function classPublicIndex(): Response
+    {
+        $this->authorize('viewAny', Task::class);
+
+        return Inertia::render('tasks/index', ['tasks' => VisibleTask::zeroQuery()]);
+    }
+
+    public function classPivotIndex(Request $request): Response
+    {
+        $this->authorize('viewAny', Task::class);
+
+        return Inertia::render('tasks/index', ['tasks' => Task::zeroQuery()->visibleTo($request->user())->with('tags')]);
+    }
+
+    public function classStandalone(Request $request): ZeroQuery
+    {
+        $this->authorize('viewAny', Task::class);
+
+        return Task::zeroQuery()->visibleTo($request->user());
     }
 
     public function shell(): Response

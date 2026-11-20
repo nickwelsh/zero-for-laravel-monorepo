@@ -100,6 +100,11 @@ final readonly class LiveProps implements ProvidesInertiaProperties
             $registration->assertCurrent();
             $access = null;
             foreach ($registration->guards as $guard) {
+                if ($guard['parameter'] === null) {
+                    $access = GuardedAccess::contract((new PolicyCompiler)->compileClass($guard['class'], $guard['ability']));
+                    break;
+                }
+
                 if (isset($boundProps[$prop]) && $route->parameter($guard['parameter']) === $boundProps[$prop]) {
                     $declaration = $declaration->guardedBy($context->request->user() ?? throw new LogicException('A protected prop requires an authenticated actor.'), $guard['ability']);
                     $access = GuardedAccess::contract((new PolicyCompiler)->compile($guard['class'], $guard['ability']));
@@ -134,10 +139,22 @@ final readonly class LiveProps implements ProvidesInertiaProperties
         if ($partial) {
             $only = array_filter(explode(',', $context->request->header('X-Inertia-Partial-Data', '')));
             $except = array_filter(explode(',', $context->request->header('X-Inertia-Partial-Except', '')));
-            $bindings = array_filter($bindings, fn (string|int $prop): bool => ($only === [] || in_array($prop, $only, true)) && ! in_array($prop, $except, true), ARRAY_FILTER_USE_KEY);
+            $bindings = array_filter($bindings, fn (string|int $prop): bool => ($bindings[$prop]['access']['scope'] ?? null) === 'page'
+                || ($only === [] || in_array($prop, $only, true)) && ! in_array($prop, $except, true), ARRAY_FILTER_USE_KEY);
         }
 
-        $props['__zero'] = new AlwaysProp(['version' => 1, 'mode' => $partial ? 'patch' : 'replace', 'bindings' => (object) $bindings]);
+        $metadata = ['version' => 1, 'mode' => $partial ? 'patch' : 'replace', 'bindings' => (object) $bindings];
+        foreach ($bindings as $binding) {
+            if (($binding['access']['scope'] ?? null) === 'page') {
+                // Persistent Inertia layouts (outside ZeroProvider) receive transport
+                // props directly. Only the approved page receives these ordinary props.
+                $metadata['pageProps'] = (object) $props;
+                $props = [];
+                break;
+            }
+        }
+
+        $props['__zero'] = new AlwaysProp($metadata);
 
         return $props;
     }

@@ -33,7 +33,7 @@ import { createInertiaAdapter } from '../../packages/client/src/react/inertia';
 import type { index, show } from '../interop/controller-api/ZeroForLaravel/Tests/Fixtures/QueryController';
 import type * as TaskQueries from '../interop/controller-api/ZeroForLaravel/Tests/Fixtures/Module/TaskQueries';
 import { expect, it, vi } from 'vite-plus/test';
-import { schema as fixtureSchema, definitions, type Context } from '../interop/generated';
+import { schema as fixtureSchema, type definitions as fixtureDefinitions, type Context } from '../interop/generated';
 import {
     applyTableQuery,
     createTable,
@@ -169,16 +169,15 @@ it.skipIf(!enabled)(
             ])
                 mkdirSync(join(root, directory), { recursive: true });
             execFileSync('php', ['tests/integration/app.php'], { env, stdio: 'pipe' });
-            const generated = { exports: {} as { schema: LiveSchema } };
+            const generated = { exports: {} as { schema: LiveSchema; definitions: typeof fixtureDefinitions } };
             runInNewContext(
                 execFileSync('node_modules/.bin/esbuild', [join(root, 'generated.ts'), '--format=cjs'], {
                     encoding: 'utf8',
                 }),
                 { require: () => native, module: generated },
             );
-            const schema = generated.exports.schema;
-            expect(Object.keys(schema.tables)).toHaveLength(Object.keys(fixtureSchema.tables).length);
-            expect(Object.keys(schema.tables)).toEqual(expect.arrayContaining(Object.keys(fixtureSchema.tables)));
+            const { schema, definitions } = generated.exports;
+            expect(Object.keys(schema.tables).sort()).toEqual([...Object.keys(fixtureSchema.tables), 'todos'].sort());
             // Consume the deployed client manifest, not a second compilation
             // against a registry whose lazy relationships have since changed.
             const mutationModule = {
@@ -280,9 +279,9 @@ it.skipIf(!enabled)(
                     `SELECT attnames::text FROM pg_publication_tables WHERE pubname='${publication}' AND tablename='tasks'`,
                 ),
             ).not.toContain('secret');
-            // Five business/pivot tables, seven private permission projections,
+            // Six business/pivot tables, eight private permission projections,
             // one safe access root and one private access-check projection.
-            expect(psql(`SELECT count(*) FROM pg_publication_tables WHERE pubname='${publication}'`)).toBe('14');
+            expect(psql(`SELECT count(*) FROM pg_publication_tables WHERE pubname='${publication}'`)).toBe('16');
             php = spawn(
                 'php',
                 [
@@ -441,6 +440,96 @@ it.skipIf(!enabled)(
             }
             try {
                 await until(() => complete && result.length === 2, 'Authorized query never completed');
+                const todoSelection = (
+                    module.exports.actions['FixtureReads@todos.todos'] as (args: object) => ReturnType<typeof tasks>
+                )({});
+                const todoName = todoSelection.request().query.queryName;
+                const todoPage = () =>
+                    fetch(`${base}/fixture/todos`, {
+                        headers: { Authorization: 'Bearer alice', 'X-Inertia': 'true', Accept: 'text/html' },
+                    });
+                const permission = (command: string) =>
+                    execFileSync('php', ['tests/integration/app.php', command], { env, stdio: 'pipe' });
+                permission('restore-row');
+                expect((await todoPage()).status).toBe(404);
+                expect(await transform(todoName, {})).toMatchObject({ error: 'app', details: { status: 404 } });
+                permission('restore-class');
+                const todoResponse = await todoPage();
+                expect(todoResponse.status).toBe(200);
+                const todoContract = (await todoResponse.json()) as {
+                    component: string;
+                    props: Record<string, unknown>;
+                };
+                expect(todoContract.props['__zero']).toMatchObject({
+                    bindings: { todos: { access: { scope: 'page', status: 404 } } },
+                    pageProps: { heading: 'Private heading' },
+                });
+                expect(todoContract.props).not.toHaveProperty('heading'); // Not delivered as a shared/layout prop.
+                psql("UPDATE users SET access_blocked=true WHERE id='alice'");
+                expect(await transform(todoName, {})).toMatchObject({ error: 'app', details: { status: 403 } });
+                psql("UPDATE users SET access_blocked=false WHERE id='alice'");
+                const classLoss = vi.fn();
+                const todoAdapter = createInertiaAdapter(module.exports.bindings, { access: { onRevoked: classLoss } });
+                const Todos = todoAdapter.wrap(
+                    (props: Record<string, unknown>) => (
+                        <p>
+                            {String(props.heading)}:
+                            {(props.todos as Data<readonly { title: string }[]>).data.map((row) => row.title).join(',')}
+                        </p>
+                    ),
+                    todoContract,
+                );
+                // Keep the original business view subscribed independently of the page.
+                // Hiding the React tree is not evidence the server stopped its stream.
+                const raw = zero.materialize(todoSelection.request(), { ttl: 0 });
+                let todoTitles: string[] = [];
+                const detachRaw = raw.addListener((rows) => {
+                    todoTitles = rows.map((row) => row.title);
+                });
+                const todoHost = render(
+                    <ZeroProvider zero={zero}>
+                        <Todos {...todoContract.props} />
+                    </ZeroProvider>,
+                );
+                try {
+                    expect(todoHost.container.textContent).not.toContain('Private heading');
+                    const shows = (text: string) =>
+                        waitFor(() => expect(todoHost.container.textContent).toBe(text), { timeout: 10000 });
+                    await shows('Private heading:');
+                    psql(`INSERT INTO todos (id,title) VALUES ('${alice}','Visible todo')`);
+                    await shows('Private heading:Visible todo');
+                    expect(todoTitles).toEqual(['Visible todo']);
+                    permission('revoke-row');
+                    await shows('Private heading:');
+                    expect(classLoss).not.toHaveBeenCalled();
+                    permission('restore-row');
+                    await shows('Private heading:Visible todo');
+                    permission('revoke-class');
+                    await shows('Not found');
+                    expect(classLoss).toHaveBeenCalledTimes(1);
+                    expect(todoTitles).toEqual([]);
+                    const afterLoss = frames.length;
+                    psql(
+                        `UPDATE todos SET title='Revoked secret' WHERE id='${alice}'; INSERT INTO todos (id,title) VALUES ('${third}','Later secret'); UPDATE tasks SET title='Class WAL barrier' WHERE id='${alice}'`,
+                    );
+                    await until(
+                        () => result[0]?.title === 'Class WAL barrier',
+                        'Class revocation WAL barrier did not replicate',
+                    );
+                    expect(todoTitles).toEqual([]);
+                    expect(Buffer.concat(frames.slice(afterLoss)).toString('utf8')).not.toMatch(
+                        /Revoked secret|Later secret/,
+                    );
+                    expect((await todoPage()).status).toBe(404);
+                    expect(await transform(todoName, {})).toMatchObject({ error: 'app', details: { status: 404 } });
+                    psql(`UPDATE tasks SET title='Initial' WHERE id='${alice}'`);
+                    await until(() => result[0]?.title === 'Initial', 'Fixture barrier did not reset');
+                } finally {
+                    todoHost.unmount();
+                    todoAdapter.dispose();
+                    detachRaw();
+                    raw.destroy();
+                }
                 expect(
                     (await zero.run(standalone.exports.search({ input: {} }), { type: 'complete' })).map(
                         (row) => row.id,
@@ -941,7 +1030,7 @@ it.skipIf(!enabled)(
                     'SELECT owner FROM permission_access_checks UNION SELECT fingerprint FROM permission_access_checks UNION SELECT id FROM permission_subjects',
                 ).split('\n');
                 const privateTables = psql(
-                    `SELECT tablename FROM pg_publication_tables WHERE pubname='${publication}' AND tablename NOT IN ('tasks','lists','tags','comments','task_tag','permission_access_revision','permission_access_results')`,
+                    `SELECT tablename FROM pg_publication_tables WHERE pubname='${publication}' AND tablename NOT IN ('tasks','todos','lists','tags','comments','task_tag','permission_access_revision','permission_access_results')`,
                 ).split('\n');
                 const forbidden = [
                     ...privateTables,
@@ -1342,5 +1431,7 @@ it.skipIf(!enabled)(
             rmSync(root, { recursive: true, force: true });
         }
     },
-    120000,
+    // Includes cache bootstrap/reset, real lease renewal, and WAL catch-up for
+    // both class and instance permission changes on a disposable database.
+    300000,
 );
