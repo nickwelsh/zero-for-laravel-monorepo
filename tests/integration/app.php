@@ -157,6 +157,7 @@ $app->afterBootstrapping(LoadConfiguration::class, function ($app) use ($root) {
         'logging.default' => 'single', 'logging.channels.single' => ['driver' => 'single', 'path' => $root.'/laravel.log'],
         'app.env' => 'local', 'app.debug' => false, 'app.key' => 'base64:'.base64_encode(str_repeat('0', 32)),
         'app.url' => getenv('APP_URL'), 'app.locale' => 'en', 'app.fallback_locale' => 'en',
+        'cache.default' => 'file',
         'database.default' => 'testing', 'database.connections.testing' => [
             'driver' => 'pgsql', 'host' => getenv('ZERO_TEST_PG_HOST') ?: '127.0.0.1',
             'port' => getenv('ZERO_TEST_PG_PORT') ?: 5432, 'database' => getenv('ZERO_LIVE_DATABASE'),

@@ -327,6 +327,7 @@ it.skipIf(!enabled)(
                     })),
                 ]),
             });
+            expect(batch.status).toBe(200);
             const transformed = (await batch.json()) as { queries: { ast?: unknown; error?: string }[] };
             expect(transformed.queries).toHaveLength(256);
             expect(transformed.queries[0]).toHaveProperty('ast');
