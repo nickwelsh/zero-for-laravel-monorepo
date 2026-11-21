@@ -30,7 +30,12 @@ test('declarations mutate aliases, clone independent branches, do not execute SQ
 
     $base = Task::zeroQuery()->withoutGlobalScopes();
     $ascending = (clone $base)->where('title', '0')->orderBy('id', 'asc')->limit(0);
-    $descending = (clone $base)->orderBy('id', 'desc')->one();
+    $descending = (clone $base)->orderBy('id', 'desc')->first();
+    $single = $base->find('task-a');
+    $collection = (clone $base)->limit(1)->get();
+    expect($single->format()['singular'])->toBeTrue()
+        ->and(data_get($single->ast(), 'where.right.value'))->toBe('task-a')
+        ->and($collection->format()['singular'])->toBeFalse();
     expect($base->ast())->toBe(['table' => 'tasks']);
     expect($ascending->where('done', false))->toBe($ascending);
     expect($ascending->ast()['limit'])->toBe(0);

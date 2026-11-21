@@ -321,18 +321,25 @@ final class ZeroQuery implements JsonSerializable
         return $this;
     }
 
-    public function one(): self
+    /** Finish a singular declaration without consuming the source builder. */
+    public function first(): self
     {
-        $this->ast['limit'] = 1;
-        $this->singular = true;
+        $query = clone $this;
+        $query->limit(1);
+        $query->singular = true;
 
-        return $this;
+        return $query;
     }
 
-    /** Collection cardinality is already the default; no hidden bounds. */
-    public function all(): self
+    public function find(mixed $id): self
     {
-        return $this;
+        return (clone $this)->where($this->model->key, $id)->first();
+    }
+
+    /** Finish a collection declaration; no SQL, implicit limit or hydration. */
+    public function get(): self
+    {
+        return clone $this;
     }
 
     /** A live growing window with one additional row as the exhaustion probe. */

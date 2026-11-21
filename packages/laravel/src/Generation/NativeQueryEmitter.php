@@ -73,6 +73,8 @@ final class NativeQueryEmitter
                     $base = '(args.__cursor === undefined ? '.$base.' : '.$base.'.start(args.__cursor))';
                 } elseif ($step->value === 'with') {
                     $base .= $this->include($step);
+                } elseif ($step->value === 'first') {
+                    $base .= '.one()';
                 } elseif (in_array($step->value, ['orderBy', 'limit', 'start', 'one'], true)) {
                     $base .= '.'.$step->value.'('.implode(', ', array_map(fn (QueryExpression $arg): string => $arg->emit(true), $args)).')';
                 }

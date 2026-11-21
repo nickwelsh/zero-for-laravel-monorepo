@@ -37,7 +37,7 @@ final class QueryController
     {
         $validated = $input->validated();
 
-        return Inertia::render('tasks/dated', ['tasks' => Task::zeroQuery()->visibleTo($input->user())->where('completed_at', '>=', $validated['after'])]);
+        return Inertia::render('tasks/dated', ['tasks' => Task::zeroQuery()->visibleTo($input->user())->where('completed_at', '>=', $validated['after'])->get()]);
     }
 
     public function choices(ChoiceQueryRequest $input): Response
@@ -65,7 +65,7 @@ final class QueryController
 
         return Inertia::render('tasks/index', [
             'heading' => 'Tasks',
-            'tasks' => $query->orderBy('id', 'asc'),
+            'tasks' => $query->orderBy('id', 'asc')->get(),
         ]);
     }
 
@@ -87,7 +87,7 @@ final class QueryController
             $query = $query->where('title', 'LIKE', '%'.$title.'%');
         }
 
-        return Inertia::render('tasks/filtered', ['tasks' => $query->orderBy('id', 'asc')->limit($window)]);
+        return Inertia::render('tasks/filtered', ['tasks' => $query->orderBy('id', 'asc')->limit($window)->get()]);
     }
 
     public function relationships(Request $request, string $title): Response
@@ -102,7 +102,7 @@ final class QueryController
                 ->with('comments', fn ($query) => $query->visibleTo($request->user())->where('body', '!=', $title)->orderBy('id', 'desc')->limit(2))
                 ->with('list', fn ($query) => $query->visibleTo($request->user()))
                 ->orderBy('title', 'desc')->orderBy('id', 'asc')
-                ->start(['title' => $title, 'id' => 'task-a'], ['inclusive' => false]),
+                ->get(),
         ]);
     }
 
@@ -113,7 +113,7 @@ final class QueryController
 
     public function sorted(Request $request, QueryDirection $direction): Response
     {
-        return Inertia::render('tasks/index', ['tasks' => Task::zeroQuery()->visibleTo($request->user())->orderBy('title', $direction->value)]);
+        return Inertia::render('tasks/index', ['tasks' => Task::zeroQuery()->visibleTo($request->user())->orderBy('title', $direction->value)->get()]);
     }
 
     public function unsafeNullable(QueryRequest $input): Response

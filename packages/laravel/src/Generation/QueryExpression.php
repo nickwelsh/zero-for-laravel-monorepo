@@ -78,7 +78,7 @@ final class QueryExpression
             'object' => ($typescript ? '{' : '[').implode(', ', array_map(fn (self $arg): string => $arg->emit($typescript), $this->children)).($typescript ? '}' : ']'),
             'property' => $literal.($typescript ? ': ' : ' => ').$child(0),
             'query' => $typescript ? 'zql['.json_encode($this->model?->table, JSON_THROW_ON_ERROR).']' : '\\'.$this->model?->class.'::zeroQuery()',
-            'bound' => ($typescript ? 'zql['.json_encode($this->model?->table, JSON_THROW_ON_ERROR).'].where(' : '\\'.$this->model?->class.'::zeroQuery()->where(').json_encode($this->model?->key, JSON_THROW_ON_ERROR).', '.($typescript ? 'args[' : '$args[').$literal.']'.($typescript ? ').one()' : ')->one()'),
+            'bound' => ($typescript ? 'zql['.json_encode($this->model?->table, JSON_THROW_ON_ERROR).'].where(' : '\\'.$this->model?->class.'::zeroQuery()->where(').json_encode($this->model?->key, JSON_THROW_ON_ERROR).', '.($typescript ? 'args[' : '$args[').$literal.']'.($typescript ? ').one()' : ')->first()'),
             'infinite' => $typescript ? $child(0).'.limit(args.__window ?? '.((int) $this->value + 1).')' : $child(0).'->infinite('.$literal.')',
             'paginate' => $typescript ? '(args.__cursor === undefined ? '.$child(0).'.limit('.((int) $this->value + 1).') : '.$child(0).'.limit('.((int) $this->value + 1).').start(args.__cursor))' : $child(0).'->paginate('.$literal.')',
             'method' => in_array($this->value, ['all', 'visibleTo'], true) && $typescript ? $child(0) : $child(0).($typescript ? '.' : '->').$this->value.'('.implode(', ', array_map(fn (self $arg): string => $arg->emit($typescript), array_slice($this->children, 1))).')',
@@ -86,6 +86,17 @@ final class QueryExpression
             'binary' => '('.$child(0).' '.($typescript && $this->value === '.' ? '+' : $this->value).' '.$child(1).')',
             'not' => '(!'.$child(0).')',
             default => throw new LogicException('Unsupported query expression '.$this->kind),
+        };
+    }
+
+    public function isTerminal(): bool
+    {
+        return match ($this->kind) {
+            'reference' => $this->children[0]->isTerminal(),
+            'conditional' => $this->children[1]->isTerminal() && $this->children[2]->isTerminal(),
+            'method' => in_array($this->value, ['first', 'get'], true),
+            'bound', 'guarded', 'paginate', 'infinite' => true,
+            default => false,
         };
     }
 

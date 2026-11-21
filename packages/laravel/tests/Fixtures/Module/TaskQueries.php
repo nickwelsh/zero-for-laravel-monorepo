@@ -31,14 +31,14 @@ final class TaskQueries
             $query->where('title', 'LIKE', '%'.$validated['title'].'%');
         }
 
-        return $query->orderBy('title', 'desc')->orderBy('id', 'asc')->limit(20);
+        return $query->orderBy('title', 'desc')->orderBy('id', 'asc')->limit(20)->get();
     }
 
     public function dated(DateQueryRequest $input): ZeroQuery
     {
         $validated = $input->validated();
 
-        return Task::zeroQuery()->visibleTo($input->user())->where('completed_at', '>=', $validated['after']);
+        return Task::zeroQuery()->visibleTo($input->user())->where('completed_at', '>=', $validated['after'])->get();
     }
 
     public function window(Request $request): ZeroQuery
@@ -53,6 +53,6 @@ final class TaskQueries
 
     public function detail(Request $request, string $id): ZeroQuery
     {
-        return Task::zeroQuery()->visibleTo($request->user())->where('id', $id)->one();
+        return Task::zeroQuery()->visibleTo($request->user())->find($id);
     }
 }

@@ -58,12 +58,12 @@ final class AutomaticallyVisibleController
 {
     public function index(): \Inertia\Response
     {
-        return \Inertia\Inertia::render('lists/index', ['lists' => AutomaticallyVisibleList::zeroQuery()->with('siblings')->where('id', 7)]);
+        return \Inertia\Inertia::render('lists/index', ['lists' => AutomaticallyVisibleList::zeroQuery()->with('siblings')->where('id', 7)->get()]);
     }
 
     public function bypass(): \Inertia\Response
     {
-        return \Inertia\Inertia::render('lists/index', ['lists' => AutomaticallyVisibleList::zeroQuery()->withoutGlobalScope(VisibleToCurrentUser::class)]);
+        return \Inertia\Inertia::render('lists/index', ['lists' => AutomaticallyVisibleList::zeroQuery()->withoutGlobalScope(VisibleToCurrentUser::class)->get()]);
     }
 }
 

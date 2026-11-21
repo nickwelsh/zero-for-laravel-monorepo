@@ -101,7 +101,7 @@ if (($argv[1] ?? null) === 'generate') {
     $queries = [
         'unbounded' => clone $query,
         'zeroLimit' => (clone $query)->limit(0),
-        'one' => (clone $query)->where('id', 'task-a')->one(),
+        'one' => $query->find('task-a'),
         'cursor' => (clone $query)->orderBy('title', 'desc')->orderBy('id', 'asc')->start(['title' => '0', 'id' => 'task-a'], ['inclusive' => true])->limit(7),
         'exclusive' => (clone $query)->orderBy('id', 'asc')->start(['id' => 'task-a']),
         'relationships' => (clone $query)->with('comments', fn ($q) => $q->withoutGlobalScopes()->where('body', 'NOT ILIKE', '%private%')->orderBy('id', 'desc')->limit(3))->with('list', fn ($q) => $q->withoutGlobalScopes()),

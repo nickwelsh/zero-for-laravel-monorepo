@@ -37,7 +37,7 @@ final class OptionRequest extends FormRequest
                 resolve: Task::zeroQuery()
                     ->where('done', OptionInput::field('done'))
                     ->where('id', OptionInput::field('reference'))
-                    ->where('id', '!=', OptionInput::context('task'))->one(),
+                    ->where('id', '!=', OptionInput::context('task'))->first(),
                 authorize: ['task' => 'view'],
             )),
         ];

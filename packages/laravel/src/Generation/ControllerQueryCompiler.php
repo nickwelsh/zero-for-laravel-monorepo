@@ -311,7 +311,7 @@ final class ControllerQueryCompiler
         $models = $this->models->all();
         ksort($models);
         $schemaFingerprint = hash('sha256', json_encode([
-            'zero' => '1.11.3', 'builder' => 'mutable-scopes-v1', 'context' => ContextDefinition::configured()->contract(),
+            'zero' => '1.11.4', 'builder' => 'eloquent-live-reads-v2', 'context' => ContextDefinition::configured()->contract(),
             'models' => array_map(function (ModelMetadata $model): array {
                 $schema = $model->toArray();
                 // Lazy query dependencies belong to the query, not discovery order.
@@ -352,6 +352,9 @@ final class ControllerQueryCompiler
                 $this->coverage($expression);
             }
 
+                if (! $expression->isTerminal()) {
+                    $this->unsupported($item, 'Finish the live read with get(), first(), find(), or a paginator.');
+                }
             $props[$this->prop] = [$expression, $item->getStartLine()];
             if (! $expression->model instanceof ModelMetadata) {
                 $ordinary[$this->prop] = match ($expression->type) {
@@ -808,6 +811,41 @@ final class ControllerQueryCompiler
             $method = $node->name->name;
             if ($receiver->kind === 'request' && $method === 'user' && $node->args === []) {
                 return new QueryExpression('actor', type: 'actor');
+            if ($receiver->type === 'query') {
+                if ($receiver->isTerminal()) {
+                    $this->unsupported($node, 'A result selector or paginator must be the final query operation.');
+                }
+
+                $replacement = match ($method) {
+                    'one' => 'first()', 'all' => 'get()', 'start' => 'cursorPaginate()',
+                    'expressionBuilder' => 'a grouped where() callback',
+                    default => null,
+                };
+                if ($replacement !== null) {
+                    $this->unsupported($node, "Use {$replacement} instead of {$method}().");
+                }
+
+                if (in_array($method, ['first', 'get', 'find'], true)) {
+                    $args = $node->getArgs();
+                    if (count($args) !== ($method === 'find' ? 1 : 0)) {
+                        $this->unsupported($node, 'Only get(), first(), and single-key find($id) are supported.');
+                    }
+
+                    $source = $receiver->snapshot();
+                    if ($method === 'find') {
+                        $arg = $args[0];
+                        $id = $this->expression($arg->value, $variables);
+                        if ($arg->unpack || $arg->byRef || ($arg->name !== null && $arg->name->name !== 'id') || ! in_array($id->type, ['int', 'string', 'option'], true)) {
+                            $this->unsupported($arg, 'find() requires one scalar primary key.');
+                        }
+
+                        $source = new QueryExpression('method', 'where', [$source, ScopeCompiler::value($receiver->queryModel()->key), $id], $receiver->model, 'query');
+                    }
+
+                    return new QueryExpression('method', $method === 'get' ? 'get' : 'first', [$source], $receiver->model, 'query', $method !== 'get');
+                }
+            }
+
             }
 
             if ($receiver->type === 'query' && $method === 'with' && ($node->getArgs()[0]->value ?? null) instanceof Expr\Array_) {

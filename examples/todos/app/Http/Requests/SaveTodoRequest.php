@@ -45,7 +45,7 @@ class SaveTodoRequest extends FormRequest
                     ->where('name', 'ILIKE', ZeroOptions::contains(OptionInput::value()))
                     ->orderBy('name', 'asc')->orderBy('id', 'asc')->infinite(20),
                 value: 'id', label: 'name',
-                resolve: TodoList::zeroQuery()->where('id', OptionInput::field('list_id'))->one(),
+                resolve: TodoList::zeroQuery()->find(OptionInput::field('list_id')),
             )),
             'title' => Field::make()->label('New todo')->props(['placeholder' => 'What needs doing?']),
         ];

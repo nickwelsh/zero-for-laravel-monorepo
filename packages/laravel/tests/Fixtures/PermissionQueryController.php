@@ -25,7 +25,7 @@ final class PermissionQueryController
 
     public function unscoped(): Response
     {
-        return Inertia::render('lists/index', ['lists' => PermissionList::zeroQuery()]);
+        return Inertia::render('lists/index', ['lists' => PermissionList::zeroQuery()->get()]);
     }
 
     public function forged(Request $request): Response
@@ -35,6 +35,6 @@ final class PermissionQueryController
             abort(403);
         }
 
-        return Inertia::render('lists/index', ['lists' => PermissionList::zeroQuery()->visibleTo($actor)]);
+        return Inertia::render('lists/index', ['lists' => PermissionList::zeroQuery()->visibleTo($actor)->get()]);
     }
 }
