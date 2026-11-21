@@ -442,16 +442,18 @@ checks identity and scalar types before evaluation; it cannot detect a same-user
 feed that an application has not refreshed. These are UI hints only; never accept
 a browser prediction as authorization for reads, writes or watch registration.
 
-## Migrating the previous API
+## Who can see search results?
 
-Remove model `zero()` methods and `ZeroDefinition` imports. Move publication to
-`HasZeroQueries` discovery, deliberate public reads to `#[ZeroPublic]` on each model,
-creation defaults to `withAttributes()` with typed application context, and search
-to `zeroSearch()` or the registered search integration. Defaults do not enforce
-ownership: explicit creation attributes override defaults, and updates are not stamped.
-Replace scalar/relation authorization and server-scope closures with ordinary
-policies plus explicit visibility on every protected query path. Backfill old ACL
-tables into managed grants; do not maintain two permission authorities. Use
-`Mutation::server(...)` with disabled optimism for permission writes. Rebuild
-projections, regenerate paired PHP/TypeScript and review publication changes before
-deployment. See the todos example for transactional share/unshare and ACL backfill.
+If you only use Zero queries, you don't need `zeroSearch()`. If a model already
+uses Laravel Scout with Typesense, you can add `public static zeroSearch(): ScoutSearch`
+to the model or register a `ScoutSearch` in a service provider. This tells the
+integration which search index and record key to use, and which filters, facets,
+and sorts to expose. It doesn't grant access to the indexed records.
+
+Typesense answers searches from its own index. For example, a Zero query can hide
+another team's tasks while an unrestricted Typesense search still counts them.
+With the package's authenticated search endpoint, supply `ScoutSearch::scope()`
+on the search configuration to build a Typesense filter from trusted request
+context. The endpoint requires that filter and combines it with the user's search
+filters. If the browser queries Typesense directly, enforce the same restriction
+with a scoped search key. Don't rely on filtering the rows after search.

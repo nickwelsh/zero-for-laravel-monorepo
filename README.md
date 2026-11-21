@@ -104,7 +104,7 @@ Write authorization stays in FormRequests, middleware and controller Gates.
 Captured show Gates also create actor-owned access watches: confirmed access loss
 blocks the page before the optional Inertia adapter `access.onRevoked` callback.
 Disconnects block pending revalidation; empty collections remain successful.
-See [authorization and migration](apps/docs/content/docs/0.x/docs/authorization.mdx)
+See [authorization](apps/docs/content/docs/0.x/docs/authorization.mdx)
 for setup, supported compiler boundaries and deployment requirements.
 
 Column privacy uses `$visible`, `$hidden`, `ZeroColumns`, `ZeroExclude`, and

@@ -20,7 +20,7 @@ signatures replace package context keys; runtime values use `ResolvedContext`.
 Relationships come from opted-in Eloquent models, without silent target enrollment
 or private-column exposure. Native ZQL remains the compilation target, not a
 promise to translate arbitrary Eloquent or PHP. See the
-[migration mappings](../apps/docs/content/docs/0.x/docs/constraints.mdx#migrating-existing-0x-applications).
+[supported query operations](../apps/docs/content/docs/0.x/docs/constraints.mdx#which-php-operations-can-zero-translate).
 
 ## 1. Agreed decisions
 

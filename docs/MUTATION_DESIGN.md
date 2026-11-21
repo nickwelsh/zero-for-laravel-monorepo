@@ -23,7 +23,7 @@ This is not immutable ownership authorization. Keep policies, Gates, and associa
 checks. Arbitrary FormRequest hooks/events are not automatically optimistic; use
 custom/disabled optimism for nonportable PHP. See
 [creation defaults](../apps/docs/content/docs/0.x/docs/mutations.mdx#creation-defaults)
-and [migration mappings](../apps/docs/content/docs/0.x/docs/constraints.mdx#migrating-existing-0x-applications).
+and [optimism strategies](../apps/docs/content/docs/0.x/docs/mutations.mdx#optimism-strategies).
 
 ## 1. Decisions and scope
 
