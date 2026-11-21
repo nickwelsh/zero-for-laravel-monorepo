@@ -280,8 +280,12 @@ without a `.data` wrapper or mutation methods. Live objects distinguish loading,
 refreshing, success, stale data, failure, and idle/disabled state. Connection status
 does not imply query completeness.
 
-Infinite props expose `loadMore`, `hasMore`, and loading state; cursor-page props
-expose navigation. Completion determines whether more data is known to exist.
+`Zero::scroll()` props expose `loadMore`, `hasMore`, and loading state. Numbered
+and cursor props expose `nextPage()`, `previousPage()`, and availability flags.
+Numbered props also expose `currentPage`; neither mode computes a total. The
+Inertia adapter reads the position from the URL before subscribing and restores
+it on Back/Forward. Route-free reads leave browser history alone. Completion
+determines whether more data is known to exist.
 Partial reloads and history use reserved page metadata; query descriptors never
 replace the omitted live prop in serialized page props. Initial SSR and hydration
 render a deterministic loading shell before native client initialization.
