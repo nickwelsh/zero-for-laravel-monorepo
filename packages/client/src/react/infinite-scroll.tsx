@@ -5,14 +5,14 @@ import {
     useEffect,
     useImperativeHandle,
     useLayoutEffect,
-    useMemo,
+    useSyncExternalStore,
     useRef,
     useState,
     type HTMLAttributes,
     type ReactNode,
     type RefObject,
 } from 'react';
-import { useNamedScroll, type ScrollHandle } from './scroll-context';
+import { useNamedScroll, type ScrollAnchor, type ScrollHandle } from './scroll-context';
 
 export interface InfiniteScrollSlotProps {
     loading: boolean;
@@ -84,6 +84,10 @@ function useElement(target?: Target) {
     return [attach, target ? custom : fallback] as const;
 }
 
+function constrained(dimension: string) {
+    return !!dimension && !['auto', 'none', '0', '0px'].includes(dimension);
+}
+
 function scrollParent(items: HTMLElement | null) {
     for (let el = items?.parentElement; el; el = el.parentElement) {
         const css = getComputedStyle(el);
@@ -97,12 +101,54 @@ function scrollParent(items: HTMLElement | null) {
         const parent = el.parentElement && getComputedStyle(el.parentElement);
         const flex = parent?.display === 'flex' || parent?.display === 'inline-flex';
         const column = parent?.flexDirection.startsWith('column');
-        const constrained = (dimension: string) => dimension && !['auto', 'none', '0', '0px'].includes(dimension);
         if (parent?.display === 'grid' || parent?.display === 'inline-grid') return el;
-        if (y === 'auto' && (el.scrollHeight > el.clientHeight || constrained(css.maxHeight) || constrained(el.style.height) || (flex && column) || x === 'visible' || x === 'clip')) return el;
-        if (x === 'auto' && (el.scrollWidth > el.clientWidth || constrained(css.maxWidth) || constrained(el.style.width) || (flex && !column) || y === 'visible' || y === 'clip')) return el;
+        if (
+            y === 'auto' &&
+            (el.scrollHeight > el.clientHeight ||
+                constrained(css.maxHeight) ||
+                constrained(el.style.height) ||
+                (flex && column) ||
+                x === 'visible' ||
+                x === 'clip')
+        )
+            return el;
+        if (
+            x === 'auto' &&
+            (el.scrollWidth > el.clientWidth ||
+                constrained(css.maxWidth) ||
+                constrained(el.style.width) ||
+                (flex && !column) ||
+                y === 'visible' ||
+                y === 'clip')
+        )
+            return el;
     }
     return null;
+}
+
+function useScrollParent(items: HTMLElement | null) {
+    const subscribe = useCallback(
+        (changed: () => void) => {
+            const attributes = new MutationObserver(changed);
+            const size = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(changed);
+            for (let node = items; node; node = node.parentElement) {
+                attributes.observe(node, { attributes: true, attributeFilter: ['class', 'style'] });
+                size?.observe(node);
+            }
+            window.addEventListener('resize', changed);
+            return () => {
+                attributes.disconnect();
+                size?.disconnect();
+                window.removeEventListener('resize', changed);
+            };
+        },
+        [items],
+    );
+    return useSyncExternalStore(
+        subscribe,
+        () => scrollParent(items),
+        () => null,
+    );
 }
 
 function useTrigger(
@@ -115,6 +161,12 @@ function useTrigger(
 ) {
     useLayoutEffect(() => {
         if (!target || !enabled || typeof IntersectionObserver === 'undefined') return undefined;
+        if (root && !root.contains(target)) {
+            const prop = side === 'next' ? 'endElement' : 'startElement';
+            throw new Error(
+                `Zero InfiniteScroll: place ${prop} inside the scroll container, outside the direct rows of itemsElement.`,
+            );
+        }
         let active = true;
         const observer = new IntersectionObserver(
             (entries) => {
@@ -134,17 +186,19 @@ function useViewedPage(
     items: HTMLElement | null,
     enabled: boolean,
     reverse: boolean,
-    current: RefObject<ScrollHandle | null>,
+    preserveUrl: boolean,
+    current: RefObject<{ handle: ScrollHandle | null; preserveUrl: boolean } | null>,
 ) {
+    const refresh = useRef<((preserve: boolean) => void) | null>(null);
     useLayoutEffect(() => {
         if (!enabled || !items || typeof IntersectionObserver === 'undefined') return undefined;
         let active = true;
         let timer: number | undefined;
         const visible = new Set<Element>();
-        const schedule = () => {
+        const schedule = (preserve = current.current?.preserveUrl ?? false) => {
             window.clearTimeout(timer);
             timer = window.setTimeout(() => {
-                const h = current.current;
+                const h = current.current?.handle;
                 if (!active || !h?.complete || h.error) return;
                 const counts = new Map<number, number>();
                 // A record's page is its current position, not the batch it first arrived in.
@@ -161,7 +215,7 @@ function useViewedPage(
                         maximum = count;
                     }
                 }
-                if (best !== undefined && best !== h.viewedPage) h.view(best, false);
+                if (best !== undefined) h.view(best, preserve);
             }, 250);
         };
         // The viewport root accounts for clipping by *all* scroll ancestors.
@@ -188,13 +242,18 @@ function useViewedPage(
             schedule();
         });
         mutations.observe(items, { childList: true });
+        refresh.current = schedule;
         return () => {
+            refresh.current = null;
             active = false;
             window.clearTimeout(timer);
             mutations.disconnect();
             observer.disconnect();
         };
     }, [items, enabled, reverse, current]);
+    useLayoutEffect(() => {
+        refresh.current?.(preserveUrl);
+    }, [preserveUrl]);
 }
 
 function useInitialBottom(items: HTMLElement | null, root: HTMLElement | null, enabled: boolean) {
@@ -219,33 +278,76 @@ function useInitialBottom(items: HTMLElement | null, root: HTMLElement | null, e
 
 // Rows can disappear while the wider live range is synchronizing. Keep the visible candidates
 // in DOM order so the next surviving row can hold the viewport if the first one disappears.
-function captureAnchor(items: HTMLElement, root: HTMLElement | null) {
+function visibleRows(items: HTMLElement, root: HTMLElement | null, handle: ScrollHandle, reverse: boolean) {
     const bounds = root?.getBoundingClientRect();
     const top = bounds?.top ?? 0;
-    const rows = Array.from(items.children).flatMap((row) => {
+    return Array.from(items.children).flatMap((row, i, rows) => {
         const rect = row.getBoundingClientRect();
+        const ordinal = (handle.firstPage - 1) * handle.size + (reverse ? rows.length - 1 - i : i);
         return rect.bottom > Math.max(top, 0) &&
             rect.top < Math.min(bounds?.bottom ?? Infinity, window.innerHeight) &&
             rect.right > Math.max(bounds?.left ?? 0, 0) &&
             rect.left < Math.min(bounds?.right ?? Infinity, window.innerWidth)
-            ? [{ row, offset: rect.top - top }]
+            ? [{ row, marker: { ordinal, offset: rect.top - top, reverse } }]
             : [];
     });
-    return () => {
-        if (!items.isConnected || (root && !root.contains(items))) return;
-        const anchor = rows.find(({ row }) => row.parentElement === items);
-        if (!anchor) return;
-        const delta = anchor.row.getBoundingClientRect().top - (root?.getBoundingClientRect().top ?? 0) - anchor.offset;
-        if (!delta) return;
-        if (root) root.scrollTop += delta;
-        else window.scrollTo({ top: window.scrollY + delta, behavior: 'instant' });
+}
+
+function alignRow(row: Element, root: HTMLElement | null, marker: ScrollAnchor) {
+    const delta = row.getBoundingClientRect().top - (root?.getBoundingClientRect().top ?? 0) - marker.offset;
+    if (!delta) return;
+    if (root) root.scrollTop += delta;
+    else window.scrollTo({ top: window.scrollY + delta, behavior: 'instant' });
+}
+
+function restoreOrdinal(
+    items: HTMLElement,
+    root: HTMLElement | null,
+    marker: ScrollAnchor,
+    handle: ScrollHandle | null | undefined,
+) {
+    if (!handle?.complete || handle.error) return false;
+    const position = marker.ordinal - (handle.firstPage - 1) * handle.size;
+    if (position < 0 || position >= (handle.lastPage - handle.firstPage + 1) * handle.size) return true;
+    const row = items.children[marker.reverse ? items.childElementCount - 1 - position : position];
+    if (!row) return false;
+    alignRow(row, root, marker);
+    return true;
+}
+
+// Completion and the DOM commit can arrive in either order. Stop watching once the row is
+// aligned, on a new command/unmount, or when the reader takes control of the scroll position.
+function holdAnchor(items: HTMLElement, root: HTMLElement | null, restore: () => boolean, onIntent?: () => void) {
+    const controller = new AbortController();
+    const changes = new MutationObserver(check);
+    function cancel() {
+        controller.abort();
+        changes.disconnect();
+    }
+    function check() {
+        if (controller.signal.aborted) return;
+        if (!items.isConnected || restore()) cancel();
+    }
+    const onScroll = () => {
+        onIntent?.();
+        cancel();
+    };
+    const target = root ?? window;
+    for (const event of ['wheel', 'touchmove', 'scroll'])
+        target.addEventListener(event, onScroll, { passive: true, signal: controller.signal });
+    return {
+        cancel,
+        complete() {
+            if (controller.signal.aborted) return;
+            changes.observe(items, { childList: true });
+            check();
+        },
     };
 }
 
 interface Expansion {
     side: Side;
     target: number;
-    restore: (() => void) | undefined;
 }
 
 function reached(handle: ScrollHandle | null, target: number) {
@@ -281,50 +383,90 @@ const MountedScroll = forwardRef<
     const [startRef, startNode] = useElement(startElement);
     const [endRef, endNode] = useElement(endElement);
     const [itemsRef, items] = useElement(itemsElement);
-    const root = useMemo(() => scrollParent(items), [items]);
+    const root = useScrollParent(items);
     const [expansion, setExpansion] = useState<Expansion | null>(null);
     const lock = useRef<Expansion | null>(null);
-    const current = useRef<ScrollHandle | null>(null);
+    const anchor = useRef<ReturnType<typeof holdAnchor> | null>(null);
+    // Only consume a numeric marker present on mount. An uninterrupted fetch owns a DOM anchor.
+    const [resumed] = useState(() => handle?.restoreAnchor);
+    const usedMarker = useRef(false);
+    const config = { handle, items, root, reverse, preserveUrl };
+    const current = useRef<typeof config | null>(null);
     useLayoutEffect(() => {
-        current.current = handle;
+        current.current = config;
         return () => {
             current.current = null;
         };
-    }, [handle]);
+    });
 
-    const fetch = useCallback(
-        (side: Side) => {
-            const h = current.current;
-            if (!h || lock.current || !allowed(h, side)) return;
-            const prepending = reverse ? side === 'next' : side === 'previous';
-            const request = {
-                side,
-                target: side === 'next' ? h.lastPage + 1 : h.firstPage - 1,
-                restore: items && prepending ? captureAnchor(items, root) : undefined,
-            };
-            lock.current = request;
-            setExpansion(request);
-            let accepted = false;
-            try {
-                // oxlint-disable-next-line typescript/no-unnecessary-boolean-literal-compare -- Only explicit false declines a command; void callbacks accept it.
-                accepted = h.fetch(side, preserveUrl) !== false;
-            } finally {
-                if (!accepted) {
-                    lock.current = null;
-                    setExpansion(null);
-                }
+    useLayoutEffect(() => {
+        if (items && resumed && resumed.reverse === reverse && !usedMarker.current) {
+            anchor.current = holdAnchor(
+                items,
+                root,
+                () => {
+                    usedMarker.current = restoreOrdinal(items, root, resumed, current.current?.handle);
+                    return usedMarker.current;
+                },
+                () => {
+                    usedMarker.current = true;
+                },
+            );
+            if (current.current?.handle?.complete) anchor.current.complete();
+        }
+        return () => {
+            anchor.current?.cancel();
+            anchor.current = null;
+        };
+    }, [items, root, resumed, reverse]);
+
+    const fetch = useCallback((side: Side) => {
+        const snapshot = current.current;
+        if (!snapshot?.handle || lock.current || !allowed(snapshot.handle, side)) return;
+        const h = snapshot.handle;
+        const prepending = snapshot.reverse ? side === 'next' : side === 'previous';
+        const container = snapshot.items;
+        const visible = container ? visibleRows(container, snapshot.root, h, snapshot.reverse) : [];
+        const marker = visible[0]?.marker;
+        anchor.current?.cancel();
+        usedMarker.current = true;
+        if (container && prepending && marker) {
+            const first = container.firstElementChild;
+            anchor.current = holdAnchor(container, snapshot.root, () => {
+                if (container.firstElementChild === first) return false;
+                const surviving = visible.find(({ row }) => row.parentElement === container);
+                if (!surviving) return restoreOrdinal(container, snapshot.root, marker, current.current?.handle);
+                alignRow(surviving.row, snapshot.root, surviving.marker);
+                return true;
+            });
+        }
+        const request = { side, target: side === 'next' ? h.lastPage + 1 : h.firstPage - 1 };
+        lock.current = request;
+        setExpansion(request);
+        let accepted = false;
+        try {
+            const result = marker ? h.fetch(side, snapshot.preserveUrl, marker) : h.fetch(side, snapshot.preserveUrl);
+            // oxlint-disable-next-line typescript/no-unnecessary-boolean-literal-compare -- Only explicit false declines a command; void callbacks accept it.
+            accepted = result !== false;
+        } finally {
+            if (!accepted) {
+                anchor.current?.cancel();
+                lock.current = null;
+                setExpansion(null);
             }
-        },
-        [items, root, reverse, preserveUrl],
-    );
+        }
+    }, []);
 
     // A cache emission (or a rerender of the old, complete window) is not an acknowledgement.
     if (expansion && (handle?.error || reached(handle, expansion.target))) setExpansion(null);
     const pending = expansion?.side;
     useLayoutEffect(() => {
         const request = lock.current;
-        if (!request || (!handle?.error && !reached(handle, request.target))) return;
-        if (!handle?.error) request.restore?.();
+        if (handle?.error) {
+            anchor.current?.cancel();
+            usedMarker.current = true;
+        } else if (!handle?.complete || (request && !reached(handle, request.target))) return;
+        else anchor.current?.complete();
         lock.current = null;
     }, [handle]);
 
@@ -335,8 +477,8 @@ const MountedScroll = forwardRef<
     useImperativeHandle(ref, () => ({
         fetchNext: (...options: unknown[]) => explicit('next', options),
         fetchPrevious: (...options: unknown[]) => explicit('previous', options),
-        hasNext: () => allowed(current.current, 'next'),
-        hasPrevious: () => allowed(current.current, 'previous'),
+        hasNext: () => allowed(current.current?.handle ?? null, 'next'),
+        hasPrevious: () => allowed(current.current?.handle ?? null, 'previous'),
     }));
 
     const manualMode = manual || (manualAfter > 0 && (handle?.count ?? 0) >= manualAfter);
@@ -344,8 +486,8 @@ const MountedScroll = forwardRef<
     useTrigger(startNode, root, buffer, 'previous', automatic && !onlyNext && allowed(handle, 'previous'), fetch);
     useTrigger(endNode, root, buffer, 'next', automatic && !onlyPrevious && allowed(handle, 'next'), fetch);
     const ready = !!handle?.complete && !handle.error;
-    useViewedPage(items, ready && !preserveUrl && !expansion, reverse, current);
-    useInitialBottom(items, root, ready && (autoScroll ?? reverse));
+    useViewedPage(items, ready && !expansion, reverse, preserveUrl, current);
+    useInitialBottom(items, root, ready && !resumed && (autoScroll ?? reverse));
     const loadingNext = pending === 'next';
     const loadingPrevious = pending === 'previous';
     const action = (side: Side) => {
@@ -368,8 +510,16 @@ const MountedScroll = forwardRef<
     const previousContent = !startElement && action('previous');
     // oxlint-disable-next-line react/refs -- Same event-only fetch callback as the previous slot.
     const nextContent = !endElement && action('next');
-    const start = !startElement && <div key="previous" ref={startRef}>{previousContent}</div>;
-    const end = !endElement && <div key="next" ref={endRef}>{nextContent}</div>;
+    const start = !startElement && (
+        <div key="previous" ref={startRef}>
+            {previousContent}
+        </div>
+    );
+    const end = !endElement && (
+        <div key="next" ref={endRef}>
+            {nextContent}
+        </div>
+    );
     return (
         <>
             {reverse ? end : start}

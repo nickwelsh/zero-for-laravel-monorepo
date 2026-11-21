@@ -619,6 +619,63 @@ it.each([403, 404] as const)(
 
 const protectedBinding = { query: 'tasks', args: { title: '' }, access: { status: 403 as const } };
 
+it('keeps guarded rows hidden while a prepended range synchronizes and after revocation', async () => {
+    const adapter = createInertiaAdapter({
+        feed: (args: Parameters<typeof paginated.tasks>[0]) =>
+            liveQuery(paginated.tasks, args, definitions, 'Task', false, 1, undefined, 5, {
+                mode: 'scroll',
+                name: 'page',
+            }),
+    });
+    const page = {
+        component: 'List',
+        url: '/list?page=2',
+        props: {
+            __zero: {
+                version: 1,
+                mode: 'replace',
+                bindings: { feed: { query: 'feed', args: {}, access: { scope: 'page', status: 403 } } },
+            },
+        },
+    };
+    const ref = createRef<InfiniteScrollRef>();
+    const Page = adapter.wrap(
+        ({ feed }: { feed: Data<readonly { id: string }[]> }) => (
+            <InfiniteScroll data="feed" as="nav" manual ref={ref}>
+                {feed.data.map(({ id }) => (
+                    <span key={id}>{id}</span>
+                ))}
+            </InfiniteScroll>
+        ),
+        page,
+    );
+    const props = page.props as unknown as { feed: Data<readonly { id: string }[]> };
+    const replace = vi.spyOn(router, 'replace').mockImplementation(() => {});
+    const view = render(<Page {...props} />);
+    try {
+        await ready();
+        await answer();
+        put(native.requests.at(-1)!.args, rows);
+        view.rerender(<Page {...props} />);
+        expect(screen.getByRole('navigation').textContent).toBe('b');
+        act(() => ref.current!.fetchPrevious());
+        const expanded = native.requests.at(-1)!.args;
+        put(expanded, rows, 'unknown');
+        view.rerender(<Page {...props} />);
+        expect(screen.queryByRole('navigation')).toBeNull();
+        put(expanded, rows);
+        view.rerender(<Page {...props} />);
+        expect(screen.getByRole('navigation').textContent).toBe('ab');
+        await answer('denied', 403);
+        expect(ref.current).toBeNull();
+        expect(screen.queryByRole('navigation')).toBeNull();
+    } finally {
+        view.unmount();
+        adapter.dispose();
+        replace.mockRestore();
+    }
+});
+
 it('renders a retained query without a live approval, not an unknown result or a revoked one', async () => {
     const args = { title: '', __route: 'index', __routeArgs: {} };
     const access = { scope: 'page', status: 403 } as const;

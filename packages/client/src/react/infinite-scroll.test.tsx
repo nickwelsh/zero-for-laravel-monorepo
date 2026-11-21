@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
-import { createRef, type ReactNode } from 'react';
+import { createRef, StrictMode, type ReactNode } from 'react';
 import { afterEach, expect, it, vi } from 'vite-plus/test';
 import { InfiniteScroll, type InfiniteScrollRef } from './infinite-scroll';
 import { NamedScroll, type ScrollHandle } from './scroll-context';
@@ -158,6 +158,7 @@ it('restores the first surviving visible row in the scroller only after the prep
     const row = screen.getByText('B');
     row.getBoundingClientRect = () => new DOMRect(0, rowTop, 200, 10);
     act(() => ref.current!.fetchPrevious());
+    expect(scroll.fetch).toHaveBeenCalledWith('previous', false, { ordinal: 4, offset: 5, reverse: false });
     rowTop += 20;
     update({ ...scroll, firstPage: 2, complete: false }, feed(['Y', 'Z', 'B']));
     expect(root.scrollTop).toBe(50);
@@ -166,7 +167,7 @@ it('restores the first surviving visible row in the scroller only after the prep
     expect(root.scrollTop).toBe(80);
 });
 
-it('infers the most visible page from current positions after a live reorder and cancels pending preserveUrl writes', async () => {
+it('reports live row positions with the current URL policy, including when preservation is switched off', async () => {
     vi.useFakeTimers();
     const observer = observeIntersections();
     const scroll = { ...page(), firstPage: 2, viewedPage: 2 };
@@ -198,7 +199,118 @@ it('infers the most visible page from current positions after a live reorder and
     act(() => {
         vi.advanceTimersByTime(300);
     });
-    expect(scroll.view).toHaveBeenCalledTimes(2);
+    expect(scroll.view).toHaveBeenLastCalledWith(2, true);
+    update({ ...scroll, viewedPage: 2 }, feed(['C', 'D', 'A', 'B']));
+    act(() => {
+        vi.advanceTimersByTime(300);
+    });
+    expect(scroll.view).toHaveBeenLastCalledWith(2, false);
+});
+
+it.each([false, true])('waits for deferred prepend DOM without fighting a reader who scrolled (%s)', async (moved) => {
+    const scroll = page();
+    const ref = createRef<InfiniteScrollRef>();
+    const feed = (rows: string[]) => (
+        <section data-testid="scroller" style={{ overflowY: 'scroll' }}>
+            <InfiniteScroll data="feed" manual ref={ref}>
+                {rows.map((r) => (
+                    <p key={r}>{r}</p>
+                ))}
+            </InfiniteScroll>
+        </section>
+    );
+    const update = mount(scroll, feed(['A']));
+    const root = screen.getByTestId('scroller');
+    root.getBoundingClientRect = () => new DOMRect(0, 0, 100, 100);
+    let top = 40;
+    screen.getByText('A').getBoundingClientRect = () => new DOMRect(0, top, 100, 10);
+    act(() => ref.current!.fetchPrevious());
+    const complete = { ...scroll, firstPage: 2, count: 1 };
+    update(complete, feed(['A']));
+    if (moved) {
+        fireEvent.wheel(root, { deltaY: 10 });
+        root.scrollTop = 10;
+        fireEvent.scroll(root);
+    }
+    top += 30;
+    await act(async () => update(complete, feed(['Y', 'Z', 'A'])));
+    expect(root.scrollTop).toBe(moved ? 10 : 30);
+});
+
+it('reattaches automatic sentinels when the existing ancestor becomes a scroller', async () => {
+    const observer = observeIntersections();
+    mount(
+        page(),
+        <section data-testid="root">
+            <InfiniteScroll data="feed" next="Next" />
+        </section>,
+    );
+    const sentinel = screen.getByText('Next');
+    expect(observer(sentinel)?.options?.root).toBe(null);
+    const root = screen.getByTestId('root');
+    await act(async () => {
+        root.style.overflowY = 'scroll';
+    });
+    expect(observer(sentinel)?.options?.root).toBe(root);
+});
+
+it('recovers an interrupted prepend by ordinal after a guarded remount and deferred reverse rows', async () => {
+    const scroll = page();
+    const ref = createRef<InfiniteScrollRef>();
+    const resumed = { ...scroll, firstPage: 2, restoreAnchor: { ordinal: 4, offset: 12, reverse: true } };
+    const feed = (rows: string[], autoScroll = true) => (
+        <StrictMode>
+            <section data-testid="chat" style={{ overflowY: 'scroll' }}>
+                <InfiniteScroll ref={ref} data="feed" manual reverse autoScroll={autoScroll}>
+                    {rows.map((r) => (
+                        <p
+                            key={r}
+                            ref={(el) => {
+                                if (el) el.getBoundingClientRect = () => new DOMRect(0, r === 'E' ? 82 : 40, 100, 10);
+                            }}
+                        >
+                            {r}
+                        </p>
+                    ))}
+                </InfiniteScroll>
+            </section>
+        </StrictMode>
+    );
+    const update = mount(scroll, feed(['F', 'E'], false));
+    const original = screen.getByTestId('chat');
+    original.getBoundingClientRect = () => new DOMRect(0, 20, 100, 100);
+    screen.getByText('F').getBoundingClientRect = () => new DOMRect(0, -20, 100, 10);
+    screen.getByText('E').getBoundingClientRect = () => new DOMRect(0, 32, 100, 10);
+    act(() => ref.current!.fetchPrevious());
+    expect(scroll.fetch).toHaveBeenCalledWith('previous', false, resumed.restoreAnchor);
+    update(null, <p>Checking access</p>);
+    expect(original.isConnected).toBe(false);
+    update({ ...resumed, complete: false }, feed([]));
+    const root = screen.getByTestId('chat');
+    const bottom = vi.fn();
+    root.scrollTo = bottom;
+    root.getBoundingClientRect = () => new DOMRect(0, 20, 100, 100);
+    // The adapter is free to clear its numeric marker when the range completes.
+    update({ ...scroll, firstPage: 2 }, feed([]));
+    await act(async () => update({ ...scroll, firstPage: 2 }, feed(['F', 'E', 'D', 'C'])));
+    expect(root.scrollTop).toBe(50);
+    await act(async () => update({ ...scroll, firstPage: 2 }, feed(['G', 'F', 'E', 'D', 'C'])));
+    expect(root.scrollTop).toBe(50);
+    expect(bottom).not.toHaveBeenCalled();
+});
+
+it('diagnoses sentinels outside the items scroller rather than registering unreachable targets', () => {
+    observeIntersections();
+    expect(() =>
+        mount(
+            page(),
+            <InfiniteScroll data="feed" style={{ overflowY: 'scroll' }} itemsElement="#rows">
+                <ul id="rows">
+                    <li>A</li>
+                </ul>
+            </InfiniteScroll>,
+        ),
+    ).toThrow(/startElement|endElement/);
 });
 
 it('reverses the slots and scrolls to the bottom on the first live rows, not on every live update', async () => {
@@ -255,6 +367,16 @@ it('leaves the next action available when a superseded handle declines a fetch',
     act(() => ref.current!.fetchNext());
     expect(scroll.fetch).toHaveBeenCalledTimes(2);
     expect(screen.getByText('waiting')).toBeDefined();
+});
+
+it('uses the latest URL policy when a caller keeps a fetch callback across renders', () => {
+    const scroll = page();
+    const ref = createRef<InfiniteScrollRef>();
+    const update = mount(scroll, <InfiniteScroll data="feed" ref={ref} manual />);
+    const fetchNext = ref.current!.fetchNext;
+    update(scroll, <InfiniteScroll data="feed" ref={ref} manual preserveUrl />);
+    act(() => fetchNext());
+    expect(scroll.fetch).toHaveBeenCalledWith('next', true);
 });
 
 it('maps reverse DOM order back to query positions when the last page is short', () => {

@@ -67,6 +67,19 @@ function ordinal(value: unknown, min: number) {
     return value;
 }
 
+function scrollHistory(value: unknown): ScrollHistory {
+    const raw = object(value, 'scroll history');
+    const state = { viewed: ordinal(raw.viewed, 1), urlPage: ordinal(raw.urlPage, 1), count: ordinal(raw.count, 0) };
+    if (raw.anchor === undefined) return state;
+    const anchor = object(raw.anchor, 'scroll anchor');
+    if (typeof anchor.offset !== 'number' || !Number.isFinite(anchor.offset) || typeof anchor.reverse !== 'boolean')
+        throw new Error('Invalid scroll anchor.');
+    return {
+        ...state,
+        anchor: { ordinal: ordinal(anchor.ordinal, 0), offset: anchor.offset, reverse: anchor.reverse },
+    };
+}
+
 function metadata(input: unknown): Metadata {
     if (input === undefined) return { version: 1, mode: 'replace', bindings: {} };
     const source = object(input, '__zero');
@@ -101,19 +114,10 @@ function metadata(input: unknown): Metadata {
                     return [field, choices as (string | number)[]];
                 }),
             );
-            const scroll = binding.scroll === undefined ? undefined : object(binding.scroll, 'scroll history');
             bindings[prop] = {
                 query: binding.query,
                 args: object(binding.args, 'args'),
-                ...(scroll
-                    ? {
-                          scroll: {
-                              viewed: ordinal(scroll.viewed, 1),
-                              urlPage: ordinal(scroll.urlPage, 1),
-                              count: ordinal(scroll.count, 0),
-                          },
-                      }
-                    : {}),
+                ...(binding.scroll === undefined ? {} : { scroll: scrollHistory(binding.scroll) }),
                 ...(access
                     ? {
                           access: {
@@ -398,7 +402,7 @@ function InputSubscription({
     );
     return binding.access && binding.access.scope !== 'page' ? (
         <AccessBoundary
-            binding={{ ...binding, args: state.args }}
+            binding={{ query: binding.query, access: binding.access, args: state.args }}
             prop={prop}
             options={access}
             replica={replica}
@@ -718,7 +722,12 @@ export function createInertiaAdapter(factories: BindingFactories, options: Inert
                 if (!pageGuard) return body;
                 const [prop, binding] = pageGuard;
                 return (
-                    <AccessBoundary binding={binding} prop={prop} options={accessOptions(binding)} replica={replica}>
+                    <AccessBoundary
+                        binding={{ query: binding.query, access: binding.access!, args: binding.args }}
+                        prop={prop}
+                        options={accessOptions(binding)}
+                        replica={replica}
+                    >
                         {body}
                     </AccessBoundary>
                 );

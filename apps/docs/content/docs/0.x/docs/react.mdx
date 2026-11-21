@@ -180,9 +180,11 @@ limit automatic loads. For a newest-first chat query, render the rows in reverse
 query order (oldest first) and pass `reverse`. This swaps trigger placement and
 starts at the bottom; it does not reorder your children. `autoScroll` overrides
 the initial positioning. Use `manual` to disable automatic triggers.
-`itemsElement`, `startElement`, and
-`endElement` accept selectors or React refs. Use one keyed direct child per row
-in the items container for reliable page detection and scroll anchoring.
+`itemsElement`, `startElement`, and `endElement` accept selectors or React refs.
+Use one keyed direct child per row in the items container for reliable page
+detection and scroll anchoring. If that container scrolls separately from the
+wrapper, place custom triggers inside the scrollable region so they can enter
+its viewport.
 
 The URL follows the page with the most visible items. `preserveUrl` keeps the
 incoming link unchanged. The first and last loaded pages are retained on warm

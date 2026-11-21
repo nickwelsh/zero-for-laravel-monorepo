@@ -2,11 +2,19 @@ import { createContext, useContext, useEffect, type ReactNode } from 'react';
 import { scrollPosition, type LivePagination, type PagePosition } from '../pagination';
 import type { Data } from './data';
 
+/** Positional fallback if an authorization check temporarily unmounts the entire page. */
+export interface ScrollAnchor {
+    ordinal: number;
+    offset: number;
+    reverse: boolean;
+}
+
 /** Stored alongside the binding in Inertia history, never sent as query input. */
 export interface ScrollHistory {
     viewed: number;
     urlPage: number;
     count: number;
+    anchor?: ScrollAnchor;
 }
 
 export interface ScrollHandle {
@@ -20,7 +28,8 @@ export interface ScrollHandle {
     hasPrevious: boolean;
     complete: boolean;
     error: Error | undefined;
-    fetch(side: 'next' | 'previous', preserveUrl: boolean): boolean;
+    restoreAnchor?: ScrollAnchor;
+    fetch(side: 'next' | 'previous', preserveUrl: boolean, anchor?: ScrollAnchor): boolean;
     view(page: number, preserveUrl: boolean): void;
 }
 
@@ -71,8 +80,10 @@ export function ScrollWindow({
     // Each successful expansion adds exactly one page. A failed or partial range is not a success.
     const count = ready ? last - first : state.count;
     useEffect(() => {
-        if (history && count !== history.count) save(initial.wire, { ...history, count });
-    }, [count, history, initial, save]);
+        if (history && (count !== history.count || (data.error && history.anchor))) {
+            save(initial.wire, { viewed: history.viewed, urlPage: history.urlPage, count });
+        }
+    }, [count, history, initial, save, data.error]);
     const handle: ScrollHandle = {
         identity,
         firstPage: first,
@@ -84,10 +95,16 @@ export function ScrollWindow({
         hasPrevious: ready && first > 1,
         complete: ready,
         error: data.error,
-        fetch(side) {
+        ...(state.anchor ? { restoreAnchor: state.anchor } : {}),
+        fetch(side, _preserveUrl, anchor) {
             if (side === 'next' ? !handle.hasNext : !handle.hasPrevious) return false;
             const position = pagination.range(scrollPosition(initial, size, side));
-            return save(position.wire, { ...state, count });
+            return save(position.wire, {
+                viewed: state.viewed,
+                urlPage: state.urlPage,
+                count,
+                ...(anchor ? { anchor } : {}),
+            });
         },
         view(page, preserveUrl) {
             if (!ready || !Number.isSafeInteger(page) || page < first || page > last) return;
