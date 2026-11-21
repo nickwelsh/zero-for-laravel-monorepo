@@ -33,9 +33,15 @@ its own generated live props; run Zero generation before Wayfinder generation.
 
 ```sh
 php artisan vendor:publish --tag=zero-config
+php artisan migrate
 php artisan zero:generate --react
 php artisan zero:sync-publication --dry-run
 ```
+
+Migrations install the private binding between each mutation client group and its
+authenticated Zero identity. After upgrading, reset clients whose existing progress
+predates that binding so they reconnect with a new client group; the server refuses
+to guess ownership of legacy bookkeeping.
 
 Review and apply publication changes to the application's configured PostgreSQL
 database. Deploy generated PHP and TypeScript together; use `zero:generate --check`

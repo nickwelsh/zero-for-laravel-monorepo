@@ -27,6 +27,7 @@ use ReflectionClass;
 use ReflectionMethod;
 use ReflectionNamedType;
 use ZeroForLaravel\Attributes;
+use ZeroForLaravel\Mutation\MutationIdentitySchema;
 use ZeroForLaravel\Permissions\Binding;
 use ZeroForLaravel\Permissions\ProjectionManager;
 use ZeroForLaravel\Search\ScoutSearch;
@@ -250,6 +251,10 @@ final class ModelRegistry
         $name = (new ReflectionClass($class))->getShortName();
         if (in_array($model->getTable(), ['permission_access_checks', 'permission_access_revision', 'permission_access_results'], true)) {
             throw new LogicException('Access infrastructure tables cannot be registered as application models.');
+        }
+
+        if ($model->getTable() === MutationIdentitySchema::TABLE) {
+            throw new LogicException('Mutation identity infrastructure cannot be registered as an application model.');
         }
 
         if (! preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/D', $model->getTable())) {
