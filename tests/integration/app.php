@@ -227,7 +227,8 @@ if (PHP_SAPI === 'cli') {
     if (($argv[1] ?? null) === 'dev') {
         exit(Artisan::call('zero:dev', [], new ConsoleOutput));
     }
-    if (Artisan::call('migrate', ['--path' => __DIR__.'/migrations', '--realpath' => true, '--force' => true]) !== 0 || Artisan::call('zero:generate') !== 0 || Artisan::call('zero:generate', ['--check' => true]) !== 0) {
+    app('migrator')->path(__DIR__.'/migrations');
+    if (Artisan::call('migrate', ['--force' => true]) !== 0 || Artisan::call('zero:generate') !== 0 || Artisan::call('zero:generate', ['--check' => true]) !== 0) {
         throw new RuntimeException('Fixture setup failed.');
     }
     Schema::table('users', function (Illuminate\Database\Schema\Blueprint $table): void {
