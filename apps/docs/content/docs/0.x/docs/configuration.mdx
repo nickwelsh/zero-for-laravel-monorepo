@@ -80,7 +80,10 @@ Configure both classes using `context` and `context_resolver`. Every enum case
 requires exactly one mapping. Methods return native `string`, `int`, `float`, or
 `bool`, optionally nullable; service parameters use Laravel DI. Use configured
 enum cases directly in query values and `withAttributes()` for symbolic context
-references. `ZeroContext::USER_ID->value` remains a literal string.
+references in live-only declarations. In a shared Eloquent scope, use
+`ZeroForLaravel\Context\ContextReference::current(ZeroContext::USER_ID)` so
+ordinary Eloquent receives the resolved scalar. `ZeroContext::USER_ID->value`
+remains a literal string.
 
 At runtime `ResolvedContext` carries validated values separately from the
 authenticated Zero `userID`. Identity is never inferred from a context field.

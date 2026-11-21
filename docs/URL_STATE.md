@@ -1,10 +1,17 @@
 # URL state integration
 
-URL state is opt-in. Zero queries and the framework-neutral table descriptor do
+Table and filter URL state is opt-in. Zero queries and the framework-neutral table descriptor do
 not import a browser or Inertia. A page can own several independent instances of
 the same descriptor, alongside other queries, without creating separate pages.
 See `examples/todos/resources/js/pages/url-state.tsx` and its `URLStateController`
 for a working two-source page at `/url-state`.
+
+Paginated Inertia live props own their position automatically. `paginate()` and
+`simplePaginate()` read `?page=3`; `cursorPaginate()` reads an opaque `?cursor=…`.
+Use `pageName:` or `cursorName:` to give each paginator a separate parameter.
+Do not register these positions as FormRequest fields or map them as scalar filters.
+Explicit page navigation pushes history; `Zero::scroll()` grows the visible
+window and replaces the position. Route-free selections leave the URL alone.
 
 ## Wire contract
 

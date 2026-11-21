@@ -431,13 +431,14 @@ part of this integration. The optional React producer helper is exported from
 
 ## Creation defaults
 
-Use `withAttributes` on a Zero query or in a Zero scope to supply creation
+Use `withAttributes` on the Eloquent creation builder or in a shared Eloquent scope to supply creation
 defaults. By default it also adds equality conditions to reads:
 
 ```php
 use App\Enums\ZeroContext;
+use ZeroForLaravel\Context\ContextReference;
 
-$query->withAttributes(['user_id' => ZeroContext::USER_ID]);
+$query->withAttributes(['user_id' => ContextReference::current(ZeroContext::USER_ID)]);
 // Read condition: user_id equals the resolved context value.
 // Create default: user_id is that value.
 // Explicit creation data can override it.
@@ -450,7 +451,7 @@ For a default without an owner-only read filter, pass `asConditions: false`:
 // Set the creator without an owner-only read condition.
 $query->whereHas('memberships')
     ->withAttributes(
-        ['user_id' => ZeroContext::USER_ID],
+        ['user_id' => ContextReference::current(ZeroContext::USER_ID)],
         asConditions: false,
     );
 ```

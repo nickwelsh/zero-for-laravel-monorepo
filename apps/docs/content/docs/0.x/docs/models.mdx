@@ -70,12 +70,13 @@ Globals remain AND constraints outside caller OR groups.
 `withoutGlobalScope()` / `withoutGlobalScopes()` remove their predicates and defaults.
 These business scopes do not replace explicit policy visibility.
 
-`withAttributes(['user_id' => ZeroContext::USER_ID], asConditions: false)` supplies
+`withAttributes(['user_id' => ContextReference::current(ZeroContext::USER_ID)], asConditions: false)` supplies
 creation-only defaults from the application's typed context enum. Without
 `asConditions: false`, the attributes also constrain reads. Register a creator
 default in `booted()` with `addGlobalScope()` when needed. Explicit creation
 attributes override defaults; updates do not receive them. These defaults are
-not an ownership authorization boundary. Context enum cases are symbolic;
+not an ownership authorization boundary. `ZeroForLaravel\Context\ContextReference::current()`
+resolves the value for Eloquent and compiles to a trusted context reference for Zero;
 `ZeroContext::USER_ID->value` is just a literal string. See
 [configuration](./configuration.mdx) for the attributed resolver contract.
 
