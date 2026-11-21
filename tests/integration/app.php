@@ -93,15 +93,15 @@ class FixtureReads
 
         return Inertia::render('fixture/todos', [
             'heading' => 'Private heading',
-            'todos' => Todo::zeroQuery(),
-            'latest' => Todo::zeroQuery()->orderBy('title', 'desc')->limit(1),
+            'todos' => Todo::zeroQuery()->get(),
+            'latest' => Todo::zeroQuery()->orderByDesc('title')->limit(1)->get(),
         ]);
     }
 
     public function index(): Response
     {
         return Inertia::render('fixture/related', [
-            'tasks' => Task::zeroQuery()->with('tags'),
+            'tasks' => Task::zeroQuery()->with('tags')->get(),
         ]);
     }
 }

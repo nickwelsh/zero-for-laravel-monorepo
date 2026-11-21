@@ -465,7 +465,10 @@ final class ControllerMutationCompiler
                     $inputs[$name] = new QueryExpression($type['kind'] === 'request' ? 'request' : 'local', $name, type: $type['kind'] === 'request' ? 'request:'.($type['type'] ?? throw new LogicException('Request input requires a FormRequest class.')) : ($type['type'] ?? 'unknown'));
                 }
 
-                $query = (new ControllerQueryCompiler($this->parser, $this->models))->construction($expr->var, $inputs);
+                $query = (new ControllerQueryCompiler($this->parser, $this->models, modelEntry: 'query'))->construction($expr->var, $inputs);
+                if ($query->isTerminal()) {
+                    $this->fail($expr, 'A create requires an Eloquent builder, not a completed read.');
+                }
                 $node = $this->create($expr, $query->queryModel()->class, $variables);
                 $node['defaults'] = ScopeCompiler::mutation(ScopeCompiler::attributes($query));
 

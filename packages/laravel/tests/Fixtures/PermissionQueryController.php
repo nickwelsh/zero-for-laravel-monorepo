@@ -13,7 +13,7 @@ final class PermissionQueryController
 {
     public function index(Request $request): Response
     {
-        return Inertia::render('lists/index', ['lists' => PermissionList::zeroQuery()->visibleTo($request->user())->orderBy('id', 'asc')->paginate(2)]);
+        return Inertia::render('lists/index', ['lists' => PermissionList::zeroQuery()->visibleTo($request->user())->orderBy('id', 'asc')->cursorPaginate(2)]);
     }
 
     public function show(PermissionList $list): Response

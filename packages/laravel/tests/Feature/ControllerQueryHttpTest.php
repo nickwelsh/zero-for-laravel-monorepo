@@ -152,7 +152,7 @@ final class HookedQueries
 {
     public function all(HookedQueryRequest $input): ZeroQuery
     {
-        return Task::zeroQuery()->visibleTo($input->user());
+        return Task::zeroQuery()->visibleTo($input->user())->get();
     }
 }
 

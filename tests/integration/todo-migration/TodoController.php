@@ -22,14 +22,14 @@ final class TodoController
     {
         $this->authorize('viewAny', Todo::class);
 
-        return Inertia::render('todos/index', ['todos' => Todo::zeroQuery()->orderBy('title', 'asc')]);
+        return Inertia::render('todos/index', ['todos' => Todo::zeroQuery()->orderBy('title')->get()]);
     }
 
     public function notes(): Response
     {
         $this->authorize('viewAny', Todo::class);
 
-        return Inertia::render('notes', ['activity' => Todo::zeroQuery()->orderBy('title', 'asc')]);
+        return Inertia::render('notes', ['activity' => Todo::zeroQuery()->orderBy('title')->get()]);
     }
 
     public function show(Todo $todo): Response
