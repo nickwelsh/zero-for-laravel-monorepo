@@ -8,6 +8,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
 use Inertia\Inertia;
 use Inertia\Response;
+use ZeroForLaravel\Zero;
 
 final class QueryController
 {
@@ -25,12 +26,12 @@ final class QueryController
 
     public function window(Request $request): Response
     {
-        return Inertia::render('tasks/window', ['tasks' => Task::zeroQuery()->visibleTo($request->user())->orderBy('title', 'desc')->infinite(2)]);
+        return Inertia::render('tasks/window', ['tasks' => Zero::scroll(Task::zeroQuery()->visibleTo($request->user())->orderBy('title', 'desc')->paginate(2))]);
     }
 
     public function pages(Request $request): Response
     {
-        return Inertia::render('tasks/pages', ['tasks' => Task::zeroQuery()->visibleTo($request->user())->orderBy('created_at', 'desc')->paginate(2)]);
+        return Inertia::render('tasks/pages', ['tasks' => Task::zeroQuery()->visibleTo($request->user())->orderBy('created_at', 'desc')->cursorPaginate(2)]);
     }
 
     public function dated(DateQueryRequest $input): Response
@@ -42,7 +43,7 @@ final class QueryController
 
     public function choices(ChoiceQueryRequest $input): Response
     {
-        return Inertia::render('tasks/choices', ['tasks' => Task::zeroQuery()->visibleTo($input->user())->orderBy('id', 'asc')->infinite(2)]);
+        return Inertia::render('tasks/choices', ['tasks' => Zero::scroll(Task::zeroQuery()->visibleTo($input->user())->orderBy('id', 'asc')->paginate(2))]);
     }
 
     public function search(QueryRequest $input): Response
@@ -53,7 +54,7 @@ final class QueryController
             $query = $query->where('title', 'LIKE', '%'.$validated['title'].'%');
         }
 
-        return Inertia::render('tasks/search', ['tasks' => $query->orderBy('id', 'asc')->infinite(2)]);
+        return Inertia::render('tasks/search', ['tasks' => Zero::scroll($query->orderBy('id', 'asc')->paginate(2))]);
     }
 
     public function index(Request $request, string $title): Response
@@ -78,16 +79,11 @@ final class QueryController
 
     public function filtered(Request $request, string $title, bool $showDone, int $window): Response
     {
-        $query = Task::zeroQuery()->visibleTo($request->user());
-        if (! $showDone) {
-            $query = $query->where('done', false);
-        }
+        $query = Task::zeroQuery()->visibleTo($request->user())
+            ->unless($showDone, fn ($query) => $query->where(['done' => false]))
+            ->when($title !== '', fn ($query) => $query->where('title', 'like', '%'.$title.'%'));
 
-        if ($title !== '') {
-            $query = $query->where('title', 'LIKE', '%'.$title.'%');
-        }
-
-        return Inertia::render('tasks/filtered', ['tasks' => $query->orderBy('id', 'asc')->limit($window)->get()]);
+        return Inertia::render('tasks/filtered', ['tasks' => $query->orderBy('id')->take($window)->get()]);
     }
 
     public function relationships(Request $request, string $title): Response
@@ -95,10 +91,10 @@ final class QueryController
         return Inertia::render('tasks/relationships', [
             'tasks' => Task::zeroQuery()
                 ->visibleTo($request->user())
-                ->where('title', 'NOT IN', [$title, 'hidden'])
+                ->whereNotIn('title', [$title, 'hidden'])
                 ->whereDoesntHave('comments', fn ($query) => $query->visibleTo($request->user())->where('body', 'secret'))
-                ->whereExists('list', fn ($query) => $query->visibleTo($request->user())->where('id', 'list-a'), ['scalar' => true])
-                ->whereExists('comments', fn ($query) => $query->visibleTo($request->user()), ['flip' => false])
+                ->whereHas('list', fn ($query) => $query->visibleTo($request->user())->whereKey('list-a'))
+                ->whereHas('comments', fn ($query) => $query->visibleTo($request->user()))
                 ->with('comments', fn ($query) => $query->visibleTo($request->user())->where('body', '!=', $title)->orderBy('id', 'desc')->limit(2))
                 ->with('list', fn ($query) => $query->visibleTo($request->user()))
                 ->orderBy('title', 'desc')->orderBy('id', 'asc')

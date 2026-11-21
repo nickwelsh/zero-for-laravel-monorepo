@@ -80,9 +80,9 @@ test('finite FormRequest choices generate literal unions and runtime options wit
         ->and($contract->fields['status']->choices())->toBe(['active', 'completed'])
         ->and($contract->fields['direction']->typescript())->toBe('"asc" | "desc" | null')
         ->and($contract->fields['direction']->optional)->toBeTrue();
-    $schema = (new ZodSchemaDriver)->object(['input' => 'request:'.ChoiceQueryRequest::class]);
+    $schema = (new ZodSchemaDriver)->object(['input' => 'request:'.ChoiceQueryRequest::class], pagination: 'scroll');
     expect($schema)->toContain('z.literal(2)', 'z.literal(7)', 'z.literal("active")', '.nullable().optional()', '__window: z.number().int().min(1).max(7)');
-    expect((new EffectSchemaDriver)->object([]))->toContain('EffectSchema.isLessThanOrEqualTo(7)');
+    expect((new EffectSchemaDriver)->object([], pagination: 'scroll'))->toContain('EffectSchema.isLessThanOrEqualTo(7)');
 });
 
 test('registered controller queries preserve input branches without executing the HTTP action', function (): void {
@@ -156,7 +156,7 @@ test('standalone query declarations reject implicit binding and unrepresented gu
     /** @var TestCase $this */
     app()->register(SurveyorServiceProvider::class);
     app()->instance(ModelRegistry::class, new ModelRegistry($this->models()));
-    foreach (['bound' => 'no route model binding', 'unsafe' => 'Statement or guard cannot be represented', 'nullable' => 'public instance method returning ZeroQuery'] as $method => $message) {
+    foreach (['bound' => 'no route model binding', 'unsafe' => 'Statement or guard cannot be represented', 'nullable' => 'public instance method returning ZeroQuery', 'bare' => 'Finish the live read', 'afterResult' => 'final query operation', 'mixedResult' => 'result contract across branches'] as $method => $message) {
         expect(fn () => resolve(ControllerQueryCompiler::class)->compile(InvalidStandaloneQueries::class, $method))
             ->toThrow(LogicException::class, $message);
     }
@@ -164,6 +164,26 @@ test('standalone query declarations reject implicit binding and unrepresented gu
 
 final class InvalidStandaloneQueries
 {
+    public function bare(): ZeroQuery
+    {
+        return Task::zeroQuery();
+    }
+
+    public function afterResult(): ZeroQuery
+    {
+        return Task::zeroQuery()->get()->limit(1);
+    }
+
+    public function mixedResult(bool $finish): ZeroQuery
+    {
+        $tasks = Task::zeroQuery();
+        if ($finish) {
+            $tasks = $tasks->get();
+        }
+
+        return $tasks->get();
+    }
+
     public function bound(Task $task): ZeroQuery
     {
         return Task::zeroQuery()->where('id', $task->id);

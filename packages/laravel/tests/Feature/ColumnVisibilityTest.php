@@ -4,11 +4,11 @@ declare(strict_types=1);
 
 namespace ZeroForLaravel\Tests\Feature;
 
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Foundation\Auth\User;
-use Illuminate\Validation\ValidationException;
 use LogicException;
 use ZeroForLaravel\Attributes\ZeroColumns;
 use ZeroForLaravel\Attributes\ZeroExclude;
@@ -16,6 +16,7 @@ use ZeroForLaravel\Attributes\ZeroIncludeColumns;
 use ZeroForLaravel\Attributes\ZeroPublic;
 use ZeroForLaravel\Concerns\HasPolicyVisibility;
 use ZeroForLaravel\Concerns\HasZeroQueries;
+use ZeroForLaravel\Context\ContextReference;
 use ZeroForLaravel\Generation\TypeScriptGenerator;
 use ZeroForLaravel\Metadata\ModelRegistry;
 use ZeroForLaravel\Query\QueryCompiler;
@@ -70,7 +71,7 @@ test('creation defaults cannot expose omitted visible columns', function (): voi
     $registry = new ModelRegistry([MissingVisibleFill::class]);
     $model = $registry->get('MissingVisibleFill');
     expect($model->columns)->not->toHaveKey('user_id');
-    expect(fn (): array => (new ZeroQuery($model, $registry))->ast())->toThrow(ValidationException::class);
+    expect(fn (): array => (new ZeroQuery($model, $registry))->ast())->toThrow(LogicException::class, 'Creation defaults require an exposed, fillable, non-metadata column.');
     expect(fn (): string => (new TypeScriptGenerator)->generate($registry))
         ->toThrow(LogicException::class, 'Creation defaults require an exposed, fillable, non-metadata column.');
 });
@@ -170,8 +171,8 @@ class MissingVisibleFill extends VisibleTask
 
     protected static function booted(): void
     {
-        static::addZeroGlobalScope('creator', function (ZeroQuery $query): void {
-            $query->withAttributes(['user_id' => ZeroContext::USER_ID], asConditions: false);
+        static::addGlobalScope('creator', function (Builder $query): void {
+            $query->withAttributes(['user_id' => ContextReference::current(ZeroContext::USER_ID)], asConditions: false);
         });
     }
 }

@@ -15,14 +15,18 @@ final readonly class ZodSchemaDriver implements SchemaDriver
         return "import {z} from 'zod';";
     }
 
-    public function object(array $parameters, ?array $cursor = null, bool $public = false, array $contracts = [], bool $routed = true, bool $window = false): string
+    public function object(array $parameters, ?array $cursor = null, bool $public = false, array $contracts = [], bool $routed = true, ?string $pagination = null): string
     {
         $fields = $routed ? [
             '__route: z.string().optional()',
             '__routeArgs: z.record(z.string(), z.union([z.string(), z.number().int()])).optional()',
         ] : [];
-        if ($routed || $window) {
+        if ($pagination === 'scroll') {
             $fields[] = '__window: z.number().int().min(1).max('.QueryLimits::liveWindow().').optional()';
+        }
+
+        if (in_array($pagination, ['numbered', 'scroll'], true)) {
+            $fields[] = '__page: z.number().int().min(1).max('.(QueryLimits::liveWindow() - 1).').optional()';
         }
 
         if (! $public) {
@@ -40,9 +44,12 @@ final readonly class ZodSchemaDriver implements SchemaDriver
             }
 
             $fields[] = '__cursor: z.strictObject({'.implode(', ', $columns).'}).optional()';
+            $fields[] = '__reverse: z.boolean().optional()';
         }
 
-        return 'z.strictObject({'.implode(', ', $fields).'})';
+        $object = 'z.strictObject({'.implode(', ', $fields).'})';
+
+        return $cursor === null ? $object : $object.'.refine(args => args.__reverse === undefined || args.__cursor !== undefined, "A cursor direction requires a boundary.")';
     }
 
     public function parse(string $schema, string $input): string

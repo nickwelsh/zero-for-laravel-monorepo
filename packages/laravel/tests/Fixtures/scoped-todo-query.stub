@@ -1,0 +1,12 @@
+<?php
+
+namespace ZeroForLaravel\Query;
+
+/**
+ * Dynamic scope names used by the ScopedTodo fixture, not package APIs.
+ *
+ * @property-read HigherOrderQuery $orWhere
+ * @method self completed()
+ * @method self named(string $name)
+ */
+final class ZeroQuery {}

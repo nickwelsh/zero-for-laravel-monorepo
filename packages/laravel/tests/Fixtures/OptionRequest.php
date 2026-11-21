@@ -9,6 +9,7 @@ use Formbraid\Laravel\OptionInput;
 use Illuminate\Foundation\Http\FormRequest;
 use LogicException;
 use ZeroForLaravel\Formbraid\ZeroOptions;
+use ZeroForLaravel\Zero;
 
 final class OptionRequest extends FormRequest
 {
@@ -28,11 +29,11 @@ final class OptionRequest extends FormRequest
     {
         return [
             'reference' => Field::make()->options(ZeroOptions::query(
-                Task::zeroQuery()
+                Zero::scroll(Task::zeroQuery()
                     ->where('done', OptionInput::field('done'))
                     ->where('id', '!=', OptionInput::context('task'))
                     ->where('title', 'ILIKE', ZeroOptions::contains(OptionInput::value()))
-                    ->orderBy('title', 'asc')->orderBy('id', 'asc')->infinite(20),
+                    ->orderBy('title', 'asc')->paginate(20)),
                 value: 'id', label: 'title',
                 resolve: Task::zeroQuery()
                     ->where('done', OptionInput::field('done'))

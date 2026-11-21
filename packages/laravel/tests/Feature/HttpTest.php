@@ -353,7 +353,7 @@ test('Composer namespaces discover nested models and tables without configuratio
     File::put($directory.'/app/Other/OtherTask.php', '<?php namespace '.$namespace.'\\Other; #[\\ZeroForLaravel\\Attributes\\ZeroPublic] class OtherTask extends \\ZeroForLaravel\\Tests\\Fixtures\\VisibleTask { protected $table = "lists"; protected $visible = ["id", "name"]; protected $fillable = ["name"]; }');
     File::put($directory.'/dev/DevTask.php', '<?php namespace '.$namespace.'\\Dev; class DevTask extends \\ZeroForLaravel\\Tests\\Fixtures\\VisibleTask {}');
     File::put($directory.'/app/Domain/TasksTable.php', '<?php namespace '.$namespace.'\\Domain; use '.Table::class.'; class TasksTable { public function definition(): Table { return Table::for(NestedTask::class)->allowedSorts(["title"]); } }');
-    File::put($directory.'/app/Domain/ReadTasks.php', '<?php namespace '.$namespace.'\\Domain; class ReadTasks { public function all(): \\ZeroForLaravel\\Query\\ZeroQuery { return NestedTask::zeroQuery()->orderBy("title", "asc")->limit(5); } }');
+    File::put($directory.'/app/Domain/ReadTasks.php', '<?php namespace '.$namespace.'\\Domain; class ReadTasks { public function all(): \\ZeroForLaravel\\Query\\ZeroQuery { return NestedTask::zeroQuery()->orderBy("title", "asc")->limit(5)->get(); } }');
     $loader->addPsr4($namespace.'\\', $directory.'/app');
     $loader->addPsr4($namespace.'\\Dev\\', $directory.'/dev');
     $loader->register();
@@ -478,9 +478,9 @@ final readonly class ApplicationSchemaDriver implements MutationSchemaDriver
         return "// Application schema driver\n".$this->driver->imports();
     }
 
-    public function object(array $parameters, ?array $cursor = null, bool $public = false, array $contracts = [], bool $routed = true, bool $window = false): string
+    public function object(array $parameters, ?array $cursor = null, bool $public = false, array $contracts = [], bool $routed = true, ?string $pagination = null): string
     {
-        return $this->driver->object($parameters, $cursor, $public, $contracts, $routed, $window);
+        return $this->driver->object($parameters, $cursor, $public, $contracts, $routed, $pagination);
     }
 
     public function encode(array $parameters, string $input): string

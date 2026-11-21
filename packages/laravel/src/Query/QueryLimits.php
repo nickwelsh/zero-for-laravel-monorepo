@@ -11,6 +11,13 @@ final class QueryLimits
 {
     public const int NATIVE_MAX = 2147483647;
 
+    public const array POSITION_KEYS = ['__page', '__window', '__cursor', '__reverse'];
+
+    public static function validPageName(string $name): bool
+    {
+        return preg_match('/^[a-zA-Z][a-zA-Z0-9_-]*$/D', $name) === 1;
+    }
+
     public static function transformBatch(): int
     {
         return self::configured('zero.limits.max_transform_queries', 256);

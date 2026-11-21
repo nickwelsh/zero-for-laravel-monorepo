@@ -6,6 +6,8 @@ namespace ZeroForLaravel\Generation;
 
 use Closure;
 use Formbraid\Laravel\OptionInput;
+use Illuminate\Database\Eloquent\SoftDeletingScope;
+use Illuminate\Support\Facades\Auth;
 use LogicException;
 use PhpParser\ParserFactory;
 use ReflectionMethod;
@@ -14,8 +16,8 @@ use ZeroForLaravel\Context\ContextReference;
 use ZeroForLaravel\Formbraid\OptionPattern;
 use ZeroForLaravel\Metadata\ModelMetadata;
 use ZeroForLaravel\Permissions\VisibleToCurrentUser;
+use ZeroForLaravel\Query\ZeroQuery;
 use ZeroForLaravel\Scopes\ScopeRegistry;
-use ZeroForLaravel\Scopes\SoftDeletingScope;
 
 /**
  * Scopes use the controller's checked construction subset, not sampled requests.
@@ -24,24 +26,102 @@ use ZeroForLaravel\Scopes\SoftDeletingScope;
  */
 final class ScopeCompiler
 {
-    /** @return array<string, QueryExpression> */
+    /** @return array<int|string, QueryExpression> */
     public static function globals(ModelMetadata $model): array
     {
         $compiler = new ControllerQueryCompiler((new ParserFactory)->createForNewestSupportedVersion(), $model->registry);
         $scopes = [];
         foreach (ScopeRegistry::globals($model) as $name => $scope) {
-            if ($scope instanceof SoftDeletingScope) {
+            if ($scope::class === SoftDeletingScope::class) {
                 $local = new QueryExpression('local', 'zeroScope', model: $model, type: 'query');
-                $scopes[$name] = new QueryExpression('method', 'where', [$local, self::value($model->deletedAt), self::value('IS'), self::value(null)], $model, 'query');
+                $scopes[$name] = new QueryExpression('method', 'where', [$local, self::value($model->deletedAt ?? throw new LogicException('Missing soft-delete column.')), self::value(null)], $model, 'query');
             } elseif ($scope instanceof VisibleToCurrentUser) {
                 $local = new QueryExpression('local', 'zeroScope', model: $model, type: 'query');
                 $scopes[$name] = new QueryExpression('method', 'visibleTo', [$local, new QueryExpression('actor', type: 'actor')], $model, 'query');
             } else {
+                if (method_exists($scope, 'extend')) {
+                    throw new LogicException($scope::class.': Eloquent builder extensions are not portable.');
+                }
+
                 $scopes[$name] = $compiler->scope($scope instanceof Closure ? $scope : new ReflectionMethod($scope, 'apply'), $model, instance: $scope instanceof Closure ? null : $scope);
             }
         }
 
         return $scopes;
+    }
+
+    public static function creationOnly(QueryExpression $scope): bool
+    {
+        return match ($scope->kind) {
+            'local' => true,
+            'scope' => self::creationOnly($scope->children[0]) && self::creationOnly($scope->children[1]),
+            'method' => $scope->value === 'withAttributes' && ($scope->children[2]->value ?? true) === false && self::creationOnly($scope->children[0]),
+            default => false,
+        };
+    }
+
+    /** @param array<array-key, mixed> $arguments */
+    public static function local(ModelMetadata $model, ReflectionMethod $scope, array $arguments): QueryExpression
+    {
+        if (! array_is_list($arguments)) {
+            throw new LogicException('Scope arguments must be positional.');
+        }
+
+        $compiler = new ControllerQueryCompiler((new ParserFactory)->createForNewestSupportedVersion(), $model->registry);
+
+        return $compiler->scope($scope, $model, array_map(self::value(...), $arguments));
+    }
+
+    /** Check that the scope can run on both builders and report whether it adds a predicate. */
+    public static function assertPortable(QueryExpression $node): bool
+    {
+        if (! in_array($node->kind, ['method', 'scope', 'local', 'callback', 'literal', 'actor', 'context', 'list', 'object', 'property', 'argument', 'validated', 'field', 'enum'], true) || $node->isTerminal()) {
+            throw new LogicException('Unsupported Eloquent scope expression: '.$node->kind.'.');
+        }
+
+        $children = array_map(self::assertPortable(...), $node->children);
+        if ($node->kind !== 'method') {
+            return $node->kind === 'scope' && ($children[0] || $children[1]) || $node->kind === 'callback' && $children[0];
+        }
+
+        $method = $node->stringValue();
+        if (str_starts_with($method, 'orWhere') && ! $children[0]) {
+            throw new LogicException('An Eloquent scope must group its alternatives instead of starting with orWhere.');
+        }
+
+        return $children[0] || str_starts_with($method, 'where') && ($node->children[1]->kind !== 'callback' || $children[1])
+            || $method === 'withAttributes' && ($node->children[2]->value ?? true) && $node->children[1]->children !== [];
+    }
+
+    /** Replay the same checked refinements the native emitter sees, never application PHP against a pretend Eloquent builder. */
+    public static function apply(QueryExpression $scope, ZeroQuery $query): void
+    {
+        self::replay($scope, ['zeroScope' => $query]);
+    }
+
+    /** @param array<string, ZeroQuery> $locals */
+    private static function replay(QueryExpression $node, array $locals): mixed
+    {
+        $read = fn (QueryExpression $child): mixed => self::replay($child, $locals);
+        if ($node->kind === 'scope' || $node->kind === 'method') {
+            $builder = $read($node->children[0]);
+            if (! $builder instanceof ZeroQuery) {
+                throw new LogicException('Scope operations must refine their supplied builder.');
+            }
+
+            return $builder->{$node->stringValue()}(...array_map($read, array_slice($node->children, $node->kind === 'scope' ? 2 : 1)));
+        }
+
+        return match ($node->kind) {
+            'local' => $locals[$node->stringValue()],
+            'literal' => $node->value,
+            'actor' => Auth::user(),
+            'context' => new ContextReference($node->stringValue()),
+            'callback' => fn (ZeroQuery $builder): mixed => self::replay($node->children[0], [...$locals, $node->stringValue() => $builder]),
+            'list' => array_map($read, $node->children),
+            'object' => array_column(array_map(fn (QueryExpression $item): array => [$item->stringValue(), $read($item->children[0])], $node->children), 1, 0),
+            default => throw new LogicException('Unsupported Eloquent scope operand: '.$node->kind.'.'),
+        };
     }
 
     public static function value(mixed $value): QueryExpression
@@ -86,6 +166,12 @@ final class ScopeCompiler
         $previous = self::removals($query->children[0]);
         if ($previous === null) {
             return null;
+        }
+
+        if ($query->kind === 'scope') {
+            $body = self::removals($query->children[1]);
+
+            return $body === null ? null : [...$previous, ...$body];
         }
 
         if ($query->kind === 'method' && $query->value === 'withoutGlobalScope') {

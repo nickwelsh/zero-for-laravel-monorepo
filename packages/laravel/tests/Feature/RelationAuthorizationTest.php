@@ -27,7 +27,7 @@ test('junction predicates enforce private target visibility without introducing 
     $registry = new ModelRegistry($this->models());
     $alice = (new User)->setKeyType('string')->forceFill(['id' => 'alice']);
     $query = (new ZeroQuery($registry->get('Task'), $registry))->visibleTo($alice)
-        ->whereExists('tags', fn (ZeroQuery $tags): ZeroQuery => $tags->visibleTo($alice)->where('name', 'Reading'));
+        ->whereHas('tags', fn (ZeroQuery $tags): ZeroQuery => $tags->visibleTo($alice)->where('name', 'Reading'));
     $ast = (new QueryCompiler($registry))->compileDeclaration($query, new ResolvedContext(['user_id' => 'alice'], 'alice'));
     $encoded = json_encode($ast, JSON_THROW_ON_ERROR);
     expect($encoded)->toContain('task_tag', 'tags', 'permission_index', 'Reading', 'user:alice');
@@ -41,8 +41,8 @@ test('nested negative exists retains visibility on every private target', functi
     $alice = (new User)->setKeyType('string')->forceFill(['id' => 'alice']);
     $query = (new ZeroQuery($registry->get('Task'), $registry))->visibleTo($alice)
         ->whereDoesntHave('list', fn (ZeroQuery $list): ZeroQuery => $list->visibleTo($alice)
-            ->whereExists('tasks', fn (ZeroQuery $tasks): ZeroQuery => $tasks->visibleTo($alice)
-                ->whereExists('comments', fn (ZeroQuery $comments): ZeroQuery => $comments->visibleTo($alice)->where('body', 'hidden'))));
+            ->whereHas('tasks', fn (ZeroQuery $tasks): ZeroQuery => $tasks->visibleTo($alice)
+                ->whereHas('comments', fn (ZeroQuery $comments): ZeroQuery => $comments->visibleTo($alice)->where('body', 'hidden'))));
     $ast = (new QueryCompiler($registry))->compileDeclaration($query, new ResolvedContext(['user_id' => 'alice'], 'alice'));
     $encoded = json_encode($ast, JSON_THROW_ON_ERROR);
     expect($encoded)->toContain('NOT EXISTS', 'hidden');

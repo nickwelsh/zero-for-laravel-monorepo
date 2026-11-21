@@ -87,7 +87,19 @@ final class ModelMetadata
             if ($where['type'] === 'Nested') {
                 $query->{$method}(fn (ZeroQuery $nested) => self::applyWheres($nested, ModelRegistry::relationWheres($where['wheres'], $nested->model, normalized: true)));
             } else {
-                $query->{$method}(self::column($where['column']), $where['operator'], $where['value']);
+                $column = self::column($where['column']);
+                $operator = $where['operator'];
+                if (in_array($operator, ['IN', 'NOT IN'], true)) {
+                    $values = $where['value'];
+                    if (! is_array($values) || ! array_is_list($values)) {
+                        throw new \LogicException('Relationship membership requires a scalar list.');
+                    }
+                    $query->{$method.($operator === 'IN' ? 'In' : 'NotIn')}($column, $values);
+                } elseif ($where['value'] === null && in_array($operator, ['IS', 'IS NOT'], true)) {
+                    $query->{$method.($operator === 'IS' ? 'Null' : 'NotNull')}($column);
+                } else {
+                    $query->{$method}($column, $operator, $where['value']);
+                }
             }
         }
     }

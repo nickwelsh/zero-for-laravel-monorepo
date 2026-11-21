@@ -1,0 +1,12 @@
+<?php
+
+namespace Illuminate\Database\Eloquent;
+
+/** @template TModel of Model */
+interface Scope
+{
+    /** @param Builder<covariant TModel> $builder
+     * @param TModel $model
+     */
+    public function apply(Builder $builder, Model $model);
+}

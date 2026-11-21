@@ -4,14 +4,16 @@ declare(strict_types=1);
 
 namespace ZeroForLaravel\Tests\Fixtures;
 
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
-use ZeroForLaravel\Query\ZeroQuery;
-use ZeroForLaravel\Scopes\ZeroGlobalScope;
+use Illuminate\Database\Eloquent\Scope;
+use ZeroForLaravel\Context\ContextReference;
 
-final class OwnedScope implements ZeroGlobalScope
+/** @implements Scope<Model> */
+final class OwnedScope implements Scope
 {
-    public function apply(ZeroQuery $query, Model $model): void
+    public function apply(Builder $query, Model $model): void
     {
-        $query->withAttributes(['user_id' => ZeroContext::USER_ID]);
+        $query->withAttributes(['user_id' => ContextReference::current(ZeroContext::USER_ID)]);
     }
 }

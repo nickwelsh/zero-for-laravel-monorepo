@@ -35,14 +35,18 @@ function zeroSchema<S extends EffectSchema.ConstraintDecoder<unknown>>(schema: S
 TS;
     }
 
-    public function object(array $parameters, ?array $cursor = null, bool $public = false, array $contracts = [], bool $routed = true, bool $window = false): string
+    public function object(array $parameters, ?array $cursor = null, bool $public = false, array $contracts = [], bool $routed = true, ?string $pagination = null): string
     {
         $fields = $routed ? [
             '__route: EffectSchema.optional(EffectSchema.String)',
             '__routeArgs: EffectSchema.optional(EffectSchema.Record(EffectSchema.String, EffectSchema.Union([EffectSchema.String, EffectSchema.Int])))',
         ] : [];
-        if ($routed || $window) {
+        if ($pagination === 'scroll') {
             $fields[] = '__window: EffectSchema.optional(EffectSchema.Int.check(EffectSchema.isGreaterThanOrEqualTo(1), EffectSchema.isLessThanOrEqualTo('.QueryLimits::liveWindow().')))';
+        }
+
+        if (in_array($pagination, ['numbered', 'scroll'], true)) {
+            $fields[] = '__page: EffectSchema.optional(EffectSchema.Int.check(EffectSchema.isGreaterThanOrEqualTo(1), EffectSchema.isLessThanOrEqualTo('.(QueryLimits::liveWindow() - 1).')))';
         }
 
         if (! $public) {
@@ -60,9 +64,15 @@ TS;
             }
 
             $fields[] = '__cursor: EffectSchema.optional('.$this->objectSchema($columns).')';
+            $fields[] = '__reverse: EffectSchema.optional(EffectSchema.Boolean)';
         }
 
-        return 'zeroSchema('.$this->objectSchema($fields).')';
+        $object = $this->objectSchema($fields);
+        if ($cursor !== null) {
+            $object .= '.check(EffectSchema.makeFilter(args => args.__reverse === undefined || args.__cursor !== undefined, {expected: "a cursor direction with a boundary"}))';
+        }
+
+        return 'zeroSchema('.$object.')';
     }
 
     public function encode(array $parameters, string $input): string

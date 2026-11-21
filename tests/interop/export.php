@@ -94,7 +94,7 @@ if (($argv[1] ?? null) === 'generate') {
         'typescript' => $definition->typescript(), 'schema' => $schemas->object($definition->parameters), 'cases' => $cases,
         'filtered' => ['typescript' => $filtered->typescript(), 'schema' => $schemas->object($filtered->parameters), 'cases' => $filteredCases],
         'relationships' => ['typescript' => $relationships->typescript(), 'ast' => publicAst($relationshipQuery), 'format' => $relationshipQuery->format()],
-        'window' => ['typescript' => $window->typescript(), 'ast' => publicAst($windowQuery)],
+        'window' => ['name' => $window->name(), 'ast' => publicAst($windowQuery)],
     ], JSON_THROW_ON_ERROR);
 } elseif (($argv[1] ?? null) === 'declarations') {
     $query = (new ZeroQuery($registry->get('Task'), $registry))->withoutGlobalScopes();
@@ -102,13 +102,12 @@ if (($argv[1] ?? null) === 'generate') {
         'unbounded' => clone $query,
         'zeroLimit' => (clone $query)->limit(0),
         'one' => $query->find('task-a'),
-        'cursor' => (clone $query)->orderBy('title', 'desc')->orderBy('id', 'asc')->start(['title' => '0', 'id' => 'task-a'], ['inclusive' => true])->limit(7),
-        'exclusive' => (clone $query)->orderBy('id', 'asc')->start(['id' => 'task-a']),
+        'cursor' => (clone $query)->orderBy('title', 'desc')->cursorPaginate(6)->atPosition(['__cursor' => ['title' => '0', 'id' => 'task-a']]),
         'relationships' => (clone $query)->with('comments', fn ($q) => $q->withoutGlobalScopes()->where('body', 'NOT ILIKE', '%private%')->orderBy('id', 'desc')->limit(3))->with('list', fn ($q) => $q->withoutGlobalScopes()),
-        'junction' => (clone $query)->with('tags', fn ($q) => $q->withoutGlobalScopes()->where('name', 'IN', ['0', 'work'])),
-        'exists' => (clone $query)->whereExists('comments', fn ($q) => $q->withoutGlobalScopes()->where('body', 'NOT LIKE', 'secret%'), ['flip' => false]),
-        'scalar' => (clone $query)->whereExists('list', fn ($q) => $q->withoutGlobalScopes()->where('id', 'list-a'), ['scalar' => true]),
-        'junctionExists' => (clone $query)->whereExists('tags', fn ($q) => $q->withoutGlobalScopes()->where('name', 'work'), ['flip' => true]),
+        'junction' => (clone $query)->with('tags', fn ($q) => $q->withoutGlobalScopes()->whereIn('name', ['0', 'work'])),
+        'exists' => (clone $query)->whereHas('comments', fn ($q) => $q->withoutGlobalScopes()->where('body', 'not like', 'secret%')),
+        'scalar' => (clone $query)->whereHas('list', fn ($q) => $q->withoutGlobalScopes()->whereKey('list-a')),
+        'junctionExists' => (clone $query)->whereHas('tags', fn ($q) => $q->withoutGlobalScopes()->where('name', 'work')),
         'negation' => (clone $query)->where('done', '!=', false)->whereDoesntHave('comments', fn ($q) => $q->withoutGlobalScopes()->where('body', 'hidden')),
         'nullEquality' => (clone $query)->where('list_id', null),
         'nullInequality' => (clone $query)->where('list_id', '!=', null),
@@ -116,14 +115,12 @@ if (($argv[1] ?? null) === 'generate') {
     foreach (['=', '!=', '<', '<=', '>', '>=', 'LIKE', 'NOT LIKE', 'ILIKE', 'NOT ILIKE'] as $operator) {
         $queries[$operator] = (clone $query)->where('title', $operator, '0');
     }
-    foreach (['IN', 'NOT IN'] as $operator) {
-        $queries[$operator] = (clone $query)->where('title', $operator, ['0', 'two']);
-    }
-    foreach (['IS', 'IS NOT'] as $operator) {
-        $queries[$operator] = (clone $query)->where('list_id', $operator, null);
-    }
+    $queries['IN'] = (clone $query)->whereIn('title', ['0', 'two']);
+    $queries['NOT IN'] = (clone $query)->whereNotIn('title', ['0', 'two']);
+    $queries['IS'] = (clone $query)->whereNull('list_id');
+    $queries['IS NOT'] = (clone $query)->whereNotNull('list_id');
     $output = array_map(fn ($q) => ['ast' => $q->ast(), 'format' => $q->format()], $queries);
-    $eb = $query->expressionBuilder();
+    $eb = new \ZeroForLaravel\Query\ExpressionBuilder($query->model);
     foreach ([
         'literals' => $eb->or($eb->cmpLit('0', '=', '0'), $eb->and($eb->cmpLit(0, '!=', 1), $eb->cmp('list_id', 'IS', null))),
         'emptyGroups' => $eb->and($eb->or(), $eb->cmp('done', true)),
@@ -138,7 +135,7 @@ if (($argv[1] ?? null) === 'generate') {
     $queries = [
         'root' => clone $query,
         'related' => (clone $query)->with('list', fn ($q) => $q->visibleTo($alice))->with('comments', fn ($q) => $q->visibleTo($alice)->limit(3)),
-        'junction' => (clone $query)->whereExists('tags', fn ($q) => $q->visibleTo($alice)->where('id', 'owned')),
+        'junction' => (clone $query)->whereHas('tags', fn ($q) => $q->visibleTo($alice)->where('id', 'owned')),
         'groups' => (clone $query)->where(fn ($q) => $q
             ->whereHas('tags', fn ($q) => $q->visibleTo($alice)->where('name', 'Reading'))
             ->orWhere(fn ($q) => $q->whereHas('tags', fn ($q) => $q->visibleTo($alice)->where('name', 'Other')))),

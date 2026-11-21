@@ -43,11 +43,24 @@ final readonly class ControllerQueryGenerator
             'const zql = createBuilder(schema);',
             'const defineQueries = defineQueriesWithType<typeof schema>();',
             'const defineQuery = defineQueryWithType<typeof schema, Context>();',
-            'export const inputs = {',
         ];
+        if (str_contains($code, 'pagePrefix(')) {
+            $cap = QueryLimits::liveWindow();
+            $lines[] = <<<TS
+function pagePrefix(size: number, page = 1, window?: number) {
+    if (!Number.isSafeInteger(size) || size < 1 || !Number.isSafeInteger(page) || page < 1 || page > Math.floor(({$cap} - 1) / size)) throw new RangeError('Page exceeds the live window cap.');
+    const prefix = page * size + 1;
+    if (window !== undefined && (!Number.isSafeInteger(window) || window < prefix || window > {$cap})) throw new RangeError('Invalid scroll window.');
+    return window ?? prefix;
+}
+TS;
+        }
+
+        $lines[] = 'export const inputs = {';
         foreach ($queries as $query) {
             $cursor = null;
-            if ($query->expression->kind === 'paginate') {
+            $mode = $query->expression->kind === 'paginate' ? $query->expression->stringValue() : null;
+            if ($mode === 'cursor') {
                 $cursor = [];
                 foreach ($query->expression->cursorFields() as $field) {
                     $column = $query->expression->model?->columns[$field];
@@ -59,7 +72,7 @@ final readonly class ControllerQueryGenerator
                 }
             }
 
-            $lines[] = '  '.json_encode($query->name(), JSON_THROW_ON_ERROR).': '.$this->schemas->object($query->parameters, $cursor, contracts: $query->optionContracts(), routed: $query->optionSource === null && ! $query->standalone, window: $query->expression->kind === 'infinite').',';
+            $lines[] = '  '.json_encode($query->name(), JSON_THROW_ON_ERROR).': '.$this->schemas->object($query->parameters, $cursor, contracts: $query->optionContracts(), routed: $query->optionSource === null && ! $query->standalone, pagination: $mode).',';
         }
 
         $lines[] = '};';
@@ -81,15 +94,11 @@ final readonly class ControllerQueryGenerator
             $name = json_encode($query->name(), JSON_THROW_ON_ERROR);
             $parse = $this->schemas->parse('inputs['.$name.']', 'args');
             $model = json_encode($query->expression->model?->name, JSON_THROW_ON_ERROR);
-            $pageSize = in_array($query->expression->kind, ['infinite', 'paginate'], true) ? ', '.$query->expression->value : '';
+            $pageSize = '';
             if ($query->expression->kind === 'paginate') {
-                $pageSize .= ', '.json_encode($query->expression->cursorFields(), JSON_THROW_ON_ERROR);
-            } elseif ($query->expression->kind === 'infinite') {
-                $pageSize .= ', undefined';
-            }
-
-            if (in_array($query->expression->kind, ['infinite', 'paginate'], true)) {
-                $pageSize .= ', '.QueryLimits::liveWindow();
+                $mode = $query->expression->stringValue();
+                $pageSize = ', '.$query->expression->children[1]->emit(true).', '.($mode === 'cursor' ? json_encode($query->expression->cursorFields(), JSON_THROW_ON_ERROR) : 'undefined')
+                    .', '.QueryLimits::liveWindow().', '.json_encode(['mode' => $mode, 'name' => $query->expression->children[2]->stringValue()], JSON_THROW_ON_ERROR);
             }
 
             $request = null;

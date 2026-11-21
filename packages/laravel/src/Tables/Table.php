@@ -8,16 +8,15 @@ use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
-use Illuminate\Database\Eloquent\SoftDeletingScope;
 use Illuminate\Database\Query\Builder;
 use InvalidArgumentException;
 use LogicException;
 use ZeroForLaravel\Context\ContextReference;
+use ZeroForLaravel\Generation\ScopeCompiler;
 use ZeroForLaravel\Metadata\ModelMetadata;
 use ZeroForLaravel\Metadata\ModelRegistry;
 use ZeroForLaravel\Permissions\Binding;
 use ZeroForLaravel\Permissions\EloquentVisibility;
-use ZeroForLaravel\Permissions\VisibleToCurrentUser;
 use ZeroForLaravel\Query\Condition;
 use ZeroForLaravel\Query\QueryLimits;
 use ZeroForLaravel\Query\ZeroQuery;
@@ -63,11 +62,7 @@ final class Table
     {
         foreach (resolve(ModelRegistry::class)->all() as $model) {
             if ($model->class === $class) {
-                foreach ((new $class)->getGlobalScopes() as $scope) {
-                    if (! $scope instanceof SoftDeletingScope && ! $scope instanceof VisibleToCurrentUser) {
-                        throw new LogicException($class.': table counts require portable Zero scopes, not SQL-only global scopes.');
-                    }
-                }
+                ScopeCompiler::globals($model);
 
                 return new self(new ZeroQuery($model, $model->registry));
             }
@@ -282,7 +277,7 @@ final class Table
         $query = clone $this->base;
         $condition = (new Predicate($query, $this->filters))->parse($filter);
         if ($condition instanceof Condition) {
-            Predicate::zero($query, $condition);
+            $query->addCondition($condition);
         }
 
         foreach ($path as $part) {
@@ -317,6 +312,10 @@ final class Table
 
         $sql = $query->getQuery();
         $ast = Input::object(ContextReference::resolve($this->rows($filter, $path)->ast(), $context), 'table');
+        if (array_diff(array_keys($ast), ['table', 'where', 'orderBy', '__visibility']) !== []) {
+            throw new LogicException('Table counts require unbounded, membership-only scopes.');
+        }
+
         if (isset($ast['where'])) {
             Predicate::sql($sql, Input::object($ast['where'], 'condition'), $model);
         }

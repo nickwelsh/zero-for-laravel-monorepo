@@ -4,16 +4,19 @@ declare(strict_types=1);
 
 namespace ZeroForLaravel\Tests\Feature;
 
+use Illuminate\Database\Eloquent\Attributes\Scope;
+use Illuminate\Database\Eloquent\Attributes\ScopedBy;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Scope as GlobalScope;
+use Illuminate\Foundation\Auth\User;
 use Inertia\Inertia;
 use Inertia\Response;
 use LogicException;
 use PhpParser\ParserFactory;
 use ZeroForLaravel\Attributes\ZeroMutation;
 use ZeroForLaravel\Attributes\ZeroPublic;
-use ZeroForLaravel\Attributes\ZeroScope;
-use ZeroForLaravel\Attributes\ZeroScopedBy;
 use ZeroForLaravel\Concerns\HasZeroQueries;
 use ZeroForLaravel\Context\ContextReference;
 use ZeroForLaravel\Generation\ControllerQueryCompiler;
@@ -24,16 +27,29 @@ use ZeroForLaravel\Mutation\Mutation;
 use ZeroForLaravel\Query\QueryCompiler;
 use ZeroForLaravel\Query\ZeroQuery;
 use ZeroForLaravel\ResolvedContext;
-use ZeroForLaravel\Scopes\ZeroGlobalScope;
 use ZeroForLaravel\Tests\Fixtures\ZeroContext;
 use ZeroForLaravel\Tests\TestCase;
 
 uses(TestCase::class);
 
+test('the same local scopes remain ordinary SQL on Eloquent and unsupported scopes are never dropped by Zero', function (): void {
+    app()->instance(ModelRegistry::class, new ModelRegistry([ScopedTodo::class]));
+    request()->setUserResolver(fn () => (new User)->setKeyType('string')->forceFill(['id' => 'alice']));
+    foreach (['alice', 'bob'] as $owner) {
+        ScopedTodo::create(['user_id' => $owner, 'title' => 'match', 'done' => true]);
+        ScopedTodo::create(['user_id' => $owner, 'title' => 'match', 'done' => false]);
+    }
+
+    expect(ScopedTodo::query()->named('match')->pluck('user_id')->all())->toBe(['alice']);
+    expect(ScopedTodo::completed()->withoutGlobalScope(OwnershipScope::class)->count())->toBe(2);
+    expect(ScopedTodo::query()->unsupported()->count())->toBe(0);
+    expect(fn () => ScopedTodo::zeroQuery()->__call('unsupported', []))->toThrow(LogicException::class, 'Unrecognized query operation');
+});
+
 test('local scopes mutate aliases, group boolean branches and keep nested defaults off the root', function (): void {
     $registry = new ModelRegistry([ScopedTodo::class]);
     app()->instance(ModelRegistry::class, $registry);
-    $query = ScopedTodo::completed();
+    $query = ScopedTodo::zeroQuery()->completed();
     $alias = $query;
     $branch = clone $query;
     $alias->__call('named', ['local'])->orWhere->__call('named', ['other']);
@@ -50,18 +66,24 @@ test('local scopes mutate aliases, group boolean branches and keep nested defaul
     // Global owner remains an AND outside the root OR group.
     expect(data_get($ast, 'where.type'))->toBe('and');
     expect(data_get($ast, 'where.conditions.0.right.value'))->toBe('alice');
+    $anonymous = $compiler->compileDeclaration($query, new ResolvedContext(['user_id' => null]));
+    expect(data_get($anonymous, 'where.conditions.0.op'))->toBe('IS');
     expect(data_get($ast, 'where.conditions.2.type'))->toBe('or');
 
     $unscoped = ScopedTodo::zeroQuery()->withoutGlobalScopes()->where('title', 'first')->orWhere('title', 'second')->where('done', true)->ast();
     expect(data_get($unscoped, 'where.type'))->toBe('or');
     expect(data_get($unscoped, 'where.conditions.1.type'))->toBe('and');
+
+    $scoped = ScopedTodo::zeroQuery()->withoutGlobalScopes()->where('title', 'first')->orWhere('title', 'second')->completed()->ast();
+    expect(data_get($scoped, 'where.type'))->toBe('and');
+    expect(data_get($scoped, 'where.conditions.0.type'))->toBe('or');
 });
 
 test('creation defaults use global local explicit precedence and removal without changing updates or Eloquent', function (): void {
     $registry = new ModelRegistry([ScopedTodo::class]);
     app()->instance(ModelRegistry::class, $registry);
     $context = new ResolvedContext(['user_id' => 'alice'], 'alice');
-    $query = ScopedTodo::completed()->__call('named', ['local']);
+    $query = ScopedTodo::zeroQuery()->completed()->named('local');
     expect($query->withoutGlobalScope('named')->pendingAttributes())->toMatchArray(['title' => 'local', 'done' => true]);
     expect(ScopedTodo::zeroQuery()->withoutGlobalScope(OwnershipScope::class)->pendingAttributes())->toBe(['title' => 'global']);
     $registry->connection()->transaction(function () use ($registry, $context, $query): void {
@@ -100,7 +122,7 @@ test('controller lowering preserves mutation aliases cloned branches and scope-a
             expect($query->typescript())->toContain('ctx["user_id"]', 'zql["tasks"]');
         }
 
-        $root = ScopedTodo::completed();
+        $root = ScopedTodo::zeroQuery()->completed();
         if ($branch) {
             $root->withAttributes(['title' => 'yes']);
         } else {
@@ -118,14 +140,11 @@ test('controller lowering preserves mutation aliases cloned branches and scope-a
     $registry->connection()->transaction(function () use ($program, $registry): void {
         $mutation = new Mutation($registry, ['ids' => ['s0' => '12345678-1234-4567-8123-123456789013'], 'timestamp' => 1700000000000], new ResolvedContext(['user_id' => 'alice'], 'alice'));
         (new ControllerMutationRuntime($mutation))->run($program->operations, []);
-        expect(ScopedTodo::findOrFail('12345678-1234-4567-8123-123456789013')->only('title', 'done', 'user_id'))->toBe(['title' => 'explicit', 'done' => true, 'user_id' => 'alice']);
+        expect(ScopedTodo::withoutGlobalScopes()->findOrFail('12345678-1234-4567-8123-123456789013')->only('title', 'done', 'user_id'))->toBe(['title' => 'explicit', 'done' => true, 'user_id' => 'alice']);
     });
 });
 
 test('child attribute defaults override inherited registrations and removal restores the parent default', function (): void {
-    ParentDefaultTodo::addZeroGlobalScope('parent-title', function (ZeroQuery $query): void {
-        $query->withAttributes(['title' => 'parent registration'], asConditions: false);
-    });
     $registry = new ModelRegistry([InheritedDefaultTodo::class]);
     app()->instance(ModelRegistry::class, $registry);
     $registry->connection()->transaction(function () use ($registry): void {
@@ -140,18 +159,16 @@ test('child attribute defaults override inherited registrations and removal rest
     });
 });
 
-class OwnershipScope implements ZeroGlobalScope
+/** @implements GlobalScope<Model> */
+class OwnershipScope implements GlobalScope
 {
-    public function apply(ZeroQuery $query, Model $model): void
+    public function apply(Builder $query, Model $model): void
     {
-        $query->withAttributes(['user_id' => ZeroContext::USER_ID, 'done' => false]);
+        $query->withAttributes(['user_id' => ContextReference::current(ZeroContext::USER_ID), 'done' => false]);
     }
 }
 
-/** @method static ZeroQuery completed()
- * @method static ZeroQuery named(string $name)
- */
-#[ZeroScopedBy([OwnershipScope::class])]
+#[ScopedBy([OwnershipScope::class])]
 #[ZeroPublic]
 class ScopedTodo extends Model
 {
@@ -165,7 +182,7 @@ class ScopedTodo extends Model
 
     protected static function booted(): void
     {
-        static::addZeroGlobalScope('named', function (ZeroQuery $query): void {
+        static::addGlobalScope('named', function (Builder $query): void {
             $query->withAttributes(['title' => 'global'], asConditions: false);
         });
     }
@@ -175,16 +192,25 @@ class ScopedTodo extends Model
         return ['done' => 'boolean'];
     }
 
-    #[ZeroScope]
-    protected function completed(ZeroQuery $query): void
+    /** @param Builder<static> $query */
+    #[Scope]
+    protected function completed(Builder $query): void
     {
         $query->withAttributes(['done' => true]);
     }
 
-    #[ZeroScope]
-    protected function named(ZeroQuery $query, string $name): ZeroQuery
+    /** @param Builder<static> $query
+     * @return Builder<static>
+     */
+    public function scopeNamed(Builder $query, string $name): Builder
     {
         return $query->withAttributes(['title' => $name]);
+    }
+
+    /** @param Builder<static> $query */
+    protected function scopeUnsupported(Builder $query): void
+    {
+        $query->whereRaw('0 = 1');
     }
 }
 
@@ -192,7 +218,7 @@ class ScopedController
 {
     public function index(bool $branch): Response
     {
-        $root = ScopedTodo::completed();
+        $root = ScopedTodo::zeroQuery()->completed();
         $alias = $root;
         if ($branch) {
             $alias->withAttributes(['title' => 'yes']);
@@ -213,16 +239,17 @@ class ScopedController
             }
         });
 
-        return Inertia::render('scopes', ['root' => $root, 'alias' => $alias, 'clone' => $clone, 'grouped' => $grouped]);
+        return Inertia::render('scopes', ['root' => $root->get(), 'alias' => $alias->get(), 'clone' => $clone->get(), 'grouped' => $grouped->get()]);
     }
 
     #[ZeroMutation]
     public function store(): void
     {
-        ScopedTodo::named('local')->withAttributes(['done' => true])->withoutGlobalScope('named')->create(['title' => 'explicit']);
+        ScopedTodo::query()->named('local')->withAttributes(['done' => true])->withoutGlobalScope('named')->create(['title' => 'explicit']);
     }
 }
 
+#[ScopedBy([ParentDefaultScope::class])]
 class ParentDefaultTodo extends Model
 {
     use HasUuids, HasZeroQueries;
@@ -234,13 +261,23 @@ class ParentDefaultTodo extends Model
     protected $hidden = ['secret'];
 }
 
-#[ZeroScopedBy([ChildDefaultScope::class])]
+/** @implements GlobalScope<Model> */
+class ParentDefaultScope implements GlobalScope
+{
+    public function apply(Builder $query, Model $model): void
+    {
+        $query->withAttributes(['title' => 'parent registration'], asConditions: false);
+    }
+}
+
+#[ScopedBy([ChildDefaultScope::class])]
 #[ZeroPublic]
 class InheritedDefaultTodo extends ParentDefaultTodo {}
 
-class ChildDefaultScope implements ZeroGlobalScope
+/** @implements GlobalScope<Model> */
+class ChildDefaultScope implements GlobalScope
 {
-    public function apply(ZeroQuery $query, Model $model): void
+    public function apply(Builder $query, Model $model): void
     {
         $query->withAttributes(['title' => 'child attribute'], asConditions: false);
     }

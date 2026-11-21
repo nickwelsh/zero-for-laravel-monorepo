@@ -7,97 +7,49 @@ namespace ZeroForLaravel\Scopes;
 use Closure;
 use Illuminate\Database\Eloquent\Attributes\Scope;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Scope as GlobalScope;
+use Illuminate\Database\Eloquent\SoftDeletingScope;
 use LogicException;
 use ReflectionClass;
 use ReflectionFunction;
 use ReflectionMethod;
-use ReflectionNamedType;
 use ReflectionObject;
-use ZeroForLaravel\Attributes\ZeroScope;
-use ZeroForLaravel\Attributes\ZeroScopedBy;
 use ZeroForLaravel\Generation\ScopeCompiler;
 use ZeroForLaravel\Metadata\ModelMetadata;
-use ZeroForLaravel\Permissions\VisibleToCurrentUser;
 use ZeroForLaravel\Query\ZeroQuery;
 
 final class ScopeRegistry
 {
     public static function local(string $class, string $name): ?ReflectionMethod
     {
-        if (! method_exists($class, $name)) {
+        // A concrete builder operation wins over model scope dispatch in Laravel.
+        if (method_exists(Builder::class, $name) || method_exists(ZeroQuery::class, $name)) {
             return null;
         }
 
-        $method = new ReflectionMethod($class, $name);
-        if ($method->getAttributes(ZeroScope::class) === []) {
-            return null;
+        if (method_exists($class, $name)) {
+            $method = new ReflectionMethod($class, $name);
+            if (! $method->isPrivate() && $method->getAttributes(Scope::class) !== []) {
+                return $method;
+            }
         }
 
-        if ($method->isPublic() || $method->isStatic() || $method->getAttributes(Scope::class) !== [] || method_exists($class, 'scope'.ucfirst($name)) || method_exists(Builder::class, $name) || method_exists(ZeroQuery::class, $name)) {
-            throw new LogicException($class.'::'.$name.': Zero scopes must be nonpublic instance methods with unambiguous names.');
-        }
+        $legacy = 'scope'.ucfirst($name);
+        $method = method_exists($class, $legacy) ? new ReflectionMethod($class, $legacy) : null;
 
-        $type = ($method->getParameters()[0] ?? null)?->getType();
-        if (! $type instanceof ReflectionNamedType || $type->getName() !== ZeroQuery::class) {
-            throw new LogicException($class.'::'.$name.': a Zero scope requires a ZeroQuery first parameter.');
-        }
-
-        $return = $method->getReturnType();
-        if (! $return instanceof ReflectionNamedType || ! in_array($return->getName(), ['void', ZeroQuery::class], true)) {
-            throw new LogicException($class.'::'.$name.': a Zero scope must declare void or ZeroQuery.');
-        }
-
-        return $method;
+        return $method?->isPrivate() ? null : $method;
     }
 
-    /** @return array<string, Closure|ZeroGlobalScope> */
+    /** @return array<int|string, Closure|GlobalScope<*>> */
     public static function globals(ModelMetadata $metadata): array
     {
         $scopes = [];
-        $classes = [];
-        for ($class = new ReflectionClass($metadata->class); $class; $class = $class->getParentClass()) {
-            array_unshift($classes, $class);
-        }
-
-        foreach ($classes as $class) {
-            foreach ($class->getAttributes(ZeroScopedBy::class) as $attribute) {
-                foreach ($attribute->newInstance()->scopes as $scope) {
-                    $instance = resolve($scope);
-                    if (! $instance instanceof ZeroGlobalScope) {
-                        throw new LogicException($scope.' must implement ZeroGlobalScope.');
-                    }
-
-                    $scopes[$scope] = $instance;
-                }
+        foreach ((new $metadata->class)->getGlobalScopes() as $name => $scope) {
+            if (! $scope instanceof Closure && ! $scope instanceof GlobalScope) {
+                throw new LogicException($metadata->class.': invalid Eloquent global scope.');
             }
 
-            $name = $class->name;
-            if (! method_exists($name, 'getZeroGlobalScopes')) {
-                continue;
-            }
-
-            $registered = $name::getZeroGlobalScopes();
-            if (! is_array($registered)) {
-                throw new LogicException('getZeroGlobalScopes must return a scope map.');
-            }
-
-            foreach ($registered as $name => $scope) {
-                if (! is_string($name) || ! $scope instanceof Closure && ! $scope instanceof ZeroGlobalScope) {
-                    throw new LogicException('Zero global scopes must be named closures or ZeroGlobalScope instances.');
-                }
-
-                $scopes[$name] = $scope;
-            }
-        }
-
-        if ($metadata->deletedAt !== null) {
-            $scopes[SoftDeletingScope::class] = new SoftDeletingScope;
-        }
-
-        foreach ((new $metadata->class)->getGlobalScopes() as $scope) {
-            if ($scope instanceof VisibleToCurrentUser) {
-                $scopes[VisibleToCurrentUser::class] = $scope;
-            }
+            $scopes[$name] = $scope;
         }
 
         return $scopes;
@@ -107,13 +59,27 @@ final class ScopeRegistry
     {
         $sources = [];
         foreach ((new ReflectionClass($model->class))->getMethods() as $method) {
-            if ($method->getAttributes(ZeroScope::class) !== []) {
-                self::local($model->class, $method->name);
+            if ($method->isPrivate() || str_starts_with($method->class, 'Illuminate\\')) {
+                continue;
+            }
+
+            $name = $method->getAttributes(Scope::class) !== [] ? $method->name
+                : (str_starts_with($method->name, 'scope') ? lcfirst(substr($method->name, 5)) : '');
+            if ($name !== '' && self::local($model->class, $name)?->name === $method->name) {
                 $sources[$method->class.'::'.$method->name] = hash_file('sha256', $method->getFileName() ?: throw new LogicException('Zero scopes require inspectable source.'));
             }
         }
 
         foreach (self::globals($model) as $name => $scope) {
+            // Unnamed closures are keyed by a process-local object id in Laravel.
+            $name = is_int($name) || $scope instanceof Closure && $name === spl_object_hash($scope) ? '#'.count($sources) : $name;
+            // This translation is ours; framework source and internal state are not contract inputs.
+            if ($scope::class === SoftDeletingScope::class) {
+                $sources[$name] = [SoftDeletingScope::class, $model->deletedAt];
+
+                continue;
+            }
+
             $reflection = $scope instanceof Closure ? new ReflectionFunction($scope) : new ReflectionMethod($scope, 'apply');
             $sources[$name] = hash_file('sha256', $reflection->getFileName() ?: throw new LogicException('Zero scopes require inspectable source.'));
             $state = $scope instanceof Closure ? $reflection->getStaticVariables() : [];

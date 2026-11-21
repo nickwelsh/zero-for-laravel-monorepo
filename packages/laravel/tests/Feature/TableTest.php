@@ -14,6 +14,7 @@ use Illuminate\Validation\ValidationException;
 use InvalidArgumentException;
 use LogicException;
 use ZeroForLaravel\Metadata\ModelRegistry;
+use ZeroForLaravel\Permissions\PolicyCompiler;
 use ZeroForLaravel\Query\QueryCompiler;
 use ZeroForLaravel\Query\ZeroQuery;
 use ZeroForLaravel\ResolvedContext;
@@ -92,6 +93,21 @@ test('table predicates preserve authorized membership, literal matching, nulls a
     expect(fn (): Builder => $table->sql(new ResolvedContext(['user_id' => 'bob'], 'bob')))->toThrow(AuthorizationException::class);
 });
 
+test('table counts intersect Eloquent global scopes with policy visibility and reject untracked membership', function (): void {
+    Task::addGlobalScope('unfinished', fn (\Illuminate\Database\Eloquent\Builder $query) => $query->where('done', false));
+    $table = taskTable();
+    $context = new ResolvedContext(['user_id' => 'alice'], 'alice');
+    expect($table->sql($context)->count())->toBe(2);
+    $ast = (new QueryCompiler(resolve(ModelRegistry::class)))->compileDeclaration($table->rows(), $context);
+    expect(json_encode($ast, JSON_THROW_ON_ERROR))->toContain('permission_index', 'done', 'deleted_at');
+    expect(fn () => (new PolicyCompiler)->compile(Task::class))->toThrow(LogicException::class, 'detached permission projections');
+
+    Task::addGlobalScope('top', fn (\Illuminate\Database\Eloquent\Builder $query) => $query->limit(1));
+    expect(fn () => $table->sql($context))->toThrow(LogicException::class, 'unbounded');
+    Task::addGlobalScope('raw', fn (\Illuminate\Database\Eloquent\Builder $query) => $query->whereRaw('1 = 0'));
+    expect(fn () => Table::for(Task::class))->toThrow(LogicException::class, 'Unrecognized query operation');
+});
+
 test('table capabilities reject malformed or broadened query input', function (): void {
     $table = taskTable();
     foreach ([
@@ -161,7 +177,7 @@ test('nullable filter operations do not depend on declaration order and unsuppor
     expect(fn (): ZeroQuery => $table->rows(['kind' => 'condition', 'field' => 'rating', 'operator' => 'gt', 'value' => 1]))->toThrow(ValidationException::class);
 
     $unsupported = Table::for(Task::class)->visibleTo($alice);
-    $unsupported->base->whereExists('tags');
+    $unsupported->base->has('tags');
 
     expect(fn (): Builder => $unsupported->sql($context))->toThrow(LogicException::class, 'portable SQL lowering');
 });

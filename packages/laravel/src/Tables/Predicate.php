@@ -12,6 +12,7 @@ use Illuminate\Database\Query\Grammars\PostgresGrammar;
 use LogicException;
 use ZeroForLaravel\Metadata\ModelMetadata;
 use ZeroForLaravel\Query\Condition;
+use ZeroForLaravel\Query\ExpressionBuilder;
 use ZeroForLaravel\Query\ZeroQuery;
 use ZeroForLaravel\Support\Input;
 
@@ -20,28 +21,6 @@ final readonly class Predicate
 {
     /** @param array<string, AllowedFilter> $filters */
     public function __construct(private ZeroQuery $base, private array $filters) {}
-
-    public static function zero(ZeroQuery $query, Condition $condition): void
-    {
-        if ($condition->type === 'simple') {
-            $field = Input::object($condition->fields['left'] ?? null, 'condition')['name'] ?? null;
-            $value = Input::object($condition->fields['right'] ?? null, 'condition')['value'] ?? null;
-            if (! is_string($field)) {
-                throw new LogicException('Table conditions require a field.');
-            }
-
-            $query->where($field, $condition->fields['op'] ?? throw new LogicException('Missing table comparison.'), $value);
-
-            return;
-        }
-
-        $query->where(function (ZeroQuery $nested) use ($condition): void {
-            foreach ($condition->conditions as $child) {
-                $method = $condition->type === 'or' ? 'orWhere' : 'where';
-                $nested->{$method}(fn (ZeroQuery $part) => self::zero($part, $child));
-            }
-        });
-    }
 
     /** Only compiler-owned conditions may enter this lowering, never request ASTs.
      * @param  array<string, mixed>  $condition
@@ -171,7 +150,7 @@ final readonly class Predicate
                 Input::fail('filter.value', 'Null operations have no value.');
             }
 
-            return $this->base->expressionBuilder()->cmp($filter->field, $operator === 'isNull' ? 'IS' : 'IS NOT', null);
+            return (new ExpressionBuilder($this->base->model))->cmp($filter->field, $operator === 'isNull' ? 'IS' : 'IS NOT', null);
         }
 
         if ($operator === 'in') {
@@ -197,7 +176,7 @@ final readonly class Predicate
             $value = ($operator === 'startsWith' ? '' : '%').str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $value).($operator === 'endsWith' ? '' : '%');
         }
 
-        return $this->base->expressionBuilder()->cmp($filter->field, $native, $value);
+        return (new ExpressionBuilder($this->base->model))->cmp($filter->field, $native, $value);
     }
 
     private function value(AllowedFilter $filter, mixed $value): mixed

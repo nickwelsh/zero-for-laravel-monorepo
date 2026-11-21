@@ -105,7 +105,9 @@ final readonly class QueryCompiler
      */
     private function authorizeCondition(array $condition, ResolvedContext $context, int $depth): array
     {
-        if ($condition['type'] === 'correlatedSubquery') {
+        if ($condition['type'] === 'simple' && in_array($condition['op'], ['=', '!='], true) && data_get($condition, 'right.type') === 'literal' && data_get($condition, 'right.value') === null) {
+            $condition['op'] = $condition['op'] === '=' ? 'IS' : 'IS NOT';
+        } elseif ($condition['type'] === 'correlatedSubquery') {
             $related = Input::object($condition['related'], 'relationship');
             $related['subquery'] = $this->authorizeDeclaration(Input::object($related['subquery'], 'subquery'), $context, $depth + 1);
             $condition['related'] = $related;

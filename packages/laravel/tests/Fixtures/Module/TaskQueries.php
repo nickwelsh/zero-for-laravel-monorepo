@@ -10,6 +10,7 @@ use ZeroForLaravel\Query\ZeroQuery;
 use ZeroForLaravel\Tests\Fixtures\DateQueryRequest;
 use ZeroForLaravel\Tests\Fixtures\QueryRequest;
 use ZeroForLaravel\Tests\Fixtures\Task;
+use ZeroForLaravel\Zero;
 
 final class TaskQueries
 {
@@ -43,12 +44,12 @@ final class TaskQueries
 
     public function window(Request $request): ZeroQuery
     {
-        return Task::zeroQuery()->visibleTo($request->user())->orderBy('title', 'desc')->infinite(2);
+        return Zero::scroll(Task::zeroQuery()->visibleTo($request->user())->orderBy('title', 'desc')->paginate(2));
     }
 
     public function pages(Request $request): ZeroQuery
     {
-        return Task::zeroQuery()->visibleTo($request->user())->orderBy('title', 'desc')->paginate(2);
+        return Task::zeroQuery()->visibleTo($request->user())->orderBy('title', 'desc')->cursorPaginate(2);
     }
 
     public function detail(Request $request, string $id): ZeroQuery

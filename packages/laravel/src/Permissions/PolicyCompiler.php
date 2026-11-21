@@ -6,6 +6,7 @@ namespace ZeroForLaravel\Permissions;
 
 use Illuminate\Auth\Access\Gate as LaravelGate;
 use Illuminate\Auth\Access\Response;
+use Illuminate\Database\Eloquent\Attributes\Scope;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletingScope;
 use Illuminate\Support\Facades\Gate;
@@ -24,6 +25,8 @@ use ReflectionMethod;
 use ReflectionNamedType;
 use ReflectionProperty;
 use ZeroForLaravel\Concerns\HasPolicyVisibility;
+use ZeroForLaravel\Generation\ScopeCompiler;
+use ZeroForLaravel\Metadata\ModelRegistry;
 
 final class PolicyCompiler
 {
@@ -34,7 +37,7 @@ final class PolicyCompiler
     }
 
     /** @param class-string<Model> $class */
-    public function compile(string $class, string $ability = 'view', bool $classResource = false): PolicyPlan
+    public function compile(string $class, string $ability = 'view', bool $classResource = false, bool $onScopedRows = false): PolicyPlan
     {
         $gate = Gate::getFacadeRoot();
         if (! $gate instanceof LaravelGate) {
@@ -55,14 +58,13 @@ final class PolicyCompiler
         if (! $classResource) {
             $scope = new ReflectionMethod($model, 'scopeVisibleTo');
             $supportedScope = new ReflectionMethod(HasPolicyVisibility::class, 'scopeVisibleTo');
-            if ($scope->getFileName() !== $supportedScope->getFileName() || $scope->getStartLine() !== $supportedScope->getStartLine()) {
+            $attribute = method_exists($model, 'visibleTo') ? new ReflectionMethod($model, 'visibleTo') : null;
+            if ($scope->getFileName() !== $supportedScope->getFileName() || $scope->getStartLine() !== $supportedScope->getStartLine() || ($attribute !== null && ! $attribute->isPrivate() && $attribute->getAttributes(Scope::class) !== [])) {
                 throw new LogicException('Custom visibleTo scopes are server-only; portable queries cannot replace application SQL.');
             }
 
-            foreach ($model->getGlobalScopes() as $scope) {
-                if (! $scope instanceof SoftDeletingScope && ! $scope instanceof VisibleToCurrentUser) {
-                    throw new LogicException("{$class} has an unsupported global scope; portable queries must preserve every constraint.");
-                }
+            if (! $onScopedRows) {
+                $this->assertProjectionScopes($model);
             }
         }
 
@@ -174,6 +176,29 @@ final class PolicyCompiler
         $fingerprint = hash('sha256', json_encode([$policy::class, $this->source($method), $beforeSource, $binding, config()->array('permissions.subject'), $portable->fingerprint, $status], JSON_THROW_ON_ERROR));
 
         return new PolicyPlan($binding, $portable, $action, $status, $admin, $constant, $fingerprint, $revocation, $classResource);
+    }
+
+    /** A detached permission projection cannot observe arbitrary changes in row membership. */
+    private function assertProjectionScopes(Model $model): void
+    {
+        $business = array_filter($model->getGlobalScopes(), static fn (mixed $scope): bool => ! is_object($scope) || ($scope::class !== SoftDeletingScope::class && ! $scope instanceof VisibleToCurrentUser));
+        if ($business === []) {
+            return;
+        }
+
+        foreach (resolve(ModelRegistry::class)->all() as $metadata) {
+            if ($metadata->class === $model::class) {
+                foreach (array_intersect_key(ScopeCompiler::globals($metadata), $business) as $scope) {
+                    if (! ScopeCompiler::creationOnly($scope)) {
+                        throw new LogicException($model::class.': detached permission projections cannot track a membership-changing global scope.');
+                    }
+                }
+
+                return;
+            }
+        }
+
+        throw new LogicException($model::class.': cannot translate global scopes without participating model metadata.');
     }
 
     private function classLiteral(Expr $expression, string $class): bool

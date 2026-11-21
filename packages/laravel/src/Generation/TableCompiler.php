@@ -85,7 +85,7 @@ final class TableCompiler
                 $schema = $model->toArray();
                 // Unrelated relationships are discovered lazily by other compilers.
                 unset($schema['relations'], $schema['relationConstraints']);
-                $dependencies[$modelName] = [$schema, $model->policyVisibility ? (new PolicyCompiler)->compile($model->class)->fingerprint : null];
+                $dependencies[$modelName] = [$schema, $model->policyVisibility ? (new PolicyCompiler)->compile($model->class, onScopedRows: true)->fingerprint : null];
             }
 
             ksort($dependencies);
@@ -182,7 +182,7 @@ final class TableCompiler
                 }
 
                 $this->visible = true;
-                $target->base->withoutGlobalScope(VisibleToCurrentUser::class);
+                $target->base->withoutGlobalScopes(VisibleToCurrentUser::names(new $target->base->model->class));
                 $this->expression = new QueryExpression('method', 'visibleTo', [$this->expression ?? throw new LogicException('Missing table root.'), new QueryExpression('actor', type: 'actor')], $target->base->model, 'query');
 
                 return $target;

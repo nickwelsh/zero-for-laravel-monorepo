@@ -56,6 +56,9 @@ it('executes standalone query exports with native ZQL, decoded selections and pa
     expect(asQueryInternals(page.query.fn({ args: page.args, ctx })).ast).toEqual(
         asQueryInternals(base.orderBy('title', 'desc').orderBy('id', 'asc').limit(3).start(cursor)).ast,
     );
+    expect(asQueryInternals(page.query.fn({ args: { __cursor: cursor, __reverse: true }, ctx })).ast).toEqual(
+        asQueryInternals(base.orderBy('title', 'asc').orderBy('id', 'desc').limit(3).start(cursor)).ast,
+    );
     expect(detail.live({ id: 'a' }).decode({ id: 'a', title: 'Detail' })).toEqual({ id: 'a', title: 'Detail' });
 });
 
@@ -109,13 +112,12 @@ it('executes both generated controller definitions with empty, zero-string, and 
     const expected = tasks
         .where('title', 'NOT IN', ['0', 'hidden'])
         .where((eb) => eb.not(eb.exists('comments', (q) => q.where('body', 'secret'))))
-        .whereExists('list', (q) => q.where('id', 'list-a'), { scalar: true })
-        .whereExists('comments', (q) => q, { flip: false })
+        .whereExists('list', (q) => q.where('id', 'list-a'))
+        .whereExists('comments')
         .related('comments', (q) => q.where('body', '!=', '0').orderBy('id', 'desc').limit(2))
         .related('list')
         .orderBy('title', 'desc')
-        .orderBy('id', 'asc')
-        .start({ title: '0', id: 'task-a' }, { inclusive: false });
+        .orderBy('id', 'asc');
     const related = runInNewContext(`(${generated.relationships.typescript})`, { zql }) as (input: {
         args: { title: string };
         ctx: { user_id: string };
@@ -124,16 +126,6 @@ it('executes both generated controller definitions with empty, zero-string, and 
     expect(native.ast).toEqual(asQueryInternals(expected).ast);
     expect(native.ast).toEqual(normalizeAST(generated.relationships.ast));
     expect(native.format).toEqual(generated.relationships.format);
-    const window = runInNewContext(`(${generated.window.typescript})`, { zql }) as (input: {
-        args: { __window?: number };
-        ctx: { user_id: string };
-    }) => typeof zql.tasks;
-    expect(asQueryInternals(window({ args: {}, ctx: generated.context })).ast).toEqual(
-        normalizeAST(generated.window.ast),
-    );
-    expect(asQueryInternals(window({ args: { __window: 5 }, ctx: generated.context })).ast).toEqual(
-        asQueryInternals(tasks.orderBy('title', 'desc').orderBy('id', 'asc').limit(5)).ast,
-    );
     const source = execFileSync('php', ['tests/interop/export.php', 'controller-module'], { encoding: 'utf8' });
     const compiled = transformSync(source, { loader: 'ts', format: 'cjs', target: 'es2022' });
     const modules: Record<string, unknown> = {
@@ -148,6 +140,13 @@ it('executes both generated controller definitions with empty, zero-string, and 
     const module = { exports: exported };
     runInNewContext(compiled.code, { require: (name: string) => modules[name], module });
     Object.assign(exported, module.exports);
+    const window = exported.bindings[generated.window.name]!({}).request() as ReturnType<typeof liveWindow>;
+    expect(asQueryInternals(window.query.fn({ args: window.args, ctx: generated.context })).ast).toEqual(
+        normalizeAST(generated.window.ast),
+    );
+    expect(asQueryInternals(window.query.fn({ args: { __page: 2, __window: 5 }, ctx: generated.context })).ast).toEqual(
+        asQueryInternals(tasks.orderBy('title', 'desc').orderBy('id', 'asc').limit(5)).ast,
+    );
     const binding = exported.bindings[generated.name]!;
     expect(() => binding({ title: '0', user_id: 'other' })).toThrow();
     const selected = binding({ title: '0' });
@@ -230,21 +229,16 @@ it('matches independently cloned PHP declarations to the pinned native construct
         unbounded: q,
         zeroLimit: q.limit(0),
         one: q.where('id', 'task-a').one(),
-        cursor: q
-            .orderBy('title', 'desc')
-            .orderBy('id', 'asc')
-            .start({ title: '0', id: 'task-a' }, { inclusive: true })
-            .limit(7),
-        exclusive: q.orderBy('id', 'asc').start({ id: 'task-a' }),
+        cursor: q.orderBy('title', 'desc').orderBy('id', 'asc').start({ title: '0', id: 'task-a' }).limit(7),
         relationships: q
             .related('comments', (child) =>
                 child.where('body', 'NOT ILIKE', '%private%').orderBy('id', 'desc').limit(3),
             )
             .related('list'),
         junction: q.related('tags', (child) => child.where('name', 'IN', ['0', 'work'])),
-        exists: q.whereExists('comments', (child) => child.where('body', 'NOT LIKE', 'secret%'), { flip: false }),
-        scalar: q.whereExists('list', (child) => child.where('id', 'list-a'), { scalar: true }),
-        junctionExists: q.whereExists('tags', (child) => child.where('name', 'work'), { flip: true }),
+        exists: q.whereExists('comments', (child) => child.where('body', 'NOT LIKE', 'secret%')),
+        scalar: q.whereExists('list', (child) => child.where('id', 'list-a')),
+        junctionExists: q.whereExists('tags', (child) => child.where('name', 'work')),
         negation: q
             .where('done', '!=', false)
             .where((eb) => eb.not(eb.exists('comments', (child) => child.where('body', 'hidden')))),

@@ -181,8 +181,10 @@ final readonly class OptionQueryCompiler
 
     private function limited(QueryExpression $expression): bool
     {
-        if ($expression->kind === 'infinite') {
-            return is_int($expression->value) && $expression->value > 0 && $expression->value <= 100;
+        if ($expression->kind === 'paginate') {
+            $size = $expression->children[1];
+
+            return $expression->value === 'scroll' && $size->kind === 'literal' && is_int($size->value) && $size->value > 0 && $size->value <= 100;
         }
 
         if ($expression->kind === 'method' && $expression->value === 'limit') {

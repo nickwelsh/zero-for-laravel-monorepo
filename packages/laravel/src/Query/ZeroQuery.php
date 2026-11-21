@@ -14,9 +14,9 @@ use LogicException;
 use ReflectionMethod;
 use stdClass;
 use ZeroForLaravel\Context\ContextReference;
+use ZeroForLaravel\Generation\ScopeCompiler;
 use ZeroForLaravel\Metadata\ModelMetadata;
 use ZeroForLaravel\Metadata\ModelRegistry;
-use ZeroForLaravel\Mutation\Mutation;
 use ZeroForLaravel\Permissions\Binding;
 use ZeroForLaravel\Permissions\VisibleToCurrentUser;
 use ZeroForLaravel\Scopes\ScopeRegistry;
@@ -26,12 +26,12 @@ use ZeroForLaravel\Support\Input;
  * Mutable, application-owned query construction; never a browser-supplied AST.
  *
  * @property-read HigherOrderQuery $orWhere
- *
- * @phpstan-type Ast array{table: string, alias?: string, __visibility?: string, __ability?: string, where?: array<string, mixed>, related?: list<array<string, mixed>>, orderBy?: list<array{string, string}>, limit?: int, start?: array{row: stdClass, exclusive: bool}}
  */
 final class ZeroQuery implements JsonSerializable
 {
-    /** @var Ast */
+    use EloquentPredicates;
+
+    /** @var array{table: string, alias?: string, __visibility?: string, __ability?: string, where?: array<string, mixed>, related?: list<array<string, mixed>>, orderBy?: list<array{string, string}>, limit?: int, start?: array{row: stdClass, exclusive: bool}} */
     private array $ast;
 
     private ?Condition $condition = null;
@@ -43,7 +43,10 @@ final class ZeroQuery implements JsonSerializable
 
     private ?int $pageSize = null;
 
-    private bool $paginated = false;
+    /** @var array{mode: string, name: string}|null */
+    private ?array $pagination = null;
+
+    private bool $reversePage = false;
 
     /** @var array<string, mixed> */
     private array $relationships = [];
@@ -83,12 +86,19 @@ final class ZeroQuery implements JsonSerializable
     /** @param array<array-key, mixed> $arguments */
     public function __call(string $method, array $arguments): self
     {
+        if ($method === 'whereExists') {
+            throw new LogicException('Use has() or whereHas(); native exists options are not query declarations.');
+        }
+
         $scope = ScopeRegistry::local($this->model->class, $method);
         if (! $scope instanceof ReflectionMethod) {
             throw new LogicException('Unknown Zero scope '.$this->model->class.'::'.$method.'.');
         }
 
-        $this->callScope(fn (): mixed => $scope->invoke(new $this->model->class, $this, ...$arguments));
+        $body = ScopeCompiler::local($this->model, $scope, $arguments);
+        $this->callScope(function () use ($body): void {
+            ScopeCompiler::apply($body, $this);
+        });
 
         return $this;
     }
@@ -121,7 +131,7 @@ final class ZeroQuery implements JsonSerializable
         }
 
         $this->ast['__visibility'] = Binding::id($user->getAuthIdentifier());
-        $this->withoutGlobalScope(VisibleToCurrentUser::class);
+        $this->withoutGlobalScopes(VisibleToCurrentUser::names(new $this->model->class));
 
         return $this;
     }
@@ -135,33 +145,58 @@ final class ZeroQuery implements JsonSerializable
         return $this;
     }
 
-    /** @param string|Closure(self): (self|void) $field */
-    public function where(string|Closure $field, mixed $operator = MissingValue::Missing, mixed $value = MissingValue::Missing): self
+    /** @param string|array<array-key, mixed>|Closure(self): (self|void) $field */
+    public function where(string|array|Closure $field, mixed $operator = MissingValue::Missing, mixed $value = MissingValue::Missing): self
     {
-        $builder = $this->expressionBuilder();
-        if ($field instanceof Closure) {
-            $nested = new self($this->model, $this->registry);
-            $nested->allScopesRemoved = true;
-            $result = $field($nested);
-            if ($result !== null && $result !== $nested) {
-                throw new LogicException('A grouped predicate must return the supplied ZeroQuery or void.');
-            }
-
-            $condition = $nested->condition ?? new Condition('and');
-        } else {
-            $condition = func_num_args() === 2 ? $builder->cmp($field, $operator) : $builder->cmp($field, $operator, $value);
-        }
-
-        return $this->addCondition($condition);
+        return $this->predicate('and', $field, $operator, $value);
     }
 
-    /** @param string|Closure(self): (self|void) $field */
-    public function orWhere(string|Closure $field, mixed $operator = MissingValue::Missing, mixed $value = MissingValue::Missing): self
+    /** @param string|array<array-key, mixed>|Closure(self): (self|void) $field */
+    public function orWhere(string|array|Closure $field, mixed $operator = MissingValue::Missing, mixed $value = MissingValue::Missing): self
     {
-        $nested = new self($this->model, $this->registry);
-        func_num_args() === 2 ? $nested->where($field, $operator) : $nested->where($field, $operator, $value);
+        return $this->predicate('or', $field, $operator, $value);
+    }
 
-        return $this->addCondition($nested->condition ?? new Condition('and'), 'or');
+    /** @param string|array<array-key, mixed>|Closure(self): (self|void) $field */
+    private function predicate(string $boolean, string|array|Closure $field, mixed $operator, mixed $value): self
+    {
+        if (is_array($field) || $field instanceof Closure) {
+            if ($operator !== MissingValue::Missing || $value !== MissingValue::Missing) {
+                throw new InvalidArgumentException('Grouped predicates take only the group.');
+            }
+
+            $nested = new self($this->model, $this->registry);
+            $nested->allScopesRemoved = true;
+            if ($field instanceof Closure) {
+                $result = $field($nested);
+                if ($result !== null && $result !== $nested) {
+                    throw new LogicException('A grouped predicate must return the supplied ZeroQuery or void.');
+                }
+            } else {
+                $method = $boolean === 'and' ? 'where' : 'orWhere';
+                foreach ($field as $key => $item) {
+                    if (is_string($key)) {
+                        $nested->{$method}($key, $item);
+                    } elseif (is_array($item) && array_is_list($item) && in_array(count($item), [2, 3], true) && is_string($item[0])) {
+                        $nested->{$method}(...$item);
+                    } else {
+                        throw new InvalidArgumentException('Array predicates require field/value pairs or comparison tuples.');
+                    }
+                }
+            }
+
+            return $nested->condition === null ? $this : $this->addCondition($nested->condition, $boolean);
+        }
+
+        if ($value === MissingValue::Missing) {
+            if ($operator === MissingValue::Missing) {
+                throw new InvalidArgumentException('Comparison requires a value.');
+            }
+            $value = $operator;
+            $operator = '=';
+        }
+
+        return $this->addCondition($this->expressionBuilder()->cmp($field, ExpressionBuilder::eloquentOperator($operator), $value), $boolean);
     }
 
     /** @param array<string, mixed> $attributes */
@@ -206,45 +241,6 @@ final class ZeroQuery implements JsonSerializable
         return $this->effective()->attributes;
     }
 
-    /**
-     * Explicit scope-aware creation for custom/disabled optimism.
-     *
-     * @param  array<string, mixed>  $attributes
-     */
-    public function create(array $attributes, ?string $key = null): Model
-    {
-        if ($key === null) {
-            throw new LogicException('Outside generated controllers, ZeroQuery::create requires an explicit prepared creation key.');
-        }
-
-        return resolve(Mutation::class)->create($this->model->class, $attributes, $key, $this->pendingAttributes());
-    }
-
-    /** @param (Closure(self): (self|void))|array<string, bool>|null $refine
-     * @param  array<string, bool>  $options
-     */
-    public function whereExists(string $relationship, Closure|array|null $refine = null, array $options = []): self
-    {
-        if (is_array($refine)) {
-            $options = $refine;
-            $refine = null;
-        }
-
-        return $this->addCondition($this->expressionBuilder()->exists($relationship, $refine, $options));
-    }
-
-    /** @param Closure(self): (self|void)|null $refine */
-    public function whereHas(string $relationship, ?Closure $refine = null): self
-    {
-        return $this->whereExists($relationship, $refine);
-    }
-
-    /** @param Closure(self): (self|void)|null $refine */
-    public function whereDoesntHave(string $relationship, ?Closure $refine = null): self
-    {
-        return $this->addCondition($this->expressionBuilder()->not($this->expressionBuilder()->exists($relationship, $refine)));
-    }
-
     /** @param string|array<string, Closure(self): (self|void)>|list<string> $relationship
      * @param  Closure(self): (self|void)|null  $refine
      */
@@ -277,8 +273,9 @@ final class ZeroQuery implements JsonSerializable
         return $this;
     }
 
-    public function orderBy(string $field, string $direction): self
+    public function orderBy(string $field, string $direction = 'asc'): self
     {
+        $direction = strtolower($direction);
         if (! isset($this->model->columns[$field]) || ! in_array($direction, ['asc', 'desc'], true)) {
             throw new InvalidArgumentException('Ordering requires an exposed column and asc/desc.');
         }
@@ -297,26 +294,6 @@ final class ZeroQuery implements JsonSerializable
 
         $this->assertNotJunction('Limit');
         $this->ast['limit'] = $limit;
-
-        return $this;
-    }
-
-    /** @param array<string, mixed> $row
-     * @param  array{inclusive?: bool}  $options
-     */
-    public function start(array $row, array $options = []): self
-    {
-        Input::keys($row, array_keys($this->model->columns), 'cursor');
-        Input::keys($options, ['inclusive'], 'cursor.options');
-        foreach ($row as $field => $value) {
-            Input::value($value, $this->model->columns[$field], 'cursor.'.$field);
-        }
-
-        if (isset($options['inclusive']) && ! is_bool($options['inclusive'])) {
-            throw new InvalidArgumentException('Cursor inclusive must be boolean.');
-        }
-
-        $this->ast['start'] = ['row' => (object) self::copyValues($row), 'exclusive' => ! ($options['inclusive'] ?? false)];
 
         return $this;
     }
@@ -342,22 +319,37 @@ final class ZeroQuery implements JsonSerializable
         return clone $this;
     }
 
-    /** A live growing window with one additional row as the exhaustion probe. */
-    public function infinite(int $pageSize): self
+    public function paginate(int|string|null $perPage = null, string $pageName = 'page'): self
     {
-        if ($this->singular || $pageSize < 1 || $pageSize >= QueryLimits::liveWindow() || isset($this->ast['limit']) || isset($this->ast['start'])) {
-            throw new InvalidArgumentException('Infinite queries require a collection and a positive page size.');
+        return (clone $this)->page('numbered', $perPage, $pageName);
+    }
+
+    public function simplePaginate(int|string|null $perPage = null, string $pageName = 'page'): self
+    {
+        return $this->paginate($perPage, $pageName);
+    }
+
+    public function cursorPaginate(int|string|null $perPage = null, string $cursorName = 'cursor'): self
+    {
+        return (clone $this)->page('cursor', $perPage, $cursorName);
+    }
+
+    private function page(string $mode, int|string|null $perPage, string $name): self
+    {
+        $perPage = filter_var($perPage ?? (new $this->model->class)->getPerPage(), FILTER_VALIDATE_INT);
+        if ($this->singular || $perPage === false || $perPage < 1 || $perPage >= QueryLimits::liveWindow() || isset($this->ast['limit']) || isset($this->ast['start'])) {
+            throw new InvalidArgumentException('Pagination requires an unbounded collection and a positive page size below the live window cap.');
         }
 
-        $query = $this;
-        if (! in_array($this->model->key, array_column($this->ast['orderBy'] ?? [], 0), true)) {
-            $query = $query->orderBy($this->model->key, 'asc');
+        if (! QueryLimits::validPageName($name)) {
+            throw new InvalidArgumentException('A paginator requires a simple, non-reserved URL parameter name.');
         }
 
-        $query = $query->limit($pageSize + 1);
-        $query->pageSize = $pageSize;
+        $this->limit($perPage + 1);
+        $this->pageSize = $perPage;
+        $this->pagination = ['mode' => $mode, 'name' => $name];
 
-        return $query;
+        return $this;
     }
 
     public function pageSize(): ?int
@@ -365,44 +357,73 @@ final class ZeroQuery implements JsonSerializable
         return $this->pageSize;
     }
 
-    /** Live cursor windows, not numbered snapshots or a total-count paginator. */
-    public function paginate(int $pageSize): self
+    /** @internal Used by Zero::scroll; do not mutate other props sharing the numbered declaration. */
+    public function asScroll(): self
     {
-        $query = $this->infinite($pageSize);
-        $query->paginated = true;
+        if (($this->pagination['mode'] ?? null) !== 'numbered') {
+            throw new LogicException('Zero::scroll requires paginate() or simplePaginate().');
+        }
+
+        $query = clone $this;
+        $query->pagination = ['mode' => 'scroll', 'name' => $this->pagination['name']];
 
         return $query;
     }
 
-    public function isPaginated(): bool
+    /** @return array{mode: string, name: string}|null */
+    public function pagination(): ?array
     {
-        return $this->paginated;
+        return $this->pagination;
     }
 
-    /** @return list<string> */
-    public function cursorFields(): array
+    /** @internal Apply only validated, mode-specific native window operands.
+     * @param array<string, mixed> $position
+     */
+    public function atPosition(array $position): self
     {
-        return array_values(array_unique(array_column($this->ast['orderBy'] ?? [], 0)));
-    }
+        $mode = $this->pagination['mode'] ?? null;
+        Input::keys($position, match ($mode) {
+            'numbered' => ['__page'], 'scroll' => ['__page', '__window'], 'cursor' => ['__cursor', '__reverse'], default => [],
+        }, 'pagination');
+        if ($position === [] || $this->pageSize === null) {
+            return $this;
+        }
 
-    public function expressionBuilder(): ExpressionBuilder
-    {
-        return new ExpressionBuilder($this->model, function (string $name, ?Closure $refine, array $options): Condition {
-            Input::keys($options, ['flip', 'scalar'], 'exists.options');
-            foreach ($options as $value) {
-                if (! is_bool($value)) {
-                    throw new InvalidArgumentException('Exists options must be boolean.');
-                }
+        if ($mode === 'cursor') {
+            $cursor = Input::object($position['__cursor'] ?? null, 'cursor');
+            $fields = array_unique([...array_column($this->effective()->ast['orderBy'] ?? [], 0), $this->model->key]);
+            Input::keys($cursor, array_values($fields), 'cursor');
+            if (count($fields) !== count($cursor) || array_key_exists('__reverse', $position) && ! is_bool($position['__reverse'])) {
+                Input::fail('cursor', 'Cursor must contain all ordering fields and a boolean traversal direction.');
             }
 
-            [$related] = $this->relationship($name, $refine, true, $options);
+            $this->reversePage = ($position['__reverse'] ?? false) === true;
+            foreach ($cursor as $field => $value) {
+                Input::value($value, $this->model->columns[$field], 'cursor.'.$field);
+            }
+            $this->ast['start'] = ['row' => (object) self::copyValues($cursor), 'exclusive' => true];
 
-            return new Condition('correlatedSubquery', [
-                'related' => $related, 'op' => 'EXISTS',
-                ...(isset($options['flip']) ? ['flip' => $options['flip']] : []),
-                ...(isset($options['scalar']) && count($this->model->relations[$name]['path']) === 1 ? ['scalar' => $options['scalar']] : []),
-            ]);
-        });
+            return $this;
+        }
+
+        $page = array_key_exists('__page', $position) ? $position['__page'] : 1;
+        $cap = QueryLimits::liveWindow();
+        if (! is_int($page) || $page < 1 || $page > intdiv($cap - 1, $this->pageSize)) {
+            Input::fail('page', 'Page and its lookahead must fit in the live window cap.');
+        }
+
+        $prefix = $page * $this->pageSize + 1;
+        $window = array_key_exists('__window', $position) ? $position['__window'] : $prefix;
+        if (! is_int($window) || $window < $prefix || $window > $cap) {
+            Input::fail('window', 'Scroll window must include the starting page and its lookahead, within the live window cap.');
+        }
+
+        return $this->limit($window);
+    }
+
+    private function expressionBuilder(): ExpressionBuilder
+    {
+        return new ExpressionBuilder($this->model);
     }
 
     /** Raw native construction AST, before server visibility and native normalization.
@@ -416,7 +437,20 @@ final class ZeroQuery implements JsonSerializable
         }
 
         try {
-            return self::copyValues($this->effective()->ast);
+            $ast = $this->effective()->ast;
+            if ($this->pageSize !== null && ($ast['limit'] ?? null) !== ($this->ast['limit'] ?? null)) {
+                throw new LogicException('A global scope cannot override a live page limit.');
+            }
+
+            if ($this->pageSize !== null && ! in_array($this->model->key, array_column($ast['orderBy'] ?? [], 0), true)) {
+                $ast['orderBy'][] = [$this->model->key, 'asc'];
+            }
+
+            if ($this->reversePage) {
+                $ast['orderBy'] = array_map(static fn (array $order): array => [$order[0], $order[1] === 'asc' ? 'desc' : 'asc'], $ast['orderBy'] ?? []);
+            }
+
+            return self::copyValues($ast);
         } finally {
             self::$renderDepth--;
         }
@@ -487,7 +521,8 @@ final class ZeroQuery implements JsonSerializable
         return $values;
     }
 
-    private function addCondition(Condition $condition, string $boolean = 'and'): self
+    /** @internal Attach a compiler-owned predicate, including a validated table filter. */
+    public function addCondition(Condition $condition, string $boolean = 'and'): self
     {
         $builder = $this->expressionBuilder();
         $this->conditionTerms[] = [$boolean, $condition];
@@ -527,6 +562,10 @@ final class ZeroQuery implements JsonSerializable
         }
 
         if ($added instanceof Condition) {
+            if ($before instanceof Condition && in_array('or', array_column($terms, 0), true)) {
+                $this->conditionTerms = [['and', $before]];
+            }
+
             $this->addCondition($added);
         }
     }
@@ -550,13 +589,13 @@ final class ZeroQuery implements JsonSerializable
             $query->conditionTerms = [];
             $query->attributes = [];
             unset($query->ast['where']);
-            foreach (ScopeRegistry::globals($this->model) as $key => $scope) {
-                if (in_array($key, $this->removedScopes, true)) {
+            foreach (ScopeCompiler::globals($this->model) as $key => $scope) {
+                if (in_array((string) $key, $this->removedScopes, true)) {
                     continue;
                 }
 
-                $query->callScope(function () use ($scope, $query, $name): void {
-                    $scope instanceof Closure ? $scope($query) : $scope->apply($query, new $name);
+                $query->callScope(function () use ($scope, $query): void {
+                    ScopeCompiler::apply($scope, $query);
                 });
             }
 
@@ -573,10 +612,9 @@ final class ZeroQuery implements JsonSerializable
     }
 
     /** @param Closure(self): (self|void)|null $refine
-     * @param  array<string, bool>  $options
      * @return array{array<string, mixed>, self}
      */
-    private function relationship(string $name, ?Closure $refine, bool $predicate, array $options = []): array
+    private function relationship(string $name, ?Closure $refine, bool $predicate): array
     {
         $relation = $this->registry->relation($this->model, $name);
         if (str_starts_with($name, 'zsubq_')) {
@@ -585,9 +623,6 @@ final class ZeroQuery implements JsonSerializable
 
         $path = $relation['path'];
         $junction = count($path) === 2;
-        if ($junction && ($options['scalar'] ?? false)) {
-            throw new InvalidArgumentException('Scalar exists is only supported for one-hop relationships.');
-        }
 
         $target = $this->registry->get($relation['model']);
         $child = new self($target, $this->registry, $junction ? $name : null);
@@ -595,10 +630,14 @@ final class ZeroQuery implements JsonSerializable
 
         $alias = $predicate ? 'zsubq_'.($junction ? 'zhidden_' : '').$name : $name;
         $child->ast['alias'] = $alias;
-        $this->model->applyRelationConstraints($name, $child);
-        $result = $refine instanceof Closure ? $refine($child) : null;
-        if ($result !== null && $result !== $child) {
-            throw new LogicException('Relationship refinements must return the provided query or void.');
+        $child->callScope(fn () => $this->model->applyRelationConstraints($name, $child));
+        if ($refine !== null) {
+            $child->callScope(function () use ($child, $refine): void {
+                $result = $refine($child);
+                if ($result !== null && $result !== $child) {
+                    throw new LogicException('Relationship refinements must return the provided query or void.');
+                }
+            });
         }
 
         $ast = $child;
@@ -606,7 +645,7 @@ final class ZeroQuery implements JsonSerializable
             $inner = ['system' => 'client', 'correlation' => ['parentField' => $path[1]['source'], 'childField' => $path[1]['dest']], 'subquery' => $ast];
             $ast = ['table' => $path[0]['table'], 'alias' => $predicate ? 'zsubq_'.$name : $name];
             if ($predicate) {
-                $ast['where'] = ['type' => 'correlatedSubquery', 'related' => $inner, 'op' => 'EXISTS', ...$options];
+                $ast['where'] = ['type' => 'correlatedSubquery', 'related' => $inner, 'op' => 'EXISTS'];
             } else {
                 $ast['related'] = [$inner];
             }

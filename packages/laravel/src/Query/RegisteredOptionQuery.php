@@ -57,20 +57,14 @@ final readonly class RegisteredOptionQuery
     public function invoke(mixed $arguments, ResolvedContext $identity, QueryCompiler $compiler): array
     {
         $args = Input::object($arguments, 'args');
-        Input::keys($args, [...array_keys($this->parameters), '__generation', '__window'], 'args');
-        $window = null;
-        if (array_key_exists('__window', $args)) {
-            $window = $args['__window'];
-            if (! is_int($window) || $window < 1 || $window > QueryLimits::liveWindow()) {
-                Input::fail('window', 'Invalid option query window.');
-            }
-        }
+        Input::keys($args, [...array_keys($this->parameters), '__generation', '__window', '__page'], 'args');
+        $position = array_intersect_key($args, array_flip(QueryLimits::POSITION_KEYS));
 
         if (isset($args['__generation']) && (! is_string($args['__generation']) || ! Str::isUuid($args['__generation']))) {
             Input::fail('generation', 'Query generations must be UUIDs.');
         }
 
-        unset($args['__generation'], $args['__window']);
+        unset($args['__generation'], $args['__window'], $args['__page']);
         $rules = [];
         foreach ($this->parameters as $name => $type) {
             QueryInput::validate($type, $args[$name] ?? null, $name);
@@ -108,14 +102,7 @@ final readonly class RegisteredOptionQuery
             $guards[] = ['class' => $class, 'id' => Binding::id($model->getKey()), 'ability' => $ability];
         }
 
-        $query = ($this->factory)($args);
-        if ($window !== null) {
-            if ($query->pageSize() === null || $query->isPaginated()) {
-                Input::fail('window', 'This option query does not support growing windows.');
-            }
-
-            $query = $query->limit($window);
-        }
+        $query = ($this->factory)($args)->atPosition($position);
 
         return $compiler->compileDeclaration($query, $context, $guards, serving: true);
     }

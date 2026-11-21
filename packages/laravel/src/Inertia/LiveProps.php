@@ -116,7 +116,7 @@ final readonly class LiveProps implements ProvidesInertiaProperties
             // order used by the controller dispatcher, never parsed from a URL.
             $args = QueryInput::arguments($registration->parameters, $context->request, $route, $registration->inputContracts);
             $generated = $registration->declaration($args);
-            if (json_encode([$generated->ast(), $generated->format()], JSON_THROW_ON_ERROR) !== json_encode([$declaration->ast(), $declaration->format()], JSON_THROW_ON_ERROR)) {
+            if ($generated->pagination() !== $declaration->pagination() || json_encode([$generated->ast(), $generated->format()], JSON_THROW_ON_ERROR) !== json_encode([$declaration->ast(), $declaration->format()], JSON_THROW_ON_ERROR)) {
                 throw new LogicException("Live prop {$prop} differs from its generated contract. Run zero:generate.");
             }
 

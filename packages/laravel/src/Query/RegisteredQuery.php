@@ -79,13 +79,13 @@ final readonly class RegisteredQuery
     public function declaration(mixed $arguments): ZeroQuery
     {
         $args = Input::object($arguments, 'args');
-        $window = $args['__window'] ?? null;
-        $cursor = $args['__cursor'] ?? null;
+        $position = array_intersect_key($args, array_flip(QueryLimits::POSITION_KEYS));
         if (isset($args['__generation']) && (! is_string($args['__generation']) || ! Str::isUuid($args['__generation']))) {
             Input::fail('generation', 'Query generations must be UUIDs.');
         }
 
-        unset($args['__route'], $args['__routeArgs'], $args['__window'], $args['__cursor'], $args['__generation']);
+        $args = array_diff_key($args, $position);
+        unset($args['__route'], $args['__routeArgs'], $args['__generation']);
         Input::keys($args, array_keys($this->parameters), 'args');
         foreach ($this->parameters as $name => $type) {
             QueryInput::validate($type, $args[$name] ?? null, $name);
@@ -94,26 +94,7 @@ final readonly class RegisteredQuery
             }
         }
 
-        $query = ($this->factory)($args);
-        if ($cursor !== null) {
-            $cursor = Input::object($cursor, 'cursor');
-            Input::keys($cursor, $query->cursorFields(), 'cursor');
-            if (! $query->isPaginated() || count($cursor) !== count($query->cursorFields())) {
-                Input::fail('cursor', 'Cursor must contain every registered ordering field.');
-            }
-
-            $query = $query->start($cursor);
-        }
-
-        if ($window !== null) {
-            if ($query->pageSize() === null || ! is_int($window) || $window < 1 || $window > QueryLimits::liveWindow() || ($query->isPaginated() && $window !== $query->pageSize() + 1)) {
-                Input::fail('window', 'Invalid live query window.');
-            }
-
-            $query = $query->limit($window);
-        }
-
-        return $query;
+        return ($this->factory)($args)->atPosition($position);
     }
 
     /** @return array<string, mixed> */
@@ -143,8 +124,8 @@ final readonly class RegisteredQuery
     private function invokeRoute(mixed $arguments, ResolvedContext $identity, QueryCompiler $compiler): array
     {
         $wire = Input::object($arguments, 'args');
-        $args = $wire;
-        unset($args['__route'], $args['__routeArgs'], $args['__window'], $args['__cursor'], $args['__generation']);
+        $args = array_diff_key($wire, array_flip(QueryLimits::POSITION_KEYS));
+        unset($args['__route'], $args['__routeArgs'], $args['__generation']);
         $input = [];
         $routeParameters = $args;
         foreach ($this->parameters as $name => $type) {
@@ -213,7 +194,7 @@ final readonly class RegisteredQuery
     private function invokeStandalone(mixed $arguments, ResolvedContext $identity, QueryCompiler $compiler): array
     {
         $wire = Input::object($arguments, 'args');
-        Input::keys($wire, [...array_keys($this->parameters), '__window', '__cursor', '__generation'], 'args');
+        Input::keys($wire, [...array_keys($this->parameters), ...QueryLimits::POSITION_KEYS, '__generation'], 'args');
         $this->assertCurrent();
         $input = [];
         foreach ($this->parameters as $name => $type) {

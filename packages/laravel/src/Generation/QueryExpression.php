@@ -79,8 +79,11 @@ final class QueryExpression
             'property' => $literal.($typescript ? ': ' : ' => ').$child(0),
             'query' => $typescript ? 'zql['.json_encode($this->model?->table, JSON_THROW_ON_ERROR).']' : '\\'.$this->model?->class.'::zeroQuery()',
             'bound' => ($typescript ? 'zql['.json_encode($this->model?->table, JSON_THROW_ON_ERROR).'].where(' : '\\'.$this->model?->class.'::zeroQuery()->where(').json_encode($this->model?->key, JSON_THROW_ON_ERROR).', '.($typescript ? 'args[' : '$args[').$literal.']'.($typescript ? ').one()' : ')->first()'),
-            'infinite' => $typescript ? $child(0).'.limit(args.__window ?? '.((int) $this->value + 1).')' : $child(0).'->infinite('.$literal.')',
-            'paginate' => $typescript ? '(args.__cursor === undefined ? '.$child(0).'.limit('.((int) $this->value + 1).') : '.$child(0).'.limit('.((int) $this->value + 1).').start(args.__cursor))' : $child(0).'->paginate('.$literal.')',
+            'paginate' => match ($this->value) {
+                'cursor' => $child(0).'->cursorPaginate('.$child(1).', cursorName: '.$child(2).')',
+                'scroll' => '\\ZeroForLaravel\\Zero::scroll('.$child(0).'->paginate('.$child(1).', pageName: '.$child(2).'))',
+                default => $child(0).'->paginate('.$child(1).', pageName: '.$child(2).')',
+            },
             'method' => in_array($this->value, ['all', 'visibleTo'], true) && $typescript ? $child(0) : $child(0).($typescript ? '.' : '->').$this->value.'('.implode(', ', array_map(fn (self $arg): string => $arg->emit($typescript), array_slice($this->children, 1))).')',
             'conditional' => '('.$child(0).' ? '.$child(1).' : '.$child(2).')',
             'binary' => '('.$child(0).' '.($typescript && $this->value === '.' ? '+' : $this->value).' '.$child(1).')',
@@ -95,14 +98,18 @@ final class QueryExpression
             'reference' => $this->children[0]->isTerminal(),
             'conditional' => $this->children[1]->isTerminal() && $this->children[2]->isTerminal(),
             'method' => in_array($this->value, ['first', 'get'], true),
-            'bound', 'guarded', 'paginate', 'infinite' => true,
+            'bound', 'guarded', 'paginate' => true,
             default => false,
         };
     }
 
     public function ordersKey(): bool
     {
-        if (in_array($this->kind, ['reference', 'infinite', 'paginate'], true)) {
+        if ($this->kind === 'paginate') {
+            return true;
+        }
+
+        if ($this->kind === 'reference') {
             return $this->children[0]->ordersKey();
         }
 
@@ -128,12 +135,25 @@ final class QueryExpression
             return $this->children[1]->cursorFields();
         }
 
-        if (! in_array($this->kind, ['method', 'paginate', 'infinite'], true)) {
+        if (! in_array($this->kind, ['method', 'scope', 'paginate'], true)) {
             return [];
         }
 
         $fields = $this->children[0]->cursorFields();
-        if ($this->value === 'orderBy' && is_string($this->children[1]->value)) {
+        if ($this->kind === 'scope') {
+            array_push($fields, ...$this->children[1]->cursorFields());
+        } elseif ($this->kind === 'paginate') {
+            $removed = ScopeCompiler::removals($this);
+            if ($removed !== null) {
+                foreach (ScopeCompiler::globals($this->queryModel()) as $name => $scope) {
+                    if (! in_array($name, $removed, true)) {
+                        array_push($fields, ...$scope->cursorFields());
+                    }
+                }
+            }
+
+            $fields[] = $this->queryModel()->key;
+        } elseif ($this->value === 'orderBy' && is_string($this->children[1]->value)) {
             $fields[] = $this->children[1]->value;
         }
 
@@ -150,7 +170,8 @@ final class QueryExpression
             return $this->children[1]->hasBounds() || $this->children[2]->hasBounds();
         }
 
-        return in_array($this->kind, ['paginate', 'infinite'], true)
-            || ($this->kind === 'method' && (in_array($this->value, ['limit', 'start', 'one'], true) || $this->children[0]->hasBounds()));
+        return $this->kind === 'paginate'
+            || ($this->kind === 'scope' && ($this->children[0]->hasBounds() || $this->children[1]->hasBounds()))
+            || ($this->kind === 'method' && (in_array($this->value, ['limit', 'start', 'first'], true) || $this->children[0]->hasBounds()));
     }
 }
