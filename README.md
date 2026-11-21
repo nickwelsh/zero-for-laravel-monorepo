@@ -4,6 +4,8 @@ Controller-first live queries and mutations for [Rocicorp Zero](https://zero.roc
 Laravel owns validation, binding, authorization, and authoritative writes. Zero owns
 replication, subscriptions, optimistic transactions, replay, and mutation outcomes.
 
+The [project glossary](GLOSSARY.md) defines the terms used across the Laravel, client, and table packages.
+
 **v0.13.0** provides controller-first queries and mutations. Install matching versions of
 `nickwelsh/zero-for-laravel`, `@nickwelsh/zero-for-laravel`, and the optional
 `@nickwelsh/zero-table`. Both the Zero client
@@ -85,11 +87,14 @@ scope. Policies choose actions; `config/permissions.php` binds database attribut
 and domains to a supported Casbin model. Managed database grants are the authority.
 The portable compiler supports ACL, global/domain RBAC and a typed ABAC subset;
 unsupported policies fail explicitly. A supported policy `before()` admin override
-stays live without bypassing caller filters. There is no auth-dependent global scope.
+stays live and preserves caller filters.
 
-Models using `HasZeroQueries` are discovered in the application's Composer namespaces. Every protected root,
-related selection and existence path needs `visibleTo()` or a supported captured
-instance Gate. Declare `#[ZeroPublic]` on an intentionally public model. Creation
+Models using `HasZeroQueries` are discovered in the application's Composer namespaces.
+Every protected root, related selection, and existence path needs policy coverage.
+Use `visibleTo()` for an explicit actor or opt a model into the `VisibleToCurrentUser`
+global scope to apply the current actor's policy visibility by default. A supported
+captured instance Gate can also cover its bound resource. Declare `#[ZeroPublic]`
+on an intentionally public model. Creation
 defaults use `withAttributes()` and typed application context; explicit creation
 attributes override defaults. Defaults are not write authorization or update stamps.
 Use checked `#[ZeroScope]` methods for local Zero scopes and `ZeroGlobalScope` for
