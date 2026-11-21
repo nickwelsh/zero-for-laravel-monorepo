@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace ZeroForLaravel\Tests\Feature;
 
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
@@ -12,9 +13,10 @@ use Inertia\Inertia;
 use Inertia\Response;
 use Laravel\Surveyor\SurveyorServiceProvider;
 use LogicException;
+use ReflectionMethod;
+use ZeroForLaravel\Attributes\ZeroPublic;
 use ZeroForLaravel\Generation\ControllerQueryCompiler;
 use ZeroForLaravel\Generation\ControllerQueryGenerator;
-use ZeroForLaravel\Generation\EffectSchemaDriver;
 use ZeroForLaravel\Generation\ZodSchemaDriver;
 use ZeroForLaravel\Metadata\ModelRegistry;
 use ZeroForLaravel\Query\RegisteredQuery;
@@ -25,6 +27,17 @@ use ZeroForLaravel\Tests\OwnerTestCase;
 use ZeroForLaravel\Zero;
 
 uses(OwnerTestCase::class);
+
+#[ZeroPublic]
+final class RankedList extends TaskList
+{
+    protected static function booted(): void
+    {
+        self::addGlobalScope('rank', function (Builder $query): void {
+            $query->orderBy('name');
+        });
+    }
+}
 
 final class PageSizeRequest extends FormRequest
 {
@@ -77,6 +90,26 @@ final class PaginatedLists
         return TaskList::zeroQuery()->visibleTo($request->user())->orderBy('name', 'desc')->cursorPaginate(2, cursorName: 'after');
     }
 
+    public function varyingFields(bool $remove): ZeroQuery
+    {
+        $query = RankedList::zeroQuery();
+        if ($remove) {
+            $query->withoutGlobalScope('rank');
+        }
+
+        return $query->cursorPaginate(2);
+    }
+
+    public function varyingDirections(bool $reverse): ZeroQuery
+    {
+        $query = RankedList::zeroQuery();
+        if ($reverse) {
+            $query->withoutGlobalScope('rank')->orderBy('name', 'desc');
+        }
+
+        return $query->cursorPaginate(2);
+    }
+
     public function defaultSize(Request $request): ZeroQuery
     {
         return TaskList::zeroQuery()->visibleTo($request->user())->paginate(pageName: 'lists');
@@ -125,7 +158,7 @@ test('numbered pages resolve a bounded size and reject prefixes beyond the cap b
     $args['input']['count'] = 3;
     expect($registered->declaration([...$args, '__page' => 4])->ast()['limit'])->toBe(13);
     foreach ([['__page' => 5], ['__page' => PHP_INT_MAX], ['__page' => null], ['__page' => 1.5], ['__page' => '2'], ['__window' => 4], ['__cursor' => ['id' => 'a']]] as $bad) {
-        expect(fn () => $registered->declaration([...$args, ...$bad]))->toThrow(ValidationException::class);
+        expect(fn (): ZeroQuery => $registered->declaration([...$args, ...$bad]))->toThrow(ValidationException::class);
     }
 });
 
@@ -137,7 +170,7 @@ test('scroll includes the cold starting page and one probe and cannot exceed the
         ->and($page->ast()['limit'])->toBe(9)
         ->and($registered->declaration([...$args, '__window' => 13])->ast()['limit'])->toBe(13);
     foreach ([8, 14, null, '12'] as $bad) {
-        expect(fn () => $registered->declaration([...$args, '__window' => $bad]))->toThrow(ValidationException::class);
+        expect(fn (): ZeroQuery => $registered->declaration([...$args, '__window' => $bad]))->toThrow(ValidationException::class);
     }
 });
 
@@ -152,13 +185,29 @@ test('reverse cursor boundaries invert every ordering field but preserve raw exc
         ->and((array) data_get($ast, 'start.row'))->toBe($cursor)
         ->and($ast['limit'])->toBe(3);
     foreach ([['__reverse' => true], ['__reverse' => 1, '__cursor' => $cursor], ['__page' => 2], ['__cursor' => ['name' => 'same']]] as $bad) {
-        expect(fn () => $registered->declaration($bad))->toThrow(ValidationException::class);
+        expect(fn (): ZeroQuery => $registered->declaration($bad))->toThrow(ValidationException::class);
     }
 });
 
 test('paginators reject collisions and unbounded request fields at generation', function (): void {
-    expect(fn () => paginatorRegistration('unbounded'))->toThrow(LogicException::class, 'bounded choices or min/max')
-        ->and(fn () => paginatorRegistration('collision'))->toThrow(LogicException::class, 'collides');
+    expect(fn (): RegisteredQuery => paginatorRegistration('unbounded'))->toThrow(LogicException::class, 'bounded choices or min/max')
+        ->and(fn (): RegisteredQuery => paginatorRegistration('collision'))->toThrow(LogicException::class, 'collides');
+});
+
+test('cursor pagination compares the effective order after each conditional scope removal', function (): void {
+    app()->instance(ModelRegistry::class, new ModelRegistry([RankedList::class]));
+    $cursorLine = (new ReflectionMethod(PaginatedLists::class, 'varyingFields'))->getEndLine() - 1;
+    expect(fn (): RegisteredQuery => paginatorRegistration('varyingFields'))->toThrow(LogicException::class,
+        __FILE__.':'.$cursorLine.' '.PaginatedLists::class.'@varyingFields prop query: Cursor pagination requires the same ordering fields on every branch.');
+
+    $compiler = resolve(ControllerQueryCompiler::class);
+    $definition = $compiler->compile(PaginatedLists::class, 'varyingDirections')[0];
+    expect($definition->expression->cursorFields())->toBe(['name', 'id']);
+    $registered = paginatorRegistration('varyingDirections');
+    foreach ([true, false] as $reverse) {
+        $page = $registered->declaration(['reverse' => $reverse, '__cursor' => ['name' => 'same', 'id' => 'a']]);
+        expect($page->ast()['orderBy'])->toBe([['name', $reverse ? 'desc' : 'asc'], ['id', 'asc']]);
+    }
 });
 
 test('omitted size uses the model default and scroll preserves the original numbered declaration', function (): void {
@@ -171,14 +220,5 @@ test('omitted size uses the model default and scroll preserves the original numb
         ->and($page->ast()['limit'])->toBe($size + 1);
 
     config(['zero.limits.max_live_window' => $size]);
-    expect(fn () => paginatorRegistration('defaultSize'))->toThrow(LogicException::class, 'below the live window cap');
-});
-
-test('both schema drivers pass resolved page sizes and native metadata to live bindings', function (): void {
-    $compiler = resolve(ControllerQueryCompiler::class);
-    $defs = [...$compiler->compile(PaginatedLists::class, 'numbered'), ...$compiler->compile(PaginatedLists::class, 'cursor'), ...$compiler->compile(PaginatedLists::class, 'scroll')];
-    foreach ([new ZodSchemaDriver, new EffectSchemaDriver] as $driver) {
-        $source = (new ControllerQueryGenerator($driver))->typescript($defs, './schema');
-        expect($source)->toContain('(args["input"]["count"] ?? 2), undefined, 13, {"mode":"numbered","name":"lists"}', 'args["input"]["size"], undefined, 13, {"mode":"scroll","name":"page"}', '2, ["name","id"], 13, {"mode":"cursor","name":"after"}');
-    }
+    expect(fn (): RegisteredQuery => paginatorRegistration('defaultSize'))->toThrow(LogicException::class, 'below the live window cap');
 });

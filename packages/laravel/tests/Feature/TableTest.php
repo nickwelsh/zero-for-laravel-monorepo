@@ -100,12 +100,12 @@ test('table counts intersect Eloquent global scopes with policy visibility and r
     expect($table->sql($context)->count())->toBe(2);
     $ast = (new QueryCompiler(resolve(ModelRegistry::class)))->compileDeclaration($table->rows(), $context);
     expect(json_encode($ast, JSON_THROW_ON_ERROR))->toContain('permission_index', 'done', 'deleted_at');
-    expect(fn () => (new PolicyCompiler)->compile(Task::class))->toThrow(LogicException::class, 'detached permission projections');
+    expect(fn (): \ZeroForLaravel\Permissions\PolicyPlan => (new PolicyCompiler)->compile(Task::class))->toThrow(LogicException::class, 'detached permission projections');
 
     Task::addGlobalScope('top', fn (\Illuminate\Database\Eloquent\Builder $query) => $query->limit(1));
-    expect(fn () => $table->sql($context))->toThrow(LogicException::class, 'unbounded');
+    expect(fn (): Builder => $table->sql($context))->toThrow(LogicException::class, 'unbounded');
     Task::addGlobalScope('raw', fn (\Illuminate\Database\Eloquent\Builder $query) => $query->whereRaw('1 = 0'));
-    expect(fn () => Table::for(Task::class))->toThrow(LogicException::class, 'Unrecognized query operation');
+    expect(fn (): Table => Table::for(Task::class))->toThrow(LogicException::class, 'Unrecognized query operation');
 });
 
 test('table capabilities reject malformed or broadened query input', function (): void {

@@ -59,7 +59,7 @@ final class PolicyCompiler
             $scope = new ReflectionMethod($model, 'scopeVisibleTo');
             $supportedScope = new ReflectionMethod(HasPolicyVisibility::class, 'scopeVisibleTo');
             $attribute = method_exists($model, 'visibleTo') ? new ReflectionMethod($model, 'visibleTo') : null;
-            if ($scope->getFileName() !== $supportedScope->getFileName() || $scope->getStartLine() !== $supportedScope->getStartLine() || ($attribute !== null && ! $attribute->isPrivate() && $attribute->getAttributes(Scope::class) !== [])) {
+            if ($scope->getFileName() !== $supportedScope->getFileName() || $scope->getStartLine() !== $supportedScope->getStartLine() || ($attribute instanceof ReflectionMethod && ! $attribute->isPrivate() && $attribute->getAttributes(Scope::class) !== [])) {
                 throw new LogicException('Custom visibleTo scopes are server-only; portable queries cannot replace application SQL.');
             }
 

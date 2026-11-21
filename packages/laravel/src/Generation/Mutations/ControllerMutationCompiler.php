@@ -469,6 +469,7 @@ final class ControllerMutationCompiler
                 if ($query->isTerminal()) {
                     $this->fail($expr, 'A create requires an Eloquent builder, not a completed read.');
                 }
+
                 $node = $this->create($expr, $query->queryModel()->class, $variables);
                 $node['defaults'] = ScopeCompiler::mutation(ScopeCompiler::attributes($query));
 

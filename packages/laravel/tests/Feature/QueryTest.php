@@ -74,7 +74,7 @@ test('declarations reject unsupported columns and native junction bounds', funct
     expect(fn (): ZeroQuery => Task::zeroQuery()->where('id', 'IN', [null]))->toThrow(InvalidArgumentException::class, 'whereIn');
     expect(fn (): ZeroQuery => Task::zeroQuery()->limit(-1))->toThrow(InvalidArgumentException::class);
     expect(fn (): ZeroQuery => Task::zeroQuery()->with('tags', fn ($query) => $query->limit(2)))->toThrow(LogicException::class);
-    expect(fn (): ZeroQuery => Task::zeroQuery()->whereExists('tags', ['scalar' => true]))->toThrow(LogicException::class, 'whereHas');
+    expect(fn (): ZeroQuery => Task::zeroQuery()->__call('whereExists', ['tags', ['scalar' => true]]))->toThrow(LogicException::class, 'whereHas');
 });
 
 test('unregistered controller queries are rejected', function (): void {

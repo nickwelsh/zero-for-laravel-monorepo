@@ -81,7 +81,7 @@ final class QueryExpression
             'bound' => ($typescript ? 'zql['.json_encode($this->model?->table, JSON_THROW_ON_ERROR).'].where(' : '\\'.$this->model?->class.'::zeroQuery()->where(').json_encode($this->model?->key, JSON_THROW_ON_ERROR).', '.($typescript ? 'args[' : '$args[').$literal.']'.($typescript ? ').one()' : ')->first()'),
             'paginate' => match ($this->value) {
                 'cursor' => $child(0).'->cursorPaginate('.$child(1).', cursorName: '.$child(2).')',
-                'scroll' => '\\ZeroForLaravel\\Zero::scroll('.$child(0).'->paginate('.$child(1).', pageName: '.$child(2).'))',
+                'scroll' => \ZeroForLaravel\Zero::class.'::scroll('.$child(0).'->paginate('.$child(1).', pageName: '.$child(2).'))',
                 default => $child(0).'->paginate('.$child(1).', pageName: '.$child(2).')',
             },
             'method' => in_array($this->value, ['all', 'visibleTo'], true) && $typescript ? $child(0) : $child(0).($typescript ? '.' : '->').$this->value.'('.implode(', ', array_map(fn (self $arg): string => $arg->emit($typescript), array_slice($this->children, 1))).')',
@@ -120,6 +120,24 @@ final class QueryExpression
         return $this->kind === 'method' && (($this->value === 'orderBy' && $this->children[1]->value === $this->model?->key) || $this->children[0]->ordersKey());
     }
 
+    /** Push trailing operations into each branch so scopes and orders apply to that branch alone. */
+    public function distribute(): self
+    {
+        if (in_array($this->kind, ['method', 'scope', 'paginate', 'guarded'], true)) {
+            $receiver = $this->children[0]->distribute();
+            if ($receiver->kind === 'conditional') {
+                $yes = clone $this;
+                $no = clone $this;
+                $yes->children[0] = $receiver->children[1];
+                $no->children[0] = $receiver->children[2];
+
+                return new self('conditional', children: [$receiver->children[0], $yes->distribute(), $no->distribute()], model: $this->model, type: 'query', singular: $this->singular);
+            }
+        }
+
+        return $this;
+    }
+
     /** @return list<string> */
     public function cursorFields(): array
     {
@@ -127,12 +145,18 @@ final class QueryExpression
             return $this->children[0]->cursorFields();
         }
 
+        if ($this->kind === 'paginate' && ($branches = $this->distribute())->kind === 'conditional') {
+            return $branches->cursorFields();
+        }
+
         if ($this->kind === 'conditional') {
-            if ($this->children[1]->cursorFields() !== $this->children[2]->cursorFields()) {
+            $yes = $this->children[1]->cursorFields();
+            $no = $this->children[2]->cursorFields();
+            if (array_diff($yes, $no) !== [] || array_diff($no, $yes) !== []) {
                 throw new LogicException('Cursor pagination requires the same ordering fields on every branch.');
             }
 
-            return $this->children[1]->cursorFields();
+            return $yes;
         }
 
         if (! in_array($this->kind, ['method', 'scope', 'paginate'], true)) {

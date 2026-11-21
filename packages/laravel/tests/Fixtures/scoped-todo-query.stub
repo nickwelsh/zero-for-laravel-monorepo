@@ -2,6 +2,8 @@
 
 namespace ZeroForLaravel\Query;
 
+final readonly class HigherOrderQuery {}
+
 /**
  * Dynamic scope names used by the ScopedTodo fixture, not package APIs.
  *

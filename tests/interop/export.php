@@ -5,9 +5,14 @@ declare(strict_types=1);
 require __DIR__.'/../../packages/laravel/vendor/autoload.php';
 
 use Illuminate\Foundation\Auth\User;
+use Illuminate\Foundation\Http\FormRequest;
+use Inertia\Inertia;
+use Inertia\Response;
+use Laravel\Surveyor\SurveyorServiceProvider;
 use PhpParser\ParserFactory;
 use ZeroForLaravel\Generation\ControllerQueryCompiler;
 use ZeroForLaravel\Generation\ControllerQueryGenerator;
+use ZeroForLaravel\Generation\EffectSchemaDriver;
 use ZeroForLaravel\Generation\TypeScriptGenerator;
 use ZeroForLaravel\Generation\ZodSchemaDriver;
 use ZeroForLaravel\Metadata\ModelRegistry;
@@ -15,8 +20,38 @@ use ZeroForLaravel\Query\MissingValue;
 use ZeroForLaravel\Query\QueryCompiler;
 use ZeroForLaravel\Query\ZeroQuery;
 use ZeroForLaravel\ResolvedContext;
+use ZeroForLaravel\Tests\Fixtures\Comment;
+use ZeroForLaravel\Tests\Fixtures\PredicateQueries;
+use ZeroForLaravel\Tests\Fixtures\PredicateTask;
 use ZeroForLaravel\Tests\Fixtures\QueryController;
+use ZeroForLaravel\Tests\Fixtures\Task;
 use ZeroForLaravel\Tests\OwnerTestCase as TestCase;
+use ZeroForLaravel\Zero;
+
+final class PaginationInteropRequest extends FormRequest
+{
+    /** @return array<string, list<string>> */
+    public function rules(): array
+    {
+        return ['size' => ['sometimes', 'integer', 'min:1', 'max:7']];
+    }
+}
+
+final class PaginationInteropController
+{
+    public function index(PaginationInteropRequest $input): Response
+    {
+        $values = $input->validated();
+        $size = $values['size'] ?? 2;
+        $query = Task::zeroQuery()->visibleTo($input->user())->orderBy('title', 'desc');
+
+        return Inertia::render('tasks', [
+            'numbered' => $query->paginate($size, pageName: 'tasks'),
+            'scroll' => Zero::scroll($query->simplePaginate($size, pageName: 'feed')),
+            'cursor' => $query->cursorPaginate($size, cursorName: 'after'),
+        ]);
+    }
+}
 
 $fixture = new class('bootFixture') extends TestCase
 {
@@ -58,6 +93,26 @@ function publicAst(ZeroQuery $query): array
 }
 if (($argv[1] ?? null) === 'generate') {
     echo (new TypeScriptGenerator)->generate($registry);
+} elseif (($argv[1] ?? null) === 'predicates') {
+    app()->register(SurveyorServiceProvider::class);
+    $queries = new PredicateQueries;
+    $filtered = resolve(ControllerQueryCompiler::class)->compile(PredicateQueries::class, 'filtered')[0]->typescript();
+    $cases = [];
+    foreach ([true, false] as $flag) {
+        $cases[] = ['args' => ['flag' => $flag], 'ast' => publicAst($queries->filtered(request(), $flag))];
+    }
+    app()->instance(ModelRegistry::class, new ModelRegistry([PredicateTask::class, Comment::class]));
+    $constrained = resolve(ControllerQueryCompiler::class)->compile(PredicateQueries::class, 'constrained')[0]->typescript();
+    echo json_encode([
+        ['typescript' => $filtered, 'cases' => $cases],
+        ['typescript' => $constrained, 'cases' => [['args' => (object) [], 'ast' => publicAst($queries->constrained(request()))]]],
+    ], JSON_THROW_ON_ERROR);
+} elseif (($argv[1] ?? null) === 'pagination-module') {
+    app()->register(SurveyorServiceProvider::class);
+    config(['zero.limits.max_live_window' => 22]);
+    $driver = $argv[2] === 'effect' ? new EffectSchemaDriver : new ZodSchemaDriver;
+    $queries = resolve(ControllerQueryCompiler::class)->compile(PaginationInteropController::class, 'index');
+    echo (new ControllerQueryGenerator($driver))->typescript($queries, './generated');
 } elseif (in_array($argv[1] ?? null, ['controller', 'controller-module'], true)) {
     $compiler = new ControllerQueryCompiler((new ParserFactory)->createForHostVersion(), $registry);
     $definition = $compiler->compile(QueryController::class, 'index')[0];

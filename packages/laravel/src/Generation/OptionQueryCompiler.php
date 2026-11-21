@@ -74,7 +74,7 @@ final readonly class OptionQueryCompiler
     {
         $expression = $this->compiler->formOption($request, $field, $operation);
         if ($expression->type !== 'query' || ($operation === 'list' && $expression->singular) || ($operation === 'resolve' && ! $expression->singular)) {
-            throw new LogicException($request.'.'.$field.': listing requires rows; resolution requires one().');
+            throw new LogicException($request.'.'.$field.': listing requires a collection; resolution requires first() or find().');
         }
 
         if ($operation === 'list' && (! $expression->ordersKey() || ! $this->limited($expression))) {

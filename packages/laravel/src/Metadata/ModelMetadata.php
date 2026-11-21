@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace ZeroForLaravel\Metadata;
 
 use Illuminate\Database\Eloquent\Model;
+use LogicException;
 use ZeroForLaravel\Generation\ScopeCompiler;
 use ZeroForLaravel\Query\ZeroQuery;
 use ZeroForLaravel\Scopes\ScopeRegistry;
@@ -92,8 +93,9 @@ final class ModelMetadata
                 if (in_array($operator, ['IN', 'NOT IN'], true)) {
                     $values = $where['value'];
                     if (! is_array($values) || ! array_is_list($values)) {
-                        throw new \LogicException('Relationship membership requires a scalar list.');
+                        throw new LogicException('Relationship membership requires a scalar list.');
                     }
+
                     $query->{$method.($operator === 'IN' ? 'In' : 'NotIn')}($column, $values);
                 } elseif ($where['value'] === null && in_array($operator, ['IS', 'IS NOT'], true)) {
                     $query->{$method.($operator === 'IS' ? 'Null' : 'NotNull')}($column);

@@ -25,7 +25,7 @@ final class NativeQueryEmitter
         }
 
         try {
-            $query = $this->distribute($query->snapshot());
+            $query = $query->snapshot()->distribute();
             if ($query->kind === 'conditional') {
                 return '('.$query->children[0]->emit(true).' ? '.$this->emit($query->children[1], $relationFilter).' : '.$this->emit($query->children[2], $relationFilter).')';
             }
@@ -50,9 +50,10 @@ final class NativeQueryEmitter
                 }
             }
 
-            if ($relationFilter !== null) {
+            if ($relationFilter instanceof QueryExpression) {
                 $conditions[] = $this->condition($relationFilter);
             }
+
             $conditions[] = $this->condition($query);
             $conditions = array_values(array_filter($conditions, fn (string $condition): bool => $condition !== 'eb.and()'));
             if ($conditions !== []) {
@@ -110,7 +111,7 @@ final class NativeQueryEmitter
 
     public function condition(QueryExpression $query): string
     {
-        $query = $this->distribute($query);
+        $query = $query->distribute();
         if ($query->kind === 'conditional') {
             return '('.$query->children[0]->emit(true).' ? '.$this->condition($query->children[1]).' : '.$this->condition($query->children[2]).')';
         }
@@ -153,6 +154,7 @@ final class NativeQueryEmitter
                     // Eloquent groups the pre-scope disjunction separately from the new constraints.
                     $groups = [[$this->joinConditions($groups)]];
                 }
+
                 if ($boolean === 'or' && end($groups) !== []) {
                     $groups[] = [];
                 }
@@ -281,10 +283,12 @@ final class NativeQueryEmitter
         if ($operator === '<>') {
             $operator = '!='; // Reflected Eloquent relationship constraints retain their SQL spelling.
         }
+
         $operand = $args[array_key_last($args)];
         if (in_array($operator, ['IN', 'NOT IN'], true)) {
             return $this->membership($args[0], $operand, $operator === 'NOT IN');
         }
+
         $value = $operand->emit(true);
         if (in_array($operator, ['=', '!='], true) && $operand->type === 'null') {
             $operator = $operator === '=' ? 'IS' : 'IS NOT';
@@ -307,22 +311,5 @@ final class NativeQueryEmitter
         }
 
         return [$query, $steps];
-    }
-
-    private function distribute(QueryExpression $query): QueryExpression
-    {
-        if (in_array($query->kind, ['method', 'scope', 'infinite', 'paginate', 'guarded'], true)) {
-            $receiver = $this->distribute($query->children[0]);
-            if ($receiver->kind === 'conditional') {
-                $yes = clone $query;
-                $no = clone $query;
-                $yes->children[0] = $receiver->children[1];
-                $no->children[0] = $receiver->children[2];
-
-                return new QueryExpression('conditional', children: [$receiver->children[0], $this->distribute($yes), $this->distribute($no)], model: $query->model, type: 'query', singular: $query->singular);
-            }
-        }
-
-        return $query;
     }
 }

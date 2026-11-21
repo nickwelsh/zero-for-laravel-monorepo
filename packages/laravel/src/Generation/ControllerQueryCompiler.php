@@ -11,8 +11,10 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Gate;
 use Inertia\Inertia;
+use InvalidArgumentException;
 use LogicException;
 use PhpParser\Node;
 use PhpParser\Node\Expr;
@@ -35,7 +37,6 @@ use ZeroForLaravel\Formbraid\ZeroOptions;
 use ZeroForLaravel\Metadata\ModelMetadata;
 use ZeroForLaravel\Metadata\ModelRegistry;
 use ZeroForLaravel\Permissions\PolicyCompiler;
-use ZeroForLaravel\Permissions\VisibleToCurrentUser;
 use ZeroForLaravel\Query\QueryInput;
 use ZeroForLaravel\Query\QueryLimits;
 use ZeroForLaravel\Query\ZeroQuery;
@@ -103,6 +104,10 @@ final class ControllerQueryCompiler
                 foreach ($call->getArgs() as $index => $argument) {
                     if (($operation === 'list' && ($argument->name?->name === 'query' || ($argument->name === null && $index === 0))) || ($operation === 'resolve' && ($argument->name?->name === 'resolve' || ($argument->name === null && $index === 3)))) {
                         $expression = $this->expression($argument->value, $variables)->snapshot();
+                        if (! $expression->isTerminal()) {
+                            $this->unsupported($argument, 'Finish the option read with get(), first(), find(), or a paginator.');
+                        }
+
                         // Option sources always read protected root rows as the authenticated actor.
                         // fields() constructs metadata without an ambient authenticated request.
                         if ($expression->model?->policyVisibility) {
@@ -204,6 +209,7 @@ final class ControllerQueryCompiler
                     $this->unsupported($statement, 'Eloquent scopes must refine the supplied builder.');
                 }
             }
+
             if ($return instanceof Stmt\Return_ && $return->expr instanceof Expr) {
                 $result = $this->expression($return->expr, $variables);
                 if ($result !== $local) {
@@ -441,55 +447,80 @@ final class ControllerQueryCompiler
         return $dependencies;
     }
 
-    private function coverage(QueryExpression $expression, bool $inherited = false): void
+    /** @param array<string, true> $expanding Globals active on the current relationship path. */
+    private function coverage(QueryExpression $expression, array $expanding = []): void
     {
         $classGuarded = $this->guards !== [] && $this->guards[0]['parameter'] === null;
-        if ($classGuarded && $expression->type === 'query' && ! $expression->model?->policyVisibility) {
+        if ($classGuarded && ! $expression->queryModel()->policyVisibility) {
             throw new LogicException('Class-guarded live paths require a portable permission resource.');
         }
 
-        if ($expression->kind === 'conditional') {
-            $this->coverage($expression->children[1], $inherited);
-            $this->coverage($expression->children[2], $inherited);
+        $this->relatedCoverage($expression, $expanding);
+        $this->rootCoverage($expression, $expanding, [], false);
+    }
+
+    /** Same-row groups and scope bodies do not start a new query. A relationship does.
+     * @param  array<string, true>  $expanding
+     */
+    private function relatedCoverage(QueryExpression $node, array $expanding): void
+    {
+        if ($node->kind === 'method' && in_array($node->value, ['with', 'whereHas', 'whereDoesntHave'], true)) {
+            $relation = $this->models->relation($node->queryModel(), $node->children[1]->stringValue());
+            if ($this->guards !== [] && $this->guards[0]['parameter'] === null && count($relation['path']) !== 1) {
+                throw new LogicException('Class-guarded live paths cannot maintain authorization on intermediate tables.');
+            }
+
+            $target = $this->models->get($relation['model']);
+            $callback = $node->children[2] ?? null;
+            $this->coverage($callback?->kind === 'callback' ? $callback->children[0] : new QueryExpression('query', model: $target, type: 'query'), $expanding);
+            $this->relatedCoverage($node->children[0], $expanding);
 
             return;
         }
 
-        $covered = $inherited || $this->declaresVisibility($expression) || $this->automaticVisibility($expression);
-        for ($node = $expression; in_array($node->kind, ['method', 'scope', 'paginate', 'infinite', 'guarded'], true); $node = $node->children[0]) {
-            foreach (array_slice($node->children, 1) as $child) {
-                $group = $node->kind === 'scope' || $node->kind === 'method' && in_array($node->value, ['where', 'orWhere'], true);
-                $this->coverage($child->kind === 'callback' ? $child->children[0] : $child, $group && $covered);
-            }
+        foreach ($node->children as $child) {
+            $this->relatedCoverage($child, $expanding);
+        }
+    }
 
-            if ($node->kind === 'method' && in_array($node->value, ['with', 'whereHas', 'whereDoesntHave'], true)) {
-                $name = $node->children[1]->value;
-                if ($node->model !== null && is_string($name)) {
-                    $relation = $this->models->relation($node->model, $name);
-                    if ($classGuarded && count($relation['path']) !== 1) {
-                        throw new LogicException('Class-guarded live paths cannot maintain authorization on intermediate tables.');
-                    }
+    /** @param array<string, true> $expanding
+     * @param  list<string>|null  $outerRemoved
+     */
+    private function rootCoverage(QueryExpression $expression, array $expanding, ?array $outerRemoved, bool $visible): void
+    {
+        $removed = ScopeCompiler::removals($expression);
+        $removed = $removed === null || $outerRemoved === null ? null : [...$removed, ...$outerRemoved];
 
-                    $target = $this->models->get($relation['model']);
-                    if ($classGuarded && ! $target->policyVisibility) {
-                        throw new LogicException('Class-guarded live paths require a portable permission resource.');
-                    }
-
-                    if ((! isset($node->children[2]) || $node->children[2]->kind !== 'callback') && $target->policyVisibility && ! $this->automaticVisibility(new QueryExpression('query', model: $target, type: 'query'))) {
-                        throw new LogicException('Protected related paths require an explicit visibleTo refinement.');
-                    }
-                }
-            }
+        $visible = $visible || $this->declaresVisibility($expression);
+        $node = $expression;
+        while (in_array($node->kind, ['method', 'scope', 'paginate', 'infinite', 'guarded'], true)) {
+            $node = $node->children[0];
         }
 
         if ($node->kind === 'conditional') {
-            $this->coverage($node->children[1], $covered);
-            $this->coverage($node->children[2], $covered);
-            $covered = true;
+            $this->rootCoverage($node->children[1], $expanding, $removed, $visible);
+            $this->rootCoverage($node->children[2], $expanding, $removed, $visible);
+
+            return;
         }
 
-        if ($expression->type === 'query' && $expression->model?->policyVisibility && ! $covered) {
-            throw new LogicException($expression->model->name.': protected query paths require visibleTo or a captured instance Gate.');
+        $model = $expression->queryModel();
+        foreach ($removed === null ? [] : ScopeCompiler::globals($model) as $name => $scope) {
+            if (in_array((string) $name, $removed ?? [], true)) {
+                continue;
+            }
+
+            $key = $model->class.'::'.$name;
+            if (isset($expanding[$key])) {
+                throw new LogicException('Recursive Eloquent global scope in live relationship path: '.$key.'.');
+            }
+
+            $visible = $visible || $this->declaresVisibility($scope);
+            $this->relatedCoverage($scope, [...$expanding, $key => true]);
+        }
+
+        if ($model->policyVisibility && ! $visible) {
+            throw new LogicException($model->name.': protected query paths require visibleTo or a captured instance Gate.');
         }
     }
 
@@ -503,25 +534,6 @@ final class ControllerQueryCompiler
             'paginate', 'infinite' => $this->declaresVisibility($expression->children[0]),
             default => false,
         };
-    }
-
-    private function automaticVisibility(QueryExpression $expression): bool
-    {
-        if (! $expression->model instanceof ModelMetadata) {
-            return false;
-        }
-
-        $removed = ScopeCompiler::removals($expression);
-
-        if ($removed !== null) {
-            foreach (ScopeRegistry::globals($expression->model) as $name => $scope) {
-                if ($scope instanceof VisibleToCurrentUser && ! in_array($name, $removed, true)) {
-                    return true;
-                }
-            }
-        }
-
-        return false;
     }
 
     private function mutate(QueryExpression $receiver, QueryExpression $value): QueryExpression
@@ -825,7 +837,15 @@ final class ControllerQueryCompiler
                 return $query;
             }
 
+            if ($this->scopeStack !== [] && $node->class->toString() === Auth::class && $node->name->name === 'user' && $node->args === []) {
+                return new QueryExpression('actor', type: 'actor');
+            }
+
             if ($node->class->toString() === ContextReference::class && $node->name->name === 'current' && count($node->getArgs()) === 1) {
+                if ($this->scopeStack === []) {
+                    $this->unsupported($node, 'ContextReference::current() is only portable inside a shared Eloquent scope. Use the context enum case in a live query.');
+                }
+
                 $arg = $node->getArgs()[0];
                 $case = $arg->value;
                 $context = ContextDefinition::configured();
@@ -919,7 +939,7 @@ final class ControllerQueryCompiler
 
             if ($receiver->type === 'query') {
                 $lowered = $this->eloquentCall($node, $method, $receiver, $variables);
-                if ($lowered !== null) {
+                if ($lowered instanceof QueryExpression) {
                     return $lowered;
                 }
             }
@@ -976,6 +996,7 @@ final class ControllerQueryCompiler
 
                     $args[] = $this->expression($arg->value, $variables)->snapshot();
                 }
+
                 $body = $this->scope($scope, $receiver->model, $args);
 
                 return $this->mutate($receiver, new QueryExpression('scope', $method, [$receiver->snapshot(), $body, ...$args], $receiver->model, 'query', $receiver->singular));
@@ -1088,7 +1109,7 @@ final class ControllerQueryCompiler
             if (in_array($method, ['where', 'orWhere'], true) && count($arguments) === 3) {
                 try {
                     $arguments[1] = ScopeCompiler::value(\ZeroForLaravel\Query\ExpressionBuilder::eloquentOperator($arguments[1]->kind === 'literal' ? $arguments[1]->value : null));
-                } catch (\InvalidArgumentException $exception) {
+                } catch (InvalidArgumentException $exception) {
                     $this->unsupported($node, $exception->getMessage());
                 }
             }
@@ -1211,7 +1232,16 @@ final class ControllerQueryCompiler
             $this->unsupported($node, 'Page size must be a positive literal or a validated integer with bounded choices or min/max rules below the live window cap.');
         }
 
-        return new QueryExpression('paginate', $cursor ? 'cursor' : 'numbered', [$source, $size, $name], $source->model, 'query');
+        $page = new QueryExpression('paginate', $cursor ? 'cursor' : 'numbered', [$source, $size, $name], $source->model, 'query');
+        if ($cursor) {
+            try {
+                $page->cursorFields();
+            } catch (LogicException $failure) {
+                $this->unsupported($node->name, $failure->getMessage());
+            }
+        }
+
+        return $page;
     }
 
     private function boundedPageSize(QueryExpression $size): bool
@@ -1274,17 +1304,13 @@ final class ControllerQueryCompiler
         $method = $node->name->name;
         $count = count($arguments);
         $arity = match ($method) {
-            'one', 'all' => $count === 0,
             'withoutGlobalScope' => $count === 1 && $arguments[0]->kind === 'literal' && $arguments[0]->type === 'string',
             'withoutGlobalScopes' => $count === 0 || $count === 1 && ($arguments[0]->kind === 'list' || $arguments[0]->type === 'null'),
             'withAttributes' => $count >= 1 && $count <= 2 && $arguments[0]->type === 'object' && ($count === 1 || $arguments[1]->kind === 'literal' && $arguments[1]->type === 'bool'),
-            'limit', 'not', 'infinite', 'paginate', 'visibleTo' => $count === 1,
+            'limit', 'visibleTo' => $count === 1,
             'orderBy' => $count === 2,
-            'with', 'start', 'whereHas', 'whereDoesntHave' => $count >= 1 && $count <= 2,
+            'with', 'whereHas', 'whereDoesntHave' => $count >= 1 && $count <= 2,
             'where', 'orWhere' => ($arguments[0]->type ?? null) === 'callback' ? $count === 1 : ($count === 2 || $count === 3),
-            'cmp' => $count === 2 || $count === 3,
-            'cmpLit' => $count === 3,
-            'and', 'or' => true,
             default => false,
         };
         if (! $arity) {
@@ -1293,14 +1319,6 @@ final class ControllerQueryCompiler
 
         if ($method === 'visibleTo' && $arguments[0]->kind !== 'actor') {
             $this->unsupported($node, 'visibleTo requires the trusted request user, never an editable query argument.');
-        }
-
-        if (in_array($method, ['and', 'or', 'not'], true)) {
-            foreach ($arguments as $argument) {
-                if ($argument->type !== 'condition' || $argument->model !== $receiver->model) {
-                    $this->unsupported($node, 'Boolean query operations require conditions for the current model.');
-                }
-            }
         }
 
         if ($method === 'limit' && ($arguments[0]->type !== 'int' || ($arguments[0]->kind === 'literal' && ($arguments[0]->value < 0 || $arguments[0]->value > 2147483647)))) {
@@ -1319,30 +1337,6 @@ final class ControllerQueryCompiler
             $this->unsupported($node, 'Relationship refinement requires a query callback.');
         }
 
-        if ($method === 'start') {
-            if ($arguments[0]->type !== 'object') {
-                $this->unsupported($node, 'Cursor requires a literal field-keyed object.');
-            }
-
-            foreach ($arguments[0]->children as $property) {
-                if (! is_string($property->value) || ! isset($receiver->model?->columns[$property->value])) {
-                    $this->unsupported($node, 'Cursor must name registered columns.');
-                }
-            }
-
-            if ($count === 2) {
-                if ($arguments[1]->type !== 'object') {
-                    $this->unsupported($node, 'Cursor options require an object.');
-                }
-
-                foreach ($arguments[1]->children as $property) {
-                    if ($property->value !== 'inclusive' || $property->children[0]->type !== 'bool') {
-                        $this->unsupported($node, 'Cursor options only support a boolean inclusive value.');
-                    }
-                }
-            }
-        }
-
         if ($method === 'withAttributes') {
             foreach ($arguments[0]->children as $property) {
                 if (! in_array($property->value, $receiver->queryModel()->writable, true)) {
@@ -1353,9 +1347,6 @@ final class ControllerQueryCompiler
 
         if (in_array($method, ['where', 'orWhere'], true) && $count >= 2) {
             $value = $arguments[$count - 1];
-            if (! in_array($value->type, ['string', 'int', 'float', 'bool', 'null', 'option'], true)) {
-                $this->unsupported($node, 'Comparison operand must be a scalar; use whereIn for membership.');
-            }
             if ($value->type === 'null' && $count === 3 && ! in_array($arguments[1]->value, ['=', '!='], true)) {
                 $this->unsupported($node, 'Null comparisons require equality or inequality.');
             }

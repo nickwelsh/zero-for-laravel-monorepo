@@ -43,7 +43,7 @@ test('the same local scopes remain ordinary SQL on Eloquent and unsupported scop
     expect(ScopedTodo::query()->named('match')->pluck('user_id')->all())->toBe(['alice']);
     expect(ScopedTodo::completed()->withoutGlobalScope(OwnershipScope::class)->count())->toBe(2);
     expect(ScopedTodo::query()->unsupported()->count())->toBe(0);
-    expect(fn () => ScopedTodo::zeroQuery()->__call('unsupported', []))->toThrow(LogicException::class, 'Unrecognized query operation');
+    expect(fn (): ZeroQuery => ScopedTodo::zeroQuery()->__call('unsupported', []))->toThrow(LogicException::class, 'Unrecognized query operation');
 });
 
 test('local scopes mutate aliases, group boolean branches and keep nested defaults off the root', function (): void {
@@ -66,6 +66,7 @@ test('local scopes mutate aliases, group boolean branches and keep nested defaul
     // Global owner remains an AND outside the root OR group.
     expect(data_get($ast, 'where.type'))->toBe('and');
     expect(data_get($ast, 'where.conditions.0.right.value'))->toBe('alice');
+
     $anonymous = $compiler->compileDeclaration($query, new ResolvedContext(['user_id' => null]));
     expect(data_get($anonymous, 'where.conditions.0.op'))->toBe('IS');
     expect(data_get($ast, 'where.conditions.2.type'))->toBe('or');
@@ -144,18 +145,18 @@ test('controller lowering preserves mutation aliases cloned branches and scope-a
     });
 });
 
-test('child attribute defaults override inherited registrations and removal restores the parent default', function (): void {
+test('child defaults override earlier registrations and removing a scope retains only Eloquent defaults', function (): void {
     $registry = new ModelRegistry([InheritedDefaultTodo::class]);
     app()->instance(ModelRegistry::class, $registry);
     $registry->connection()->transaction(function () use ($registry): void {
         $mutation = new Mutation($registry, ['ids' => [
             'child' => '12345678-1234-4567-8123-123456789014',
-            'parent' => '12345678-1234-4567-8123-123456789015',
         ], 'timestamp' => 1700000000000], new ResolvedContext(['user_id' => 'alice'], 'alice'));
         $child = $mutation->create(InheritedDefaultTodo::class, ['user_id' => 'alice'], 'child');
-        $parent = $mutation->create(InheritedDefaultTodo::class, ['user_id' => 'alice'], 'parent', InheritedDefaultTodo::zeroQuery()->withoutGlobalScope(ChildDefaultScope::class)->pendingAttributes());
         expect($child->fresh()?->getAttribute('title'))->toBe('child attribute');
-        expect($parent->fresh()?->getAttribute('title'))->toBe('parent registration');
+        // Laravel 13 inherits the parent's ScopedBy attribute; Laravel 12 does not.
+        $eloquent = InheritedDefaultTodo::query()->withoutGlobalScope(ChildDefaultScope::class)->applyScopes();
+        expect(InheritedDefaultTodo::zeroQuery()->withoutGlobalScope(ChildDefaultScope::class)->pendingAttributes())->toBe($eloquent->pendingAttributes);
     });
 });
 
@@ -202,7 +203,7 @@ class ScopedTodo extends Model
     /** @param Builder<static> $query
      * @return Builder<static>
      */
-    public function scopeNamed(Builder $query, string $name): Builder
+    protected function scopeNamed(Builder $query, string $name): Builder
     {
         return $query->withAttributes(['title' => $name]);
     }

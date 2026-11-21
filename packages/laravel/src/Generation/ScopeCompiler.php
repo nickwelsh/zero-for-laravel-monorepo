@@ -99,31 +99,6 @@ final class ScopeCompiler
         self::replay($scope, ['zeroScope' => $query]);
     }
 
-    /** @param array<string, ZeroQuery> $locals */
-    private static function replay(QueryExpression $node, array $locals): mixed
-    {
-        $read = fn (QueryExpression $child): mixed => self::replay($child, $locals);
-        if ($node->kind === 'scope' || $node->kind === 'method') {
-            $builder = $read($node->children[0]);
-            if (! $builder instanceof ZeroQuery) {
-                throw new LogicException('Scope operations must refine their supplied builder.');
-            }
-
-            return $builder->{$node->stringValue()}(...array_map($read, array_slice($node->children, $node->kind === 'scope' ? 2 : 1)));
-        }
-
-        return match ($node->kind) {
-            'local' => $locals[$node->stringValue()],
-            'literal' => $node->value,
-            'actor' => Auth::user(),
-            'context' => new ContextReference($node->stringValue()),
-            'callback' => fn (ZeroQuery $builder): mixed => self::replay($node->children[0], [...$locals, $node->stringValue() => $builder]),
-            'list' => array_map($read, $node->children),
-            'object' => array_column(array_map(fn (QueryExpression $item): array => [$item->stringValue(), $read($item->children[0])], $node->children), 1, 0),
-            default => throw new LogicException('Unsupported Eloquent scope operand: '.$node->kind.'.'),
-        };
-    }
-
     public static function value(mixed $value): QueryExpression
     {
         $value = ContextReference::normalize($value);
@@ -254,6 +229,31 @@ final class ScopeCompiler
             'field' => ['op' => 'get', 'base' => $children[0], 'key' => ['op' => 'literal', 'value' => $value->value]],
             'binary' => ['op' => 'binary', 'operator' => $value->value, 'left' => $children[0], 'right' => $children[1]],
             default => throw new LogicException('Nonportable creation attribute expression '.$value->kind),
+        };
+    }
+
+    /** @param array<string, ZeroQuery> $locals */
+    private static function replay(QueryExpression $node, array $locals): mixed
+    {
+        $read = fn (QueryExpression $child): mixed => self::replay($child, $locals);
+        if ($node->kind === 'scope' || $node->kind === 'method') {
+            $builder = $read($node->children[0]);
+            if (! $builder instanceof ZeroQuery) {
+                throw new LogicException('Scope operations must refine their supplied builder.');
+            }
+
+            return $builder->{$node->stringValue()}(...array_map($read, array_slice($node->children, $node->kind === 'scope' ? 2 : 1)));
+        }
+
+        return match ($node->kind) {
+            'local' => $locals[$node->stringValue()],
+            'literal' => $node->value,
+            'actor' => Auth::user(),
+            'context' => new ContextReference($node->stringValue()),
+            'callback' => fn (ZeroQuery $builder): mixed => self::replay($node->children[0], [...$locals, $node->stringValue() => $builder]),
+            'list' => array_map($read, $node->children),
+            'object' => array_column(array_map(fn (QueryExpression $item): array => [$item->stringValue(), $read($item->children[0])], $node->children), 1, 0),
+            default => throw new LogicException('Unsupported Eloquent scope operand: '.$node->kind.'.'),
         };
     }
 }

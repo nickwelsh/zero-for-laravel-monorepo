@@ -124,7 +124,7 @@ trait EloquentPredicates
     public function when(bool $value, Closure $callback, ?Closure $default = null): self
     {
         $branch = $value ? $callback : $default;
-        $result = $branch === null ? null : $branch($this, $value);
+        $result = $branch instanceof Closure ? $branch($this, $value) : null;
         if ($result !== null && $result !== $this) {
             throw new LogicException('Conditional callbacks must return the supplied builder or void.');
         }
@@ -137,7 +137,7 @@ trait EloquentPredicates
      */
     public function unless(bool $value, Closure $callback, ?Closure $default = null): self
     {
-        return $this->when($value, $default ?? static fn () => null, $callback);
+        return $this->when($value, $default ?? static fn (): null => null, $callback);
     }
 
     /** @param (Closure(self): (self|void))|null $callback */
@@ -147,6 +147,7 @@ trait EloquentPredicates
         if (! in_array($boolean, ['and', 'or'], true)) {
             throw new InvalidArgumentException('Relationship predicates require and/or.');
         }
+
         if (str_contains($relation, '.')) {
             [$relation, $tail] = explode('.', $relation, 2);
             // Laravel's doesntHave(path) negates the whole path. Other count
@@ -156,6 +157,7 @@ trait EloquentPredicates
             $callback = fn (self $child): self => $outerNot ? $child->whereHas($tail, $leaf) : $child->whereHas($tail, $leaf, $operator, $count);
             $not = $outerNot;
         }
+
         [$related] = $this->relationship($relation, $callback, true);
 
         return $this->addCondition(new Condition('correlatedSubquery', ['related' => $related, 'op' => $not ? 'NOT EXISTS' : 'EXISTS']), $boolean);
@@ -234,12 +236,14 @@ trait EloquentPredicates
         if (! array_is_list($values)) {
             throw new InvalidArgumentException('Membership requires a scalar list.');
         }
+
         foreach ($values as $value) {
             $reference = ContextReference::normalize($value);
             if ($reference instanceof ContextReference && ContextDefinition::configured()->fields[$reference->field]['nullable']) {
                 throw new InvalidArgumentException('Membership cannot depend on a nullable context operand.');
             }
         }
+
         $nonNull = array_values(array_filter($values, static fn (mixed $v): bool => $v !== null));
         $condition = $builder->cmp($column, $not ? 'NOT IN' : 'IN', $nonNull);
         // SQL's NOT IN with a null member is never true. Empty NOT IN, on
@@ -254,9 +258,10 @@ trait EloquentPredicates
     /** @param list<mixed> $values */
     private function between(string $column, array $values, string $boolean, bool $not): self
     {
-        if (! array_is_list($values) || count($values) !== 2) {
+        if (count($values) !== 2) {
             throw new InvalidArgumentException('Between requires two ordered bounds.');
         }
+
         if ($values[0] === null || $values[1] === null) {
             if (! $not || $values === [null, null]) {
                 return $this->membership($column, [], $boolean, false);

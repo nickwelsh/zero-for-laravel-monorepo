@@ -157,48 +157,6 @@ final class ZeroQuery implements JsonSerializable
         return $this->predicate('or', $field, $operator, $value);
     }
 
-    /** @param string|array<array-key, mixed>|Closure(self): (self|void) $field */
-    private function predicate(string $boolean, string|array|Closure $field, mixed $operator, mixed $value): self
-    {
-        if (is_array($field) || $field instanceof Closure) {
-            if ($operator !== MissingValue::Missing || $value !== MissingValue::Missing) {
-                throw new InvalidArgumentException('Grouped predicates take only the group.');
-            }
-
-            $nested = new self($this->model, $this->registry);
-            $nested->allScopesRemoved = true;
-            if ($field instanceof Closure) {
-                $result = $field($nested);
-                if ($result !== null && $result !== $nested) {
-                    throw new LogicException('A grouped predicate must return the supplied ZeroQuery or void.');
-                }
-            } else {
-                $method = $boolean === 'and' ? 'where' : 'orWhere';
-                foreach ($field as $key => $item) {
-                    if (is_string($key)) {
-                        $nested->{$method}($key, $item);
-                    } elseif (is_array($item) && array_is_list($item) && in_array(count($item), [2, 3], true) && is_string($item[0])) {
-                        $nested->{$method}(...$item);
-                    } else {
-                        throw new InvalidArgumentException('Array predicates require field/value pairs or comparison tuples.');
-                    }
-                }
-            }
-
-            return $nested->condition === null ? $this : $this->addCondition($nested->condition, $boolean);
-        }
-
-        if ($value === MissingValue::Missing) {
-            if ($operator === MissingValue::Missing) {
-                throw new InvalidArgumentException('Comparison requires a value.');
-            }
-            $value = $operator;
-            $operator = '=';
-        }
-
-        return $this->addCondition($this->expressionBuilder()->cmp($field, ExpressionBuilder::eloquentOperator($operator), $value), $boolean);
-    }
-
     /** @param array<string, mixed> $attributes */
     public function withAttributes(array $attributes, bool $asConditions = true): self
     {
@@ -334,24 +292,6 @@ final class ZeroQuery implements JsonSerializable
         return (clone $this)->page('cursor', $perPage, $cursorName);
     }
 
-    private function page(string $mode, int|string|null $perPage, string $name): self
-    {
-        $perPage = filter_var($perPage ?? (new $this->model->class)->getPerPage(), FILTER_VALIDATE_INT);
-        if ($this->singular || $perPage === false || $perPage < 1 || $perPage >= QueryLimits::liveWindow() || isset($this->ast['limit']) || isset($this->ast['start'])) {
-            throw new InvalidArgumentException('Pagination requires an unbounded collection and a positive page size below the live window cap.');
-        }
-
-        if (! QueryLimits::validPageName($name)) {
-            throw new InvalidArgumentException('A paginator requires a simple, non-reserved URL parameter name.');
-        }
-
-        $this->limit($perPage + 1);
-        $this->pageSize = $perPage;
-        $this->pagination = ['mode' => $mode, 'name' => $name];
-
-        return $this;
-    }
-
     public function pageSize(): ?int
     {
         return $this->pageSize;
@@ -377,7 +317,7 @@ final class ZeroQuery implements JsonSerializable
     }
 
     /** @internal Apply only validated, mode-specific native window operands.
-     * @param array<string, mixed> $position
+     * @param  array<string, mixed>  $position
      */
     public function atPosition(array $position): self
     {
@@ -401,6 +341,7 @@ final class ZeroQuery implements JsonSerializable
             foreach ($cursor as $field => $value) {
                 Input::value($value, $this->model->columns[$field], 'cursor.'.$field);
             }
+
             $this->ast['start'] = ['row' => (object) self::copyValues($cursor), 'exclusive' => true];
 
             return $this;
@@ -419,11 +360,6 @@ final class ZeroQuery implements JsonSerializable
         }
 
         return $this->limit($window);
-    }
-
-    private function expressionBuilder(): ExpressionBuilder
-    {
-        return new ExpressionBuilder($this->model);
     }
 
     /** Raw native construction AST, before server visibility and native normalization.
@@ -475,6 +411,26 @@ final class ZeroQuery implements JsonSerializable
         throw new LogicException('Zero query declarations must be extracted before page serialization.');
     }
 
+    /** @internal Attach a compiler-owned predicate, including a validated table filter. */
+    public function addCondition(Condition $condition, string $boolean = 'and'): self
+    {
+        $builder = $this->expressionBuilder();
+        $this->conditionTerms[] = [$boolean, $condition];
+        $groups = [[]];
+        foreach ($this->conditionTerms as [$junction, $term]) {
+            if ($junction === 'or' && end($groups) !== []) {
+                $groups[] = [];
+            }
+
+            $groups[array_key_last($groups)][] = $term;
+        }
+
+        $this->condition = ExpressionBuilder::simplify($builder->or(...array_map(fn (array $terms): Condition => $builder->and(...$terms), $groups)));
+        $this->ast['where'] = $this->condition->toArray();
+
+        return $this;
+    }
+
     /**
      * Own JSON objects as well as arrays, including nested relationship cursors.
      *
@@ -521,24 +477,70 @@ final class ZeroQuery implements JsonSerializable
         return $values;
     }
 
-    /** @internal Attach a compiler-owned predicate, including a validated table filter. */
-    public function addCondition(Condition $condition, string $boolean = 'and'): self
+    /** @param string|array<array-key, mixed>|Closure(self): (self|void) $field */
+    private function predicate(string $boolean, string|array|Closure $field, mixed $operator, mixed $value): self
     {
-        $builder = $this->expressionBuilder();
-        $this->conditionTerms[] = [$boolean, $condition];
-        $groups = [[]];
-        foreach ($this->conditionTerms as [$junction, $term]) {
-            if ($junction === 'or' && end($groups) !== []) {
-                $groups[] = [];
+        if (is_array($field) || $field instanceof Closure) {
+            if ($operator !== MissingValue::Missing || $value !== MissingValue::Missing) {
+                throw new InvalidArgumentException('Grouped predicates take only the group.');
             }
 
-            $groups[array_key_last($groups)][] = $term;
+            $nested = new self($this->model, $this->registry);
+            $nested->allScopesRemoved = true;
+            if ($field instanceof Closure) {
+                $result = $field($nested);
+                if ($result !== null && $result !== $nested) {
+                    throw new LogicException('A grouped predicate must return the supplied ZeroQuery or void.');
+                }
+            } else {
+                $method = $boolean === 'and' ? 'where' : 'orWhere';
+                foreach ($field as $key => $item) {
+                    if (is_string($key)) {
+                        $nested->{$method}($key, $item);
+                    } elseif (is_array($item) && array_is_list($item) && in_array(count($item), [2, 3], true) && is_string($item[0])) {
+                        $nested->{$method}(...$item);
+                    } else {
+                        throw new InvalidArgumentException('Array predicates require field/value pairs or comparison tuples.');
+                    }
+                }
+            }
+
+            return $nested->condition instanceof Condition ? $this->addCondition($nested->condition, $boolean) : $this;
         }
 
-        $this->condition = ExpressionBuilder::simplify($builder->or(...array_map(fn (array $terms): Condition => $builder->and(...$terms), $groups)));
-        $this->ast['where'] = $this->condition->toArray();
+        if ($value === MissingValue::Missing) {
+            if ($operator === MissingValue::Missing) {
+                throw new InvalidArgumentException('Comparison requires a value.');
+            }
+
+            $value = $operator;
+            $operator = '=';
+        }
+
+        return $this->addCondition($this->expressionBuilder()->cmp($field, ExpressionBuilder::eloquentOperator($operator), $value), $boolean);
+    }
+
+    private function page(string $mode, int|string|null $perPage, string $name): self
+    {
+        $perPage = filter_var($perPage ?? (new $this->model->class)->getPerPage(), FILTER_VALIDATE_INT);
+        if ($this->singular || $perPage === false || $perPage < 1 || $perPage >= QueryLimits::liveWindow() || isset($this->ast['limit']) || isset($this->ast['start'])) {
+            throw new InvalidArgumentException('Pagination requires an unbounded collection and a positive page size below the live window cap.');
+        }
+
+        if (! QueryLimits::validPageName($name)) {
+            throw new InvalidArgumentException('A paginator requires a simple, non-reserved URL parameter name.');
+        }
+
+        $this->limit($perPage + 1);
+        $this->pageSize = $perPage;
+        $this->pagination = ['mode' => $mode, 'name' => $name];
 
         return $this;
+    }
+
+    private function expressionBuilder(): ExpressionBuilder
+    {
+        return new ExpressionBuilder($this->model);
     }
 
     /** @param Closure(): mixed $scope */
@@ -631,7 +633,7 @@ final class ZeroQuery implements JsonSerializable
         $alias = $predicate ? 'zsubq_'.($junction ? 'zhidden_' : '').$name : $name;
         $child->ast['alias'] = $alias;
         $child->callScope(fn () => $this->model->applyRelationConstraints($name, $child));
-        if ($refine !== null) {
+        if ($refine instanceof Closure) {
             $child->callScope(function () use ($child, $refine): void {
                 $result = $refine($child);
                 if ($result !== null && $result !== $child) {
