@@ -332,9 +332,15 @@ export function useSelectionData<Q extends ReadSelection>(
         infinite,
         hasMore: infinite?.hasMore,
         capped: pagination ? capped : (infinite?.capped ?? false),
-        exhausted: pagination ? ready && exhausted : (infinite?.exhausted ?? false),
+        exhausted: pagination ? ready && !reverse && exhausted : (infinite?.exhausted ?? false),
         stopReason:
-            pagination && ready ? (exhausted ? 'exhausted' : capped ? 'maximum' : undefined) : infinite?.stopReason,
+            pagination && ready
+                ? !reverse && exhausted
+                    ? 'exhausted'
+                    : capped
+                      ? 'maximum'
+                      : undefined
+                : infinite?.stopReason,
         isLoadingMore: infinite !== undefined && limit - start > initial && !complete,
         loadMore: () => infinite?.loadMore(),
         ...(pagination && pagination.mode !== 'cursor' && range ? { currentPage: range.page } : {}),

@@ -1,5 +1,7 @@
 import { router } from '@inertiajs/react';
 import { inertiaURLAdapter, inertiaURLVisit } from './inertia-url';
+import { paginatedArgs, writePagination } from './pagination-url';
+import { withoutPosition, type PagePosition } from '../pagination';
 export { inertiaURLAdapter } from './inertia-url';
 import {
     createContext,
@@ -29,6 +31,7 @@ interface Metadata {
 interface TransportPage {
     component: string;
     props: Record<string, unknown>;
+    url?: string;
 }
 type BindingFactories = Record<string, (args: never) => ReadSelection>;
 export interface InertiaInputOptions {
@@ -171,6 +174,7 @@ function Subscription({
     pageGuard,
     replica,
     inserted,
+    onPosition,
     children,
 }: {
     selection: ReadSelection;
@@ -178,9 +182,10 @@ function Subscription({
     pageGuard: boolean;
     replica: boolean;
     inserted: string | undefined;
+    onPosition: (position: PagePosition, history: 'push' | 'replace') => void;
     children: (data: Data<unknown>) => ReactNode;
 }) {
-    const data = useSelectionData(selection, {}, inserted !== undefined);
+    const data = useSelectionData(selection, {}, inserted !== undefined, onPosition);
     // Preserve the mounted editor during the transition to the normal wire
     // query. Only this selection's own locally inserted primary key qualifies.
     const [created, setCreated] = useState<{ selection: string; id: string }>();
@@ -231,7 +236,7 @@ function InputSubscription({
     binding: Binding;
     factory: (args: unknown) => ReadSelection;
     starting: boolean;
-    synchronize: (args: Record<string, unknown>, values: object) => boolean;
+    synchronize: (args: Record<string, unknown>, next: ReadSelection, history?: 'push' | 'replace') => boolean;
     prop: string;
     access: AccessOptions;
     replica: boolean;
@@ -267,6 +272,12 @@ function InputSubscription({
         replica && binding.access && binding.access.scope !== 'page' && selection.one && routeIds.length === 1
             ? inserts.find((row) => row.table === selection.entity?.table && row.id === routeIds[0])?.id
             : undefined;
+    function commit(before: typeof state, args: Record<string, unknown>, history?: 'push' | 'replace') {
+        if (selectionKey(args) === selectionKey(before.args)) return;
+        const synchronized = synchronize(args, factory(args), history);
+        latest.current = { ...before, args, pending: synchronized ? [...before.pending, selectionKey(args)] : [] };
+        setStored(latest.current);
+    }
     function update(patch: object | ((values: Readonly<Record<string, unknown>>) => object), reset = false) {
         const before = latest.current;
         if (!before || before.source !== source) return;
@@ -276,16 +287,9 @@ function InputSubscription({
         const changes = object(typeof patch === 'function' ? patch(values) : patch, 'inputs');
         const merged = reset ? (factory(before.initial).input?.values ?? {}) : { ...values, ...changes };
         const nextValues = Object.fromEntries(Object.entries(merged).filter(([, value]) => value !== undefined));
+        if (!reset && selectionKey(nextValues) === selectionKey(values)) return;
         const args = object(current.input.apply(nextValues), 'args');
-        const next = factory(args);
-        if (selectionKey(args) === selectionKey(before.args)) return;
-        const synchronized = synchronize(args, next.input?.values ?? {});
-        latest.current = {
-            ...before,
-            args,
-            pending: synchronized ? [...before.pending, selectionKey(args)] : [],
-        };
-        setStored(latest.current);
+        commit(before, args);
     }
     const inputs: QueryInputs<Record<string, unknown>, object> = {
         values: object(selection.input?.values ?? {}, 'inputs'),
@@ -302,6 +306,10 @@ function InputSubscription({
             pageGuard={binding.access?.scope === 'page'}
             replica={replica}
             inserted={inserted}
+            onPosition={(position, history) => {
+                if (latest.current !== state) return;
+                commit(state, { ...withoutPosition(state.args), ...position }, history);
+            }}
         >
             {(data) => children({ ...data, inputs })}
         </Subscription>
@@ -425,6 +433,9 @@ export function createInertiaAdapter(factories: BindingFactories, options: Inert
                 const contract = metadata(ordinary['__zero']);
                 const snapshot = object(ordinary['__zero'] ?? {}, '__zero');
                 const [mount] = useState(() => ({}));
+                const href =
+                    pages.get(snapshot)?.url ?? (typeof window !== 'undefined' ? window.location.href : undefined);
+                const pageURL = href === undefined ? undefined : new URL(href, 'https://zero.invalid');
                 // Resolving a lazy component is speculative: Inertia can discard
                 // it. Claim ownership only once React commits the page, before
                 // a nested boundary's passive revocation effect can run.
@@ -459,6 +470,18 @@ export function createInertiaAdapter(factories: BindingFactories, options: Inert
                 ) {
                     if (replica && starting) return options.access?.onPending?.() ?? null; // IndexedDB is opening.
                     return <output data-zero-access="unknown">Checking access…</output>;
+                }
+                const urlFields = options.url?.[(pages.get(snapshot) ?? current ?? page)?.component ?? ''];
+                const claimed = new Set(Object.values(urlFields ?? {}).flatMap((fields) => Object.values(fields)));
+                for (const [, binding] of entries) {
+                    if (binding.pending || !Object.hasOwn(factories, binding.query)) continue;
+                    const factory = factories[binding.query] as (args: unknown) => ReadSelection;
+                    const pagination = factory(binding.args).pagination;
+                    if (!pagination) continue;
+                    if (claimed.has(pagination.name))
+                        throw new Error(`Pagination URL parameter ${pagination.name} is already in use.`);
+                    claimed.add(pagination.name);
+                    if (pageURL) binding.args = paginatedArgs(binding.args, pagination, pageURL);
                 }
                 function accessOptions(binding: Binding): AccessOptions {
                     return {
@@ -520,12 +543,17 @@ export function createInertiaAdapter(factories: BindingFactories, options: Inert
                     if (!Object.hasOwn(factories, binding.query))
                         throw new Error('Unknown Zero query contract. Reload the application.');
                     const factory = factories[binding.query] as (args: unknown) => ReadSelection;
-                    const synchronize = (args: Record<string, unknown>, values: object) => {
-                        const fields = options.url?.[current?.component ?? page?.component ?? '']?.[prop];
-                        if (!fields) return false;
+                    const synchronize = (
+                        args: Record<string, unknown>,
+                        next: ReadSelection,
+                        history?: 'push' | 'replace',
+                    ) => {
+                        const fields = urlFields?.[prop];
+                        if (!fields && !next.pagination) return false;
                         const url = new URL(inertiaURLAdapter.getURL());
-                        const input = object(values, 'inputs');
-                        for (const [field, parameter] of Object.entries(fields)) {
+                        if (next.pagination) writePagination(url.searchParams, next.pagination);
+                        const input = object(next.input?.values ?? {}, 'inputs');
+                        for (const [field, parameter] of Object.entries(history ? {} : (fields ?? {}))) {
                             const value = input[field];
                             if (value === undefined) url.searchParams.delete(parameter);
                             else if (value === null) url.searchParams.set(parameter, '');
@@ -559,7 +587,7 @@ export function createInertiaAdapter(factories: BindingFactories, options: Inert
                                 };
                             },
                         };
-                        inertiaURLVisit(visit, options.history ?? 'replace');
+                        inertiaURLVisit(visit, history ?? options.history ?? 'replace');
                         return true;
                     };
                     return (

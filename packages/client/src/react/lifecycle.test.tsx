@@ -124,7 +124,7 @@ const paginated = defineQueries({
         ({
             args: _args,
         }: {
-            args: { __page?: number; __window?: number; __cursor?: { id: string }; __reverse?: boolean };
+            args: { __page?: number | undefined; __window?: number; __cursor?: { id: string }; __reverse?: boolean };
         }) => createBuilder(schema).tasks,
     ),
 });
@@ -176,6 +176,7 @@ it('uses the entering cursor and reverse lookahead, not a local stack, to naviga
     expect(result.current.data.map((row) => row.id)).toEqual(['a', 'b']);
     expect(result.current.hasPreviousPage).toBe(false);
     expect(result.current.hasNextPage).toBe(true);
+    expect(result.current.exhausted).toBe(false);
     act(() => result.current.nextPage());
     expect(result.current.data.map((row) => row.id)).toEqual(['c', 'd']);
 });
@@ -201,6 +202,238 @@ it('opens a cold scroll page without showing the prefix, then grows just its dis
     expect(result.current.currentPage).toBe(3);
     expect(result.current.stopReason).toBe('maximum');
     expect(result.current.exhausted).toBe(false);
+});
+
+it('hydrates two independent page parameters before subscribing and restores Back/Forward snapshots', () => {
+    const numbered = (args: Parameters<typeof paginated.tasks>[0]) =>
+        liveQuery(paginated.tasks, args, definitions, 'Task', false, 2, undefined, 9, {
+            mode: 'numbered',
+            name: 'tasks_page',
+        });
+    const scroll = (args: Parameters<typeof paginated.tasks>[0]) =>
+        liveQuery(paginated.tasks, args, definitions, 'Task', false, 2, undefined, 9, {
+            mode: 'scroll',
+            name: 'feed_page',
+        });
+    const adapter = createInertiaAdapter({ numbered, scroll });
+    const page = {
+        component: 'list',
+        url: '/list?tasks_page=2&feed_page=2&keep=yes#mine',
+        props: {
+            __zero: {
+                version: 1,
+                mode: 'replace',
+                bindings: { tasks: { query: 'numbered', args: {} }, feed: { query: 'scroll', args: {} } },
+            },
+        },
+    };
+    const original = window.location.href;
+    window.history.replaceState(null, '', page.url);
+    const prefix = ['a', 'b', 'c', 'd', 'e', 'f', 'g'].map((id) => ({ id }));
+    put({ __page: 2 }, prefix.slice(0, 5));
+    put({ __page: 3 }, prefix);
+    put({ __page: 2, __window: 5 }, prefix.slice(0, 5));
+    put({ __page: 2, __window: 7 }, prefix);
+    const push = vi.spyOn(router, 'push').mockImplementation(() => {});
+    const replace = vi.spyOn(router, 'replace').mockImplementation(() => {});
+    let live: { tasks: Data<readonly { id: string }[]>; feed: Data<readonly { id: string }[]> };
+    const Page = (props: typeof live) => {
+        live = props;
+        return null;
+    };
+    try {
+        const Wrapped = adapter.wrap(Page, page);
+        const view = render(<Wrapped {...(page.props as unknown as typeof live)} />);
+        expect(native.requests.map((request) => request.args)).not.toContainEqual({});
+        expect(live!.tasks.data.map((row) => row.id)).toEqual(['c', 'd']);
+        expect(live!.feed.data.map((row) => row.id)).toEqual(['c', 'd']);
+        act(() => {
+            live.tasks.nextPage();
+            live.feed.loadMore();
+        });
+        const next = push.mock.lastCall![0];
+        const expanded = replace.mock.lastCall![0];
+        expect(next.url).toBe('/list?tasks_page=3&feed_page=2&keep=yes#mine');
+        expect(expanded.url).toBe('/list?tasks_page=3&feed_page=3&keep=yes#mine');
+        if (typeof next.props !== 'function' || typeof expanded.props !== 'function')
+            throw new Error('Missing history bindings');
+        const advanced = expanded.props(next.props(page.props, {}), {});
+        window.history.replaceState(null, '', expanded.url);
+        view.rerender(<Wrapped {...(advanced as unknown as typeof live)} />);
+        expect(live!.feed.data.map((row) => row.id)).toEqual(['c', 'd', 'e', 'f']);
+        window.history.replaceState(null, '', page.url);
+        view.rerender(<Wrapped {...(page.props as unknown as typeof live)} />);
+        expect(live!.tasks.currentPage).toBe(2);
+        expect(live!.feed.data.map((row) => row.id)).toEqual(['c', 'd']);
+        window.history.replaceState(null, '', expanded.url);
+        view.rerender(<Wrapped {...(advanced as unknown as typeof live)} />);
+        expect(live!.tasks.currentPage).toBe(3);
+        expect(live!.feed.data.map((row) => row.id)).toEqual(['c', 'd', 'e', 'f']);
+    } finally {
+        adapter.dispose();
+        push.mockRestore();
+        replace.mockRestore();
+        window.history.replaceState(null, '', original);
+    }
+});
+
+it('rejects colliding paginator and scalar URL parameter names before any query subscribes', () => {
+    const factory = (args: Parameters<typeof paginated.tasks>[0]) =>
+        liveQuery(paginated.tasks, args, definitions, 'Task', false, 2, undefined, 7, {
+            mode: 'numbered',
+            name: 'page',
+        });
+    const adapter = createInertiaAdapter({ tasks: factory }, { url: { list: { filters: { sort: 'page' } } } });
+    const page = {
+        component: 'list',
+        props: { __zero: { version: 1, mode: 'replace', bindings: { tasks: { query: 'tasks', args: {} } } } },
+    };
+    const Page = adapter.wrap(() => null, page);
+    try {
+        expect(() => render(<Page {...page.props} />)).toThrow('parameter page is already in use');
+        expect(native.requests).toHaveLength(0);
+    } finally {
+        adapter.dispose();
+    }
+});
+
+it('opens emitted cursor URLs cold in both directions, retaining UTF-8 keys and fractional ordering values', () => {
+    const factory = (args: Parameters<typeof paginated.tasks>[0]) =>
+        liveQuery(paginated.tasks, args, definitions, 'Task', false, 1, ['created_at', 'id'], 4, {
+            mode: 'cursor',
+            name: 'tasks_after',
+        });
+    const first = { created_at: 2000.25, id: '一' };
+    const second = { created_at: 1000, id: '二' };
+    put({}, [first, second]);
+    put({ __cursor: first }, [second]);
+    put({ __cursor: second, __reverse: true }, [first]);
+    const push = vi.spyOn(router, 'push').mockImplementation(() => {});
+    let live: Data<readonly { id: string }[]>;
+    const original = window.location.href;
+    const open = (url: string) => {
+        window.history.replaceState(null, '', url);
+        const adapter = createInertiaAdapter({ tasks: factory });
+        const page = {
+            component: 'tasks',
+            url,
+            props: { __zero: { version: 1, mode: 'replace', bindings: { tasks: { query: 'tasks', args: {} } } } },
+        };
+        const Page = adapter.wrap((props: { tasks: typeof live }) => {
+            live = props.tasks;
+            return null;
+        }, page);
+        const view = render(<Page {...(page.props as unknown as { tasks: typeof live })} />);
+        return () => {
+            view.unmount();
+            adapter.dispose();
+        };
+    };
+    let close = open('/tasks?other=1#list');
+    try {
+        act(() => live.nextPage());
+        const next = String(push.mock.lastCall![0].url);
+        expect(next).toMatch(/^\/tasks\?other=1&tasks_after=[\w-]+#list$/u);
+        close();
+        native.requests.length = 0;
+        close = open(next);
+        expect(new Set(native.requests.map(({ args }) => JSON.stringify(args)))).toEqual(
+            new Set([JSON.stringify({ __cursor: first })]),
+        );
+        expect(live!.data.map((row) => row.id)).toEqual(['二']);
+        act(() => live.previousPage());
+        const previous = String(push.mock.lastCall![0].url);
+        close();
+        native.requests.length = 0;
+        close = open(previous);
+        expect(new Set(native.requests.map(({ args }) => JSON.stringify(args)))).toEqual(
+            new Set([JSON.stringify({ __cursor: second, __reverse: true })]),
+        );
+        expect(live!.data.map((row) => row.id)).toEqual(['一']);
+    } finally {
+        close();
+        push.mockRestore();
+        window.history.replaceState(null, '', original);
+    }
+});
+
+it.each([
+    ['page=9007199254740991', 'numbered', 'Page is outside'],
+    ['page=-1', 'numbered', 'positive page'],
+    ['page=2&page=3', 'numbered', 'one pagination parameter'],
+    ['page[]=2', 'numbered', 'one pagination parameter'],
+    ['page=***', 'cursor', 'Invalid cursor'],
+    [`page=${btoa(JSON.stringify([1, false, { id: 'a', secret: 1 }]))}`, 'cursor', 'cursor'],
+] as const)('rejects malformed pagination %s before the first native subscription', (search, mode, message) => {
+    const adapter = createInertiaAdapter({
+        tasks: (args: Parameters<typeof paginated.tasks>[0]) =>
+            liveQuery(paginated.tasks, args, definitions, 'Task', false, 2, mode === 'cursor' ? ['id'] : undefined, 7, {
+                mode,
+                name: 'page',
+            }),
+    });
+    const page = {
+        component: 'tasks',
+        url: `/tasks?${search}`,
+        props: { __zero: { version: 1, mode: 'replace', bindings: { tasks: { query: 'tasks', args: {} } } } },
+    };
+    const Page = adapter.wrap(() => null, page);
+    try {
+        expect(() => render(<Page {...page.props} />)).toThrow(message);
+        expect(native.requests).toHaveLength(0);
+    } finally {
+        adapter.dispose();
+    }
+});
+
+it('resets the paginator and URL in the same edit that changes the resolved page size', () => {
+    const parse = z.strictObject({
+        input: z.strictObject({ size: z.union([z.literal(1), z.literal(2)]) }),
+        __page: z.number().optional(),
+    });
+    const factory = (args: z.infer<typeof parse>) =>
+        withQueryInputs(
+            liveQuery(paginated.tasks, args, definitions, 'Task', false, args.input.size, undefined, 7, {
+                mode: 'numbered',
+                name: 'page',
+            }),
+            args,
+            'input',
+            {},
+            (value) => parse.parse(value),
+        );
+    const adapter = createInertiaAdapter({ tasks: factory }, { url: { tasks: { tasks: { size: 'size' } } } });
+    const page = {
+        component: 'tasks',
+        url: '/tasks?page=2&size=2&keep=yes',
+        props: {
+            __zero: {
+                version: 1,
+                mode: 'replace',
+                bindings: { tasks: { query: 'tasks', args: { input: { size: 2 } } } },
+            },
+        },
+    };
+    const original = window.location.href;
+    window.history.replaceState(null, '', page.url);
+    const replace = vi.spyOn(router, 'replace').mockImplementation(() => {});
+    let live: Data<unknown> & { inputs: QueryInputs<{ size: 1 | 2 }, object> };
+    const Page = adapter.wrap((props: { tasks: typeof live }) => {
+        live = props.tasks;
+        return null;
+    }, page);
+    try {
+        render(<Page {...(page.props as unknown as { tasks: typeof live })} />);
+        expect(native.requests.at(-1)?.args).toEqual({ input: { size: 2 }, __page: 2 });
+        act(() => live.inputs.set({ size: 1 }));
+        expect(native.requests.at(-1)?.args).toEqual({ input: { size: 1 } });
+        expect(live!.currentPage).toBe(1);
+        expect(replace.mock.lastCall![0].url).toBe('/tasks?size=1&keep=yes');
+    } finally {
+        adapter.dispose();
+        replace.mockRestore();
+        window.history.replaceState(null, '', original);
+    }
 });
 
 it('keeps completed empty results usable through background sync and errors', () => {

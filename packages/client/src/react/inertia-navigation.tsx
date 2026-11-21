@@ -5,6 +5,7 @@ import { forwardRef, useContext, useEffect, useRef } from 'react';
 import type { ClientContext } from '../contract';
 import { selectionKey } from '../validation';
 import type { ReadSelection } from './data';
+import { paginatedArgs } from './pagination-url';
 import { StartingZero } from './provider';
 import type { AccessContract } from './access';
 import { installMutationNavigation } from './mutation-navigation';
@@ -158,8 +159,8 @@ export function createNavigationLink(
                     }
                 }
                 if (!Object.hasOwn(factories, binding.query)) continue;
-                (factories[binding.query] as (args: unknown) => ReadSelection)(args);
-                binding.args = args;
+                const selection = (factories[binding.query] as (args: unknown) => ReadSelection)(args);
+                binding.args = selection.pagination ? paginatedArgs(args, selection.pagination, url) : args;
                 delete binding.pending;
             } catch {
                 // Laravel owns inputs that cannot be resolved unambiguously in the browser.
@@ -213,14 +214,15 @@ export function createNavigationLink(
                     // A long sidebar must not retain an unbounded number of speculative queries.
                     if (pool.size >= 32) pool.values().next().value?.stop();
                     try {
-                        const request =
-                            selection.cursorFields !== undefined
-                                ? selection.page!(undefined).request()
-                                : selection.pageSize !== undefined && !selection.one
-                                  ? selection.limit!(
-                                        Math.min(selection.pageSize + 1, selection.maxWindow ?? 10000),
-                                    ).request()
-                                  : selection.request();
+                        const request = selection.pagination
+                            ? selection.pagination.request(selection.pagination.initial.wire)
+                            : selection.cursorFields !== undefined
+                              ? selection.page!(undefined).request()
+                              : selection.pageSize !== undefined && !selection.one
+                                ? selection.limit!(
+                                      Math.min(selection.pageSize + 1, selection.maxWindow ?? 10000),
+                                  ).request()
+                                : selection.request();
                         const handle = zero.preload(request as NativeRequest, { ttl: 0 });
                         const stop = () => {
                             if (pool.get(key)?.stop !== stop) return;
