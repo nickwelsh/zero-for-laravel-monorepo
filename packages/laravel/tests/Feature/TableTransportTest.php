@@ -180,6 +180,7 @@ test('mixed and reordered grouping paginates nullable keys without gaps and keep
 
 test('table native registrations and metadata reject stale, malformed and anonymous requests', function (): void {
     /** @var OwnerPostgresTestCase $this */
+    config(['zero.limits.max_live_window' => 3]);
     $definition = resolve(TableRegistry::class)->all()[0];
     $body = ['version' => 2, 'contract' => $definition->contract, 'filter' => null, 'groupBy' => [['field' => 'done', 'direction' => 'desc']], 'directories' => [['path' => [], 'after' => null]]];
     $this->postJson('/table-metadata/tasks', $body)->assertUnauthorized();
@@ -198,6 +199,7 @@ test('table native registrations and metadata reject stale, malformed and anonym
     expect($ast['limit'])->toBe(3);
     expect(json_encode($ast, JSON_THROW_ON_ERROR))->toContain('user:alice', 'permission_index');
     expect(fn (): array => $registered->invoke(['__window' => 0], new ResolvedContext(['user_id' => 'alice'], 'alice'), new QueryCompiler(resolve(ModelRegistry::class))))->toThrow(ValidationException::class);
+    expect(fn (): array => $registered->invoke(['__window' => 4], new ResolvedContext(['user_id' => 'alice'], 'alice'), new QueryCompiler(resolve(ModelRegistry::class))))->toThrow(ValidationException::class);
 
     $identity = ['filter' => null, 'sort' => [], 'groupBy' => [], 'path' => [], '__window' => 1, '__row' => ['00000000-0000-4000-8000-000000000001'], '__refresh' => '00000000-0000-4000-8000-000000000123'];
     $ast = $registered->invoke($identity, new ResolvedContext(['user_id' => 'alice'], 'alice'), new QueryCompiler(resolve(ModelRegistry::class)));

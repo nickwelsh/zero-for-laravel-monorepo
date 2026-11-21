@@ -62,6 +62,7 @@ export interface ReadSelection {
     readonly entity?: { table: string; key: string };
     readonly pageSize?: number | undefined;
     readonly cursorFields?: readonly string[] | undefined;
+    readonly maxWindow?: number | undefined;
     readonly one: boolean;
     readonly definitions?: unknown;
     readonly queries?: unknown;
@@ -123,7 +124,7 @@ export function useSelectionData<Q extends ReadSelection>(
     const generation = useContext(AccessGeneration);
     const context = selectionKey(zero.context);
     const selection = useSelection(input, zero, context);
-    const max = 2147483647;
+    const max = selection.maxWindow ?? 10000;
     const initial = Math.min(selection.pageSize ?? max, max);
     // All arguments belong to the controller query identity, including sort input.
     const window = useMemo(() => ({ selection, zero, context, generation }), [selection, zero, context, generation]);

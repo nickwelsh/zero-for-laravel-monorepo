@@ -106,7 +106,7 @@ final readonly class RegisteredQuery
         }
 
         if ($window !== null) {
-            if ($query->pageSize() === null || ! is_int($window) || $window < 1 || $window > 2147483647 || ($query->isPaginated() && $window !== $query->pageSize() + 1)) {
+            if ($query->pageSize() === null || ! is_int($window) || $window < 1 || $window > QueryLimits::liveWindow() || ($query->isPaginated() && $window !== $query->pageSize() + 1)) {
                 Input::fail('window', 'Invalid live query window.');
             }
 

@@ -70,6 +70,7 @@ export function liveQuery<Q extends NativeQuery, D extends ContractMap, N extend
     one: boolean,
     pageSize?: number,
     cursorFields?: readonly string[],
+    maxWindow = 10000,
 ) {
     const input = freeze(structuredClone(args));
     const { __cursor: _cursor, ...pageInput } = object(input, 'args');
@@ -101,11 +102,16 @@ export function liveQuery<Q extends NativeQuery, D extends ContractMap, N extend
         return row;
     }
     const selection = {
-        key: selectionKey([query.queryName, input, pageSize, cursorFields]),
+        key: selectionKey(
+            pageSize === undefined
+                ? [query.queryName, input, pageSize, cursorFields]
+                : [query.queryName, input, pageSize, cursorFields, maxWindow],
+        ),
         one,
         entity: { table: definitions[model]!.table, key: definitions[model]!.key },
         pageSize,
         cursorFields,
+        maxWindow,
         definitions,
         queries: query,
         request: () => request,

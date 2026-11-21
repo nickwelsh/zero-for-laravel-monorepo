@@ -36,6 +36,7 @@ export interface Capabilities {
         >
     >;
     readonly pageSize: number;
+    readonly maxWindow?: number;
     readonly maxGroupDepth: number;
     readonly defaults: { readonly sort: readonly Sort[]; readonly groupBy: readonly Sort[] };
     readonly metadataURL: string;
@@ -350,7 +351,7 @@ export function applyTableQuery<Q, C extends Capabilities>(base: Q, input: Table
     ];
     for (const sort of sorts) query = query.orderBy(sort.field, sort.direction);
     const window = input['__window'] ?? capabilities.pageSize + 1;
-    if (!Number.isInteger(window) || window < 1 || window > 2147483647) invalid('window');
+    if (!Number.isInteger(window) || window < 1 || window > (capabilities.maxWindow ?? 10000)) invalid('window');
     return query.limit(window) as unknown as Q;
 }
 

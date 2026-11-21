@@ -163,7 +163,7 @@ const cases: { name: keyof typeof zod.schemas; valid: unknown[]; invalid: unknow
                 __generation: uuid,
                 __cursor: { title: null, id: 'a' },
             },
-            { ...routed, __window: 2147483647, __cursor: { title: 'z', id: 'b' } },
+            { ...routed, __window: 10000, __cursor: { title: 'z', id: 'b' } },
         ],
         invalid: [
             {},
@@ -174,7 +174,7 @@ const cases: { name: keyof typeof zod.schemas; valid: unknown[]; invalid: unknow
             { ...routed, __routeArgs: { count: 2.5 } },
             { ...routed, __routeArgs: { task: null } },
             { ...routed, __window: 0 },
-            { ...routed, __window: 2147483648 },
+            { ...routed, __window: 10001 },
             { ...routed, __window: 2.5 },
             { ...routed, __generation: 'bad' },
             { ...routed, __cursor: { title: null } },
@@ -209,8 +209,8 @@ const cases: { name: keyof typeof zod.schemas; valid: unknown[]; invalid: unknow
     { name: 'publicOption', valid: [{}], invalid: [{ __generation: uuid }, { __window: 1 }, 'text', []] },
     {
         name: 'windowOption',
-        valid: [{}, { __window: 1 }, { __window: 2147483647, __generation: uuid }],
-        invalid: [{ __window: 0 }, { __window: 2147483648 }, { __route: '/tasks' }],
+        valid: [{}, { __window: 1 }, { __window: 10000, __generation: uuid }],
+        invalid: [{ __window: 0 }, { __window: 10001 }, { __route: '/tasks' }],
     },
     {
         name: 'requestPublic',

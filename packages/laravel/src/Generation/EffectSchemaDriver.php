@@ -8,6 +8,7 @@ use LogicException;
 use ZeroForLaravel\Generation\Mutations\MutationSchemaDriver;
 use ZeroForLaravel\Generation\Mutations\ValueContract;
 use ZeroForLaravel\Query\QueryInput;
+use ZeroForLaravel\Query\QueryLimits;
 
 /** Native Effect 4 schemas with synchronous Zero compatibility at the generated boundary. */
 final readonly class EffectSchemaDriver implements MutationSchemaDriver
@@ -41,7 +42,7 @@ TS;
             '__routeArgs: EffectSchema.optional(EffectSchema.Record(EffectSchema.String, EffectSchema.Union([EffectSchema.String, EffectSchema.Int])))',
         ] : [];
         if ($routed || $window) {
-            $fields[] = '__window: EffectSchema.optional(EffectSchema.Int.check(EffectSchema.isGreaterThanOrEqualTo(1), EffectSchema.isLessThanOrEqualTo(2147483647)))';
+            $fields[] = '__window: EffectSchema.optional(EffectSchema.Int.check(EffectSchema.isGreaterThanOrEqualTo(1), EffectSchema.isLessThanOrEqualTo('.QueryLimits::liveWindow().')))';
         }
 
         if (! $public) {

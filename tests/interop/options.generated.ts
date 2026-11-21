@@ -7,7 +7,7 @@ const zql = createBuilder(schema);
 const defineQueries = defineQueriesWithType<typeof schema>();
 const defineQuery = defineQueryWithType<typeof schema, Context>();
 export const inputs = {
-  "q_e54b4bc88f36dc6e56eaff7f7164cb0e1615887cca1652654b8fb960e0106e15": z.strictObject({__window: z.number().int().min(1).max(2147483647).optional(), __generation: z.uuid().optional(), "i0": z.string(), "i1": z.boolean(), "i2": z.string().refine(value => Array.from(value).length <= 256)}),
+  "q_e54b4bc88f36dc6e56eaff7f7164cb0e1615887cca1652654b8fb960e0106e15": z.strictObject({__window: z.number().int().min(1).max(10000).optional(), __generation: z.uuid().optional(), "i0": z.string(), "i1": z.boolean(), "i2": z.string().refine(value => Array.from(value).length <= 256)}),
   "q_fe9827917241f783e24a2a20a05df8ffa874ea8dbe646a0d5e50ad3f6d978e6c": z.strictObject({__generation: z.uuid().optional(), "i0": z.string(), "i1": z.boolean(), "i2": z.string().uuid()}),
 };
 export const publicInputs = {
@@ -19,7 +19,7 @@ export const queries = defineQueries({
   "q_fe9827917241f783e24a2a20a05df8ffa874ea8dbe646a0d5e50ad3f6d978e6c": defineQuery(inputs["q_fe9827917241f783e24a2a20a05df8ffa874ea8dbe646a0d5e50ad3f6d978e6c"], ({args}) => zql["tasks"].where(eb => eb.and(eb.cmp("deleted_at", "IS", null), eb.and(eb.cmp("done", "=", args["i1"]), eb.cmp("id", "=", args["i2"]), eb.cmp("id", "!=", args["i0"])))).one()),
 });
 export const bindings = {
-  "q_e54b4bc88f36dc6e56eaff7f7164cb0e1615887cca1652654b8fb960e0106e15": (args: Parameters<typeof queries["q_e54b4bc88f36dc6e56eaff7f7164cb0e1615887cca1652654b8fb960e0106e15"]>[0]) => withQueryInputs(liveQuery(queries["q_e54b4bc88f36dc6e56eaff7f7164cb0e1615887cca1652654b8fb960e0106e15"], inputs["q_e54b4bc88f36dc6e56eaff7f7164cb0e1615887cca1652654b8fb960e0106e15"].parse(args), definitions, "Task", false, 20), inputs["q_e54b4bc88f36dc6e56eaff7f7164cb0e1615887cca1652654b8fb960e0106e15"].parse(args), null, {} as const, value => inputs["q_e54b4bc88f36dc6e56eaff7f7164cb0e1615887cca1652654b8fb960e0106e15"].parse(value)),
+  "q_e54b4bc88f36dc6e56eaff7f7164cb0e1615887cca1652654b8fb960e0106e15": (args: Parameters<typeof queries["q_e54b4bc88f36dc6e56eaff7f7164cb0e1615887cca1652654b8fb960e0106e15"]>[0]) => withQueryInputs(liveQuery(queries["q_e54b4bc88f36dc6e56eaff7f7164cb0e1615887cca1652654b8fb960e0106e15"], inputs["q_e54b4bc88f36dc6e56eaff7f7164cb0e1615887cca1652654b8fb960e0106e15"].parse(args), definitions, "Task", false, 20, undefined, 10000), inputs["q_e54b4bc88f36dc6e56eaff7f7164cb0e1615887cca1652654b8fb960e0106e15"].parse(args), null, {} as const, value => inputs["q_e54b4bc88f36dc6e56eaff7f7164cb0e1615887cca1652654b8fb960e0106e15"].parse(value)),
   "q_fe9827917241f783e24a2a20a05df8ffa874ea8dbe646a0d5e50ad3f6d978e6c": (args: Parameters<typeof queries["q_fe9827917241f783e24a2a20a05df8ffa874ea8dbe646a0d5e50ad3f6d978e6c"]>[0]) => withQueryInputs(liveQuery(queries["q_fe9827917241f783e24a2a20a05df8ffa874ea8dbe646a0d5e50ad3f6d978e6c"], inputs["q_fe9827917241f783e24a2a20a05df8ffa874ea8dbe646a0d5e50ad3f6d978e6c"].parse(args), definitions, "Task", true), inputs["q_fe9827917241f783e24a2a20a05df8ffa874ea8dbe646a0d5e50ad3f6d978e6c"].parse(args), null, {} as const, value => inputs["q_fe9827917241f783e24a2a20a05df8ffa874ea8dbe646a0d5e50ad3f6d978e6c"].parse(value)),
 };
 export const actions = {

@@ -92,6 +92,7 @@ test('standalone queries authorize and validate each native invocation without r
 
 test('standalone native reads preserve dates, live windows and cursor pages', function (): void {
     /** @var HttpTestCase $this */
+    config(['zero.limits.max_live_window' => 7]);
     $this->discover([...$this->models(), TaskQueries::class]);
     $definitions = array_values(array_column(resolve(ControllerDiscovery::class)->queries(), 'query'));
     $registrations = eval(substr(resolve(ControllerQueryGenerator::class)->php($definitions), 5));
@@ -111,16 +112,16 @@ test('standalone native reads preserve dates, live windows and cursor pages', fu
     $cases = [
         ['dated', ['input' => ['after' => '2023-11-14T22:13:20.123Z']]],
         ['dated', ['input' => ['after' => '2023-11-14']]],
-        ['window', ['__window' => 7]], ['window', ['__window' => 0]],
+        ['window', ['__window' => 7]], ['window', ['__window' => 8]], ['window', ['__window' => 0]],
         ['pages', ['__cursor' => ['title' => 'Cursor', 'id' => 'task-a']]],
         ['pages', ['__cursor' => ['id' => 'task-a']]],
     ];
     $batch = array_map(fn (array $case, int $index): array => ['id' => (string) $index, 'name' => $names[TaskQueries::class.'@'.$case[0]]->name(), 'args' => [$case[1]]], $cases, array_keys($cases));
     $response = $this->postJson('/zero/query', ['transform', $batch])->assertOk()
         ->assertJsonMissingPath('queries.0.error')->assertJsonPath('queries.1.error', 'parse')
-        ->assertJsonPath('queries.2.ast.limit', 7)->assertJsonPath('queries.3.error', 'parse')
-        ->assertJsonPath('queries.4.ast.limit', 3)->assertJsonPath('queries.4.ast.start.row', ['title' => 'Cursor', 'id' => 'task-a'])
-        ->assertJsonPath('queries.5.error', 'parse');
+        ->assertJsonPath('queries.2.ast.limit', 7)->assertJsonPath('queries.3.error', 'parse')->assertJsonPath('queries.4.error', 'parse')
+        ->assertJsonPath('queries.5.ast.limit', 3)->assertJsonPath('queries.5.ast.start.row', ['title' => 'Cursor', 'id' => 'task-a'])
+        ->assertJsonPath('queries.6.error', 'parse');
     expect(json_encode($response->json('queries.0.ast'), JSON_THROW_ON_ERROR))->toContain('1700000000123');
 });
 
@@ -191,6 +192,7 @@ final class HookedQueryRequest extends FormRequest
 
 test('option reads validate their own arguments and reauthorize context without executing mutation hooks', function (): void {
     /** @var HttpTestCase $this */
+    config(['zero.limits.max_live_window' => 41]);
     Route::post('/option-write/{task}', [ControllerMutationController::class, 'options']);
     $mutation = resolve(ControllerMutationCompiler::class)->compile(ControllerMutationController::class, 'options');
     $definitions = resolve(OptionQueryCompiler::class)->compile($mutation);
@@ -212,7 +214,7 @@ test('option reads validate their own arguments and reauthorize context without 
     $foreign = Task::create(['title' => 'Private', 'user_id' => 'bob']);
     $this->actingAs(OwnerUser::findOrFail('alice'))->withHeader('X-Api-Key', 'private-test-secret');
     $args = ['i0' => $parent->id, 'i1' => false, 'i2' => '50%_\\'];
-    $variants = [$args, [...$args, 'i0' => $foreign->id], [...$args, 'i1' => null], [...$args, 'i2' => str_repeat('x', 257)], [...$args, '__window' => 0], [...$args, 'i2' => ''], [...$args, '__window' => 41], [...$args, '__window' => 2147483648], [...$args, '__route' => 'forged']];
+    $variants = [$args, [...$args, 'i0' => $foreign->id], [...$args, 'i1' => null], [...$args, 'i2' => str_repeat('x', 257)], [...$args, '__window' => 0], [...$args, 'i2' => ''], [...$args, '__window' => 41], [...$args, '__window' => 42], [...$args, '__route' => 'forged']];
     $batch = array_map(fn (array $input, int $index): array => ['id' => (string) $index, 'name' => $definitions[0]->name(), 'args' => [$input]], $variants, array_keys($variants));
     $response = $this->postJson('/zero/query', ['transform', $batch])->assertOk()
         ->assertJsonMissingPath('queries.0.error')->assertJsonPath('queries.0.ast.limit', 21)
@@ -375,22 +377,26 @@ test('query endpoint uses authenticated identity instead of body context', funct
     expect(json_encode($response->json('queries.0.ast'), JSON_THROW_ON_ERROR))->toContain('user:alice', 'permission_index');
 });
 
-test('query transforms accept large revalidation batches while authorizing every query', function (): void {
+test('query transforms bound each batch and isolate work budgets by identity', function (): void {
     /** @var HttpTestCase $this */
+    config([
+        'zero.limits.max_transform_queries' => 2,
+        'zero.limits.max_transform_queries_per_minute' => 3,
+    ]);
     registerHttpQuery();
-    $user = (new User)->setKeyType('string')->forceFill(['id' => 'alice']);
-    $queries = [];
-    for ($index = 0; $index < 257; $index++) {
-        $queries[] = ['id' => 'q'.$index, 'name' => 'q_http', 'args' => [(object) []]];
-    }
-
-    $queries[] = ['id' => 'invalid', 'name' => 'q_http', 'args' => [['ast' => ['table' => 'users']]]];
-    $response = $this->actingAs($user)->withHeader('X-Api-Key', 'private-test-secret')
-        ->postJson('/zero/query', ['transform', $queries])
-        ->assertOk()->assertJsonPath('kind', 'QueryResponse')->assertJsonCount(258, 'queries')
-        ->assertJsonPath('queries.257.error', 'parse');
-    for ($index = 0; $index < 257; $index++) {
-        $response->assertJsonMissingPath('queries.'.$index.'.error');
-        expect(json_encode($response->json('queries.'.$index.'.ast'), JSON_THROW_ON_ERROR))->toContain('user:alice', 'permission_index');
-    }
+    $query = fn (string $id): array => ['id' => $id, 'name' => 'q_http', 'args' => [(object) []]];
+    $this->actingAs((new User)->setKeyType('string')->forceFill(['id' => 'alice']))->withHeader('X-Api-Key', 'private-test-secret');
+    $this->postJson('/zero/query', ['transform', [$query('a'), $query('b'), $query('c')]])
+        ->assertOk()->assertJsonPath('kind', 'TransformFailed')->assertJsonPath('message', 'Query transform exceeds the configured batch limit.');
+    $this->postJson('/zero/query', ['transform', [$query('a'), $query('b')]])
+        ->assertOk()->assertJsonPath('kind', 'QueryResponse')->assertJsonCount(2, 'queries')
+        ->assertJsonMissingPath('queries.0.error')->assertJsonMissingPath('queries.1.error');
+    $this->postJson('/zero/query', ['transform', [$query('c')]])
+        ->assertOk()->assertJsonPath('kind', 'QueryResponse')->assertJsonMissingPath('queries.0.error');
+    $this->postJson('/zero/query', ['transform', [$query('d')]])
+        ->assertOk()->assertJsonPath('kind', 'TransformFailed')->assertJsonPath('message', 'Query transform work budget exceeded.');
+    $this->actingAs((new User)->setKeyType('string')->forceFill(['id' => 'bob']))
+        ->postJson('/zero/query', ['transform', [$query('a'), $query('b')]])
+        ->assertOk()->assertJsonPath('kind', 'QueryResponse')->assertJsonCount(2, 'queries')
+        ->assertJsonMissingPath('queries.0.error')->assertJsonMissingPath('queries.1.error');
 });

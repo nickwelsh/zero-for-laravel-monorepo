@@ -6,6 +6,7 @@ namespace ZeroForLaravel\Generation;
 
 use LogicException;
 use ZeroForLaravel\Query\QueryInput;
+use ZeroForLaravel\Query\QueryLimits;
 
 final readonly class ZodSchemaDriver implements SchemaDriver
 {
@@ -21,7 +22,7 @@ final readonly class ZodSchemaDriver implements SchemaDriver
             '__routeArgs: z.record(z.string(), z.union([z.string(), z.number().int()])).optional()',
         ] : [];
         if ($routed || $window) {
-            $fields[] = '__window: z.number().int().min(1).max(2147483647).optional()';
+            $fields[] = '__window: z.number().int().min(1).max('.QueryLimits::liveWindow().').optional()';
         }
 
         if (! $public) {

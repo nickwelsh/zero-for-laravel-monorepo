@@ -11,6 +11,8 @@ export default defineConfig({
         tabWidth: 4,
         sortPackageJson: true,
         ignorePatterns: [
+            '.agents/skills/**',
+            'skills-lock.json',
             '**/vendor/**',
             '**/dist/**',
             '**/.docs-base/**',
@@ -64,6 +66,7 @@ export default defineConfig({
         ],
         options: { typeAware: true, typeCheck: true },
         ignorePatterns: [
+            '.agents/skills/**',
             '**/vendor/**',
             '**/dist/**',
             '**/.docs-base/**',

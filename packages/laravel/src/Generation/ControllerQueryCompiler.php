@@ -35,6 +35,7 @@ use ZeroForLaravel\Metadata\ModelRegistry;
 use ZeroForLaravel\Permissions\PolicyCompiler;
 use ZeroForLaravel\Permissions\VisibleToCurrentUser;
 use ZeroForLaravel\Query\QueryInput;
+use ZeroForLaravel\Query\QueryLimits;
 use ZeroForLaravel\Query\ZeroQuery;
 use ZeroForLaravel\Scopes\ScopeRegistry;
 
@@ -972,7 +973,7 @@ final class ControllerQueryCompiler
 
             if (in_array($method, ['infinite', 'paginate'], true)) {
                 $size = $arguments[0]->value;
-                if ($receiver->singular || $receiver->hasBounds() || $arguments[0]->kind !== 'literal' || ! is_int($size) || $size < 1 || $size >= 2147483647) {
+                if ($receiver->singular || $receiver->hasBounds() || $arguments[0]->kind !== 'literal' || ! is_int($size) || $size < 1 || $size >= QueryLimits::liveWindow()) {
                     $this->unsupported($node, 'Pagination requires an unbounded collection and a literal positive page size.');
                 }
 

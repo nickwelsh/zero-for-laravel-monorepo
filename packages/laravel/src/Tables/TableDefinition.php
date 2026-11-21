@@ -7,6 +7,7 @@ namespace ZeroForLaravel\Tables;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Support\Str;
 use ZeroForLaravel\Generation\QueryExpression;
+use ZeroForLaravel\Query\QueryLimits;
 use ZeroForLaravel\Query\ZeroQuery;
 use ZeroForLaravel\Support\Input;
 
@@ -36,7 +37,7 @@ final readonly class TableDefinition
 
         return ['version' => 2, 'name' => $this->name, 'contract' => $this->contract,
             'model' => $table->base->model->name, 'key' => [$table->base->model->key],
-            'pageSize' => $table->increment, 'maxGroupDepth' => $table->depth ?? min(3, count($table->groups)),
+            'pageSize' => $table->increment, 'maxWindow' => QueryLimits::liveWindow(), 'maxGroupDepth' => $table->depth ?? min(3, count($table->groups)),
             'filters' => (object) array_map(fn (AllowedFilter $filter): array => ['field' => $filter->field, 'kind' => $filter->kind,
                 'operators' => $filter->operations, 'column' => $table->base->model->columns[$filter->field]], $table->filters),
             'sorts' => $table->sorts, 'groups' => (object) $table->groups,
@@ -57,7 +58,7 @@ final readonly class TableDefinition
         $path = $this->table->path($args['path'] ?? [], $groups, leaf: true);
         $sort = $this->table->ordering($args['sort'] ?? $this->table->defaultOrdering);
         $window = $args['__window'] ?? $this->table->increment + 1;
-        if (! is_int($window) || $window < 1 || $window > 2147483647) {
+        if (! is_int($window) || $window < 1 || $window > QueryLimits::liveWindow()) {
             Input::fail('window', 'Invalid live table window.');
         }
 
