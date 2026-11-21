@@ -9,6 +9,7 @@ use Illuminate\Validation\ValidationException;
 use LogicException;
 use ZeroForLaravel\ResolvedContext;
 use ZeroForLaravel\Search\ScoutSearch;
+use ZeroForLaravel\Search\SearchRevision;
 use ZeroForLaravel\Search\TypesenseFilter;
 use ZeroForLaravel\Tests\TestCase;
 
@@ -44,4 +45,21 @@ test('search filter grammar permits facet groups and rejects server scope escape
     foreach (['tags:=`x`) || tags:!=`none`', 'tags:=`x` ||', 'user_id:=alice', '(tags:=`x`', 'tags:=`unclosed'] as $input) {
         expect(fn (): string => $parser->validate($input, $fields))->toThrow(ValidationException::class);
     }
+});
+test('search revisions change only with documents in the actor scope', function (): void {
+    config(['app.key' => 'test-search-revision-key']);
+    $tenantA = "{\"id\":\"a-1\",\"title\":\"Before\"}\n{\"id\":\"a-2\",\"title\":\"Stable\"}";
+    $tenantB = '{"id":"b-1","title":"Before"}';
+    $tenantARevision = SearchRevision::current('scoped_records', 'tenant_id:=a', $tenantA);
+    $tenantBRevision = SearchRevision::current('scoped_records', 'tenant_id:=b', $tenantB);
+    $tenantAAfterTenantBUpdate = SearchRevision::current('scoped_records', 'tenant_id:=a', $tenantA);
+    $tenantBAfterUpdate = SearchRevision::current('scoped_records', 'tenant_id:=b', str_replace('Before', 'After', $tenantB));
+    $tenantAAfterUpdate = SearchRevision::current('scoped_records', 'tenant_id:=a', str_replace('Before', 'After', $tenantA));
+    $tenantAReordered = SearchRevision::current('scoped_records', 'tenant_id:=a', implode("\n", array_reverse(explode("\n", $tenantA))));
+
+    expect($tenantAAfterTenantBUpdate)->toBe($tenantARevision)
+        ->and($tenantBAfterUpdate)->not->toBe($tenantBRevision)
+        ->and($tenantAAfterUpdate)->not->toBe($tenantARevision)
+        ->and($tenantAReordered)->toBe($tenantARevision)
+        ->and(SearchRevision::current('scoped_records', 'tenant_id:=b', $tenantA))->not->toBe($tenantARevision);
 });
