@@ -119,6 +119,90 @@ const put = (args: unknown, raw: unknown, type = 'complete') =>
         { type, ...(type === 'error' ? { error: { message: 'Denied' }, retry: native.retry } : {}) },
     ]);
 
+const paginated = defineQueries({
+    tasks: defineQuery(
+        ({
+            args: _args,
+        }: {
+            args: { __page?: number; __window?: number; __cursor?: { id: string }; __reverse?: boolean };
+        }) => createBuilder(schema).tasks,
+    ),
+});
+
+it('replaces numbered pages from a bounded live prefix and never writes standalone history', () => {
+    const prefix = ['a', 'b', 'c', 'd', 'e', 'f', 'g'].map((id) => ({ id }));
+    put({ __page: 2 }, prefix.slice(0, 5));
+    put({ __page: 3 }, prefix);
+    const url = window.location.href;
+    const { result } = renderHook(() =>
+        useData(
+            liveQuery(paginated.tasks, { __page: 2 }, definitions, 'Task', false, 2, undefined, 7, {
+                mode: 'numbered',
+                name: 'page',
+            }),
+        ),
+    );
+    expect(result.current.data.map((row) => row.id)).toEqual(['c', 'd']);
+    expect(result.current.hasPreviousPage).toBe(true);
+    expect(result.current.hasNextPage).toBe(true);
+    act(() => result.current.nextPage());
+    expect(result.current.data.map((row) => row.id)).toEqual(['e', 'f']);
+    expect(result.current.hasNextPage).toBe(false);
+    expect(result.current.capped).toBe(true);
+    expect(result.current.exhausted).toBe(false);
+    act(() => result.current.previousPage());
+    expect(result.current.data.map((row) => row.id)).toEqual(['c', 'd']);
+    expect(window.location.href).toBe(url);
+});
+
+it('uses the entering cursor and reverse lookahead, not a local stack, to navigate mixed-order rows', () => {
+    const a = { created_at: 2000.5, id: 'a' };
+    const b = { created_at: 2000.5, id: 'b' };
+    const c = { created_at: 1000, id: 'c' };
+    const d = { created_at: 1000, id: 'd' };
+    put({ __cursor: b }, [c, d]);
+    put({ __cursor: c, __reverse: true }, [b, a]);
+    const { result } = renderHook(() =>
+        useData(
+            liveQuery(paginated.tasks, { __cursor: b }, definitions, 'Task', false, 2, ['created_at', 'id'], 7, {
+                mode: 'cursor',
+                name: 'after',
+            }),
+        ),
+    );
+    expect(result.current.data.map((row) => row.id)).toEqual(['c', 'd']);
+    expect(result.current.hasPreviousPage).toBe(true);
+    act(() => result.current.previousPage());
+    expect(result.current.data.map((row) => row.id)).toEqual(['a', 'b']);
+    expect(result.current.hasPreviousPage).toBe(false);
+    expect(result.current.hasNextPage).toBe(true);
+    act(() => result.current.nextPage());
+    expect(result.current.data.map((row) => row.id)).toEqual(['c', 'd']);
+});
+
+it('opens a cold scroll page without showing the prefix, then grows just its displayed range', () => {
+    const prefix = ['a', 'b', 'c', 'd', 'e', 'f', 'g'].map((id) => ({ id }));
+    put({ __page: 2, __window: 5 }, prefix.slice(0, 4), 'unknown');
+    const { result, rerender } = renderHook(() =>
+        useData(
+            liveQuery(paginated.tasks, { __page: 2 }, definitions, 'Task', false, 2, undefined, 7, {
+                mode: 'scroll',
+                name: 'page',
+            }),
+        ),
+    );
+    expect(result.current.data.map((row) => row.id)).toEqual(['c', 'd']);
+    expect(result.current.hasMore).toBeUndefined();
+    put({ __page: 2, __window: 5 }, prefix.slice(0, 5));
+    put({ __page: 2, __window: 7 }, prefix);
+    rerender();
+    act(() => result.current.loadMore());
+    expect(result.current.data.map((row) => row.id)).toEqual(['c', 'd', 'e', 'f']);
+    expect(result.current.currentPage).toBe(3);
+    expect(result.current.stopReason).toBe('maximum');
+    expect(result.current.exhausted).toBe(false);
+});
+
 it('keeps completed empty results usable through background sync and errors', () => {
     put({ title: '' }, []);
     const { result, rerender } = renderHook(() => useData(index.tasks.live({ title: '' })));

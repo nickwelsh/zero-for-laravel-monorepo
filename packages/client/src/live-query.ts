@@ -1,5 +1,6 @@
 import type { AnyCustomQuery, QueryRowType, QueryResultType } from '@rocicorp/zero';
 import type { ContractMap, FieldValue } from './contract';
+import { livePagination, withoutPosition, type PaginationDeclaration } from './pagination';
 import type { ReadSelection } from './react/data';
 import { decodeColumn, fail, freeze, object, selectionKey } from './validation';
 
@@ -37,7 +38,7 @@ export function withQueryInputs<
             options: freeze(options),
             apply(value: object): A {
                 if (field === null && Object.keys(value).length) fail('inputs', 'This query has no editable inputs.');
-                const { __cursor: _cursor, __window: _window, ...base } = object(args, 'args');
+                const base = withoutPosition(object(args, 'args'));
                 return parse(field === null ? base : { ...base, [field]: value });
             },
         },
@@ -71,10 +72,22 @@ export function liveQuery<Q extends NativeQuery, D extends ContractMap, N extend
     pageSize?: number,
     cursorFields?: readonly string[],
     maxWindow = 10000,
+    declaration?: PaginationDeclaration,
 ) {
     const input = freeze(structuredClone(args));
     const { __cursor: _cursor, ...pageInput } = object(input, 'args');
     const invoke = query as (args: Parameters<Q>[0]) => ReturnType<Q>;
+    const pagination =
+        declaration &&
+        livePagination(
+            declaration,
+            object(input, 'args'),
+            pageSize!,
+            maxWindow,
+            cursorFields ?? [],
+            definitions[model]!.columns,
+            (position) => invoke({ ...withoutPosition(pageInput), ...position } as Parameters<Q>[0]),
+        );
     const request = invoke(input);
     const cache = new WeakMap<object, unknown>();
     function decode(raw: unknown, name: string): unknown {
@@ -105,10 +118,11 @@ export function liveQuery<Q extends NativeQuery, D extends ContractMap, N extend
         key: selectionKey(
             pageSize === undefined
                 ? [query.queryName, input, pageSize, cursorFields]
-                : [query.queryName, input, pageSize, cursorFields, maxWindow],
+                : [query.queryName, input, pageSize, cursorFields, maxWindow, ...(declaration ? [declaration] : [])],
         ),
         one,
         entity: { table: definitions[model]!.table, key: definitions[model]!.key },
+        pagination,
         pageSize,
         cursorFields,
         maxWindow,

@@ -3,6 +3,7 @@ import { defineQueries, defineQuery } from '@rocicorp/zero';
 import type { Schema, QueryResultDetails, ConnectionState, QueryRequest, ReadonlyJSONValue } from '@rocicorp/zero';
 import { useContext, useMemo, useState } from 'react';
 import type { ClientContext } from '../contract';
+import { pageSteps, type LivePagination, type PagePosition } from '../pagination';
 import { selectionKey } from '../validation';
 import { AccessGeneration } from './access';
 
@@ -48,6 +49,8 @@ export interface Data<T> {
     readonly exhausted: boolean;
     readonly stopReason: 'maximum' | 'exhausted' | undefined;
     loadMore(this: void): void;
+    /** Numbered position (latest displayed page for scroll); cursor pages have no ordinal. */
+    readonly currentPage?: number;
     readonly hasNextPage: boolean | undefined;
     readonly hasPreviousPage: boolean;
     readonly isChangingPage: boolean;
@@ -61,6 +64,7 @@ export interface ReadSelection {
     readonly key: string;
     readonly entity?: { table: string; key: string };
     readonly pageSize?: number | undefined;
+    readonly pagination?: LivePagination | undefined;
     readonly cursorFields?: readonly string[] | undefined;
     readonly maxWindow?: number | undefined;
     readonly one: boolean;
@@ -75,7 +79,7 @@ export interface ReadSelection {
     decode(raw: unknown): unknown;
     limit?(limit: number): ReadSelection;
     page?(cursor: Readonly<Record<string, unknown>> | undefined): ReadSelection;
-    cursor?(raw: unknown): Readonly<Record<string, unknown>>;
+    cursor?(this: void, raw: unknown): Readonly<Record<string, unknown>>;
 }
 
 export interface QueryInputs<I extends object, O extends object> {
@@ -117,6 +121,7 @@ export function useSelectionData<Q extends ReadSelection>(
     input: Q,
     options: UseQueryOptions,
     pendingInsert: boolean,
+    onPosition?: (position: PagePosition, history: 'push' | 'replace') => void,
 ): Data<SelectionData<Q>> {
     type Result = SelectionData<Q>;
     const zero = useZero<Schema, undefined, ClientContext>();
@@ -132,23 +137,30 @@ export function useSelectionData<Q extends ReadSelection>(
         window,
         limit: initial,
         cursors: [] as readonly Readonly<Record<string, unknown>>[],
+        position: selection.pagination?.initial,
     });
-    if (page.window !== window) setPage({ window, limit: initial, cursors: [] });
-    const limit = Math.min(page.window === window ? page.limit : initial, max);
+    const pagination = selection.pagination;
+    if (page.window !== window) setPage({ window, limit: initial, cursors: [], position: pagination?.initial });
+    const range = page.window === window ? page.position : pagination?.initial;
+    const limit = range?.end ?? Math.min(page.window === window ? page.limit : initial, max);
+    const start = range?.start ?? 0;
+    const reverse = range?.wire['__reverse'] === true;
     const cursor = page.window === window ? page.cursors.at(-1) : undefined;
-    const scope = useMemo(() => ({ window, limit, cursor }), [window, limit, cursor]);
+    const scope = useMemo(() => ({ window, limit, cursor, range }), [window, limit, cursor, range]);
     const requested = selection.pageSize === undefined ? undefined : Math.min(limit + 1, max);
     const request = useMemo(
         () =>
-            (selection.cursorFields !== undefined
-                ? selection.page!(cursor).request()
-                : selection.pageSize === undefined || selection.one
-                  ? selection.request()
-                  : selection.limit!(requested!).request()) as NativeRequest,
+            (pagination && range
+                ? pagination.request(range.wire)
+                : selection.cursorFields !== undefined
+                  ? selection.page!(cursor).request()
+                  : selection.pageSize === undefined || selection.one
+                    ? selection.request()
+                    : selection.limit!(requested!).request()) as NativeRequest,
         // The selection object may be recreated by a consumer or compiler while
         // its query remains identical. Native resource identity follows semantics.
         // oxlint-disable-next-line react-hooks-plugin/exhaustive-deps
-        [selection.key, window, requested, cursor],
+        [selection.key, window, requested, cursor, pagination, range],
     );
     const authorizedRequest = useMemo(
         () =>
@@ -210,11 +222,12 @@ export function useSelectionData<Q extends ReadSelection>(
         }
     }, [raw, selection, accessStatus, generation, details.type]);
     const decoded = decodedResult.value;
-    const data = useMemo(
-        () =>
-            (selection.pageSize !== undefined && Array.isArray(decoded) ? decoded.slice(0, limit) : decoded) as Result,
-        [decoded, selection.pageSize, limit],
-    );
+    const data = useMemo(() => {
+        if (selection.pageSize === undefined || !Array.isArray(decoded)) return decoded as Result;
+        const visible = decoded.slice(start, limit);
+        // oxlint-disable-next-line unicorn/no-array-reverse -- This is a fresh slice; the client targets ES2022.
+        return (reverse ? visible.reverse() : visible) as Result;
+    }, [decoded, selection.pageSize, start, limit, reverse]);
     const complete = details.type === 'complete';
     const hasData =
         !decodedResult.error &&
@@ -241,12 +254,26 @@ export function useSelectionData<Q extends ReadSelection>(
         Array.isArray(decoded) &&
         decoded.length <= limit &&
         (requested! > limit || decoded.length < limit);
-    const capped = limit >= max;
+    const capped = range?.capped ?? limit >= max;
+    const ready = enabled && !error && complete;
+    const steps =
+        pagination && range && pagination.mode !== 'scroll'
+            ? pageSteps(pagination.mode, range, ready && Array.isArray(raw) ? raw : undefined, selection.cursor!)
+            : undefined;
+    function move(position: PagePosition, history: 'push' | 'replace') {
+        if (!pagination || !ready) return;
+        const next = pagination.range(position);
+        if (onPosition) onPosition(next.wire, history);
+        else
+            setPage((current) =>
+                current === page && current.window === window ? { ...current, position: next } : current,
+            );
+    }
     const infinite: InfiniteData | undefined =
-        selection.pageSize === undefined
+        selection.pageSize === undefined || (pagination && pagination.mode !== 'scroll')
             ? undefined
             : {
-                  limit,
+                  limit: limit - start,
                   capped,
                   exhausted,
                   stopReason:
@@ -280,6 +307,10 @@ export function useSelectionData<Q extends ReadSelection>(
                           capped
                       )
                           return;
+                      if (pagination && range) {
+                          move({ ...range.wire, __window: limit + pagination.size + 1 }, 'replace');
+                          return;
+                      }
                       setPage((current) =>
                           current.window !== window || current.limit !== limit
                               ? current
@@ -300,15 +331,29 @@ export function useSelectionData<Q extends ReadSelection>(
         details,
         infinite,
         hasMore: infinite?.hasMore,
-        capped: infinite?.capped ?? false,
-        exhausted: infinite?.exhausted ?? false,
-        stopReason: infinite?.stopReason,
-        isLoadingMore: selection.pageSize !== undefined && limit > initial && !complete,
+        capped: pagination ? capped : (infinite?.capped ?? false),
+        exhausted: pagination ? ready && exhausted : (infinite?.exhausted ?? false),
+        stopReason:
+            pagination && ready ? (exhausted ? 'exhausted' : capped ? 'maximum' : undefined) : infinite?.stopReason,
+        isLoadingMore: infinite !== undefined && limit - start > initial && !complete,
         loadMore: () => infinite?.loadMore(),
-        hasNextPage: selection.cursorFields === undefined ? undefined : infinite?.hasMore,
-        hasPreviousPage: selection.cursorFields !== undefined && page.window === window && page.cursors.length > 0,
-        isChangingPage: selection.cursorFields !== undefined && !complete,
+        ...(pagination && pagination.mode !== 'cursor' && range ? { currentPage: range.page } : {}),
+        hasNextPage: steps
+            ? ready
+                ? !!steps.next
+                : undefined
+            : selection.cursorFields !== undefined
+              ? infinite?.hasMore
+              : undefined,
+        hasPreviousPage: steps
+            ? !!steps.previous
+            : selection.cursorFields !== undefined && page.window === window && page.cursors.length > 0,
+        isChangingPage: (pagination?.mode === 'numbered' || selection.cursorFields !== undefined) && !complete,
         nextPage: () => {
+            if (steps) {
+                if (steps.next) move(steps.next, 'push');
+                return;
+            }
             if (selection.cursorFields === undefined || infinite?.hasMore !== true || !Array.isArray(raw)) return;
             const next = selection.cursor!(raw[limit - 1]);
             setPage((current) =>
@@ -318,6 +363,10 @@ export function useSelectionData<Q extends ReadSelection>(
             );
         },
         previousPage: () => {
+            if (steps) {
+                if (steps.previous) move(steps.previous, 'push');
+                return;
+            }
             if (selection.cursorFields === undefined || !enabled || !complete || error) return;
             setPage((current) =>
                 current !== page || current.window !== window
