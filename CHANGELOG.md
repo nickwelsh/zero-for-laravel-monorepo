@@ -19,6 +19,10 @@ and client contracts together; do not reuse old generated query identities.
 `paginate()` now means numbered pages. Like `simplePaginate()`, it has no count
 query or last-page promise. See the [query guide](apps/docs/content/docs/0.x/docs/queries.mdx).
 
+Use the Zero `/inertia` `InfiniteScroll` component with `Zero::scroll()` for
+bidirectional automatic or manual loading and viewport-aware page URLs.
+The component does not issue partial reloads or accept Inertia reload options.
+
 ## [0.13.0] - 2026-11-21
 
 - Migrate supported Inertia forms by changing the `Form` and generated controller

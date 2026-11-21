@@ -150,6 +150,48 @@ Laravel's FormRequest again; normalize numeric and boolean URL strings there.
 `QueryData` includes both decoded rows and editable inputs; `Data` alone describes
 the read-only `useData` result. Native calls still pass their inputs explicitly.
 
+## Infinite scroll on Inertia pages
+
+Return a named `Zero::scroll($query->paginate(50))` live prop from Laravel, then
+use the Zero `InfiniteScroll` import instead of Inertia's. Read the injected prop
+from the page component. There is only one live query, even as its window grows.
+
+```tsx
+import { InfiniteScroll } from '@nickwelsh/zero-for-laravel/inertia';
+
+<InfiniteScroll
+    data="lists"
+    as="nav"
+    buffer={200}
+    manualAfter={2}
+    next={({ manualMode, hasMore, fetch }) => manualMode && hasMore && <button onClick={fetch}>More lists</button>}
+>
+    {lists.data.map((list) => (
+        <a key={list.id} href={`/lists/${list.id}`}>
+            {list.name}
+        </a>
+    ))}
+</InfiniteScroll>;
+```
+
+The `previous`, `next`, and `loading` slots and the `fetchPrevious()` and
+`fetchNext()` ref methods use the same live window. `onlyPrevious` and `onlyNext`
+limit automatic loads. For a newest-first chat query, render the rows in reverse
+query order (oldest first) and pass `reverse`. This swaps trigger placement and
+starts at the bottom; it does not reorder your children. `autoScroll` overrides
+the initial positioning. Use `manual` to disable automatic triggers.
+`itemsElement`, `startElement`, and
+`endElement` accept selectors or React refs. Use one keyed direct child per row
+in the items container for reliable page detection and scroll anchoring.
+
+The URL follows the page with the most visible items. `preserveUrl` keeps the
+incoming link unchanged. The first and last loaded pages are retained on warm
+Back/Forward navigation; opening a copied link starts with one page. Rows can
+move between pages when their live ordering changes. A configured window cap
+is not exhaustion: see the prop's `stopReason`. Cursor windows, HTTP `params`,
+and Inertia reload options on ref methods are unsupported. Set filters through
+`lists.inputs.set(...)`; use upstream Inertia for HTTP partial reloads.
+
 ## Headless tables and ordered grouping
 
 `@nickwelsh/zero-table` uses generated PHP table capabilities for authorized live

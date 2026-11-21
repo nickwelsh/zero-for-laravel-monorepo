@@ -1,3 +1,4 @@
+import { InfiniteScroll, type InfiniteScrollActionSlotProps } from '@nickwelsh/zero-for-laravel/inertia';
 import { useState } from 'react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
@@ -6,9 +7,24 @@ import { store } from '@/formbraid/zero/App/Http/Controllers/TodoListController'
 import type { Inertia } from '@/wayfinder/types';
 import { ListPanel } from './list-panel';
 
+function listAction(label: string) {
+    return (action: InfiniteScrollActionSlotProps) =>
+        action.hasMore &&
+        action.manualMode && (
+            <Button variant="outline" className="w-full" disabled={action.loading} onClick={() => action.fetch()}>
+                {label}
+            </Button>
+        );
+}
+
+const previousLists = listAction('Load previous lists');
+const nextLists = listAction('Load next lists');
+
 export function TodosWorkspace({ userId, lists }: { userId: number; lists: Inertia.Pages.Dashboard['lists'] }) {
     const [selectedId, setSelectedId] = useState<string | undefined>();
     const selected = lists.data.find((list) => list.id === selectedId) ?? lists.data[0];
+    // Keep the initial list open when earlier lists are prepended to the navigation.
+    if (selectedId === undefined && selected && lists.complete) setSelectedId(selected.id);
     const online = lists.connection.name === 'connected';
 
     return (
@@ -65,32 +81,32 @@ export function TodosWorkspace({ userId, lists }: { userId: number; lists: Inert
                         }}
                     />
                     {lists.status === 'loading' && <p className="text-sm text-muted-foreground">Loading lists…</p>}
-                    <nav aria-label="Choose a list" className="space-y-1">
-                        {lists.data.map((list) => (
-                            <Button
-                                key={list.id}
-                                variant={list.id === selected?.id ? 'secondary' : 'ghost'}
-                                className="w-full justify-start"
-                                aria-current={list.id === selected?.id ? 'true' : undefined}
-                                onClick={() => setSelectedId(list.id)}
-                            >
-                                <span className="truncate">{list.name}</span>
-                                {list.user_id !== userId && (
-                                    <span className="ml-auto text-xs text-muted-foreground">Shared</span>
-                                )}
-                            </Button>
-                        ))}
-                    </nav>
-                    {lists.hasMore && (
-                        <Button
-                            variant="outline"
-                            className="w-full"
-                            onClick={() => lists.loadMore()}
-                            disabled={lists.isLoadingMore}
+                    <div scroll-region="" className="max-h-[50vh] overflow-y-auto">
+                        <InfiniteScroll
+                            as="nav"
+                            aria-label="Choose a list"
+                            className="space-y-1"
+                            data="lists"
+                            manualAfter={1}
+                            previous={previousLists}
+                            next={nextLists}
                         >
-                            Load more lists
-                        </Button>
-                    )}
+                            {lists.data.map((list) => (
+                                <Button
+                                    key={list.id}
+                                    variant={list.id === selected?.id ? 'secondary' : 'ghost'}
+                                    className="w-full justify-start"
+                                    aria-current={list.id === selected?.id ? 'true' : undefined}
+                                    onClick={() => setSelectedId(list.id)}
+                                >
+                                    <span className="truncate">{list.name}</span>
+                                    {list.user_id !== userId && (
+                                        <span className="ml-auto text-xs text-muted-foreground">Shared</span>
+                                    )}
+                                </Button>
+                            ))}
+                        </InfiniteScroll>
+                    </div>
                 </aside>
                 {selected ? (
                     <ListPanel key={selected.id} list={selected} userId={userId} />

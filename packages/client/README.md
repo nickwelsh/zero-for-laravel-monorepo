@@ -42,6 +42,12 @@ Live props distinguish loading, success, refreshing, stale, failure, and idle
 states. Connection status is separate from query completion. Infinite queries grow
 one live window; cursor pages keep raw ordering values to avoid rounding timestamps.
 
+For a page prop declared with `Zero::scroll($query->paginate(50))`, import
+`InfiniteScroll` from `@nickwelsh/zero-for-laravel/inertia` and wrap the rows
+with `<InfiniteScroll data="lists">`. Loading earlier or later pages keeps the
+existing rows visible. By default the URL follows the most visible page;
+`preserveUrl` disables that update. HTTP reload options are not supported.
+
 For editable FormRequest inputs, type injected props as `QueryData<typeof index.lists>`
 from `/react`. `lists.inputs.values` holds current inputs; `options` holds finite
 enum/`in` choices; `set(partial)` validates and resubscribes; `reset()` restores the
