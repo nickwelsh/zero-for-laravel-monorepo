@@ -1,4 +1,4 @@
-import { Link as InertiaLink, type InertiaLinkProps } from '@inertiajs/react';
+import { Link as InertiaLink, router, type InertiaLinkProps } from '@inertiajs/react';
 import { ZeroContext } from '@rocicorp/zero/react';
 import type { Schema, Zero, QueryRequest, ReadonlyJSONValue } from '@rocicorp/zero';
 import { forwardRef, useContext, useEffect, useRef } from 'react';
@@ -54,6 +54,14 @@ type Factories = Record<string, (args: never) => ReadSelection>;
 type NativeZero = Zero<Schema, undefined, ClientContext>;
 type NativeRequest = QueryRequest<string, ReadonlyJSONValue, ReadonlyJSONValue, Schema, unknown, ClientContext>;
 
+function retainedState(page: unknown) {
+    if (!page) return false;
+    if (typeof page !== 'object' || !('props' in page)) return true; // Includes encrypted entries.
+    return ['onceProps', 'rememberedState', 'deferredProps', 'initialDeferredProps'].some(
+        (key) => Object.keys(Reflect.get(page, key) ?? {}).length > 0,
+    );
+}
+
 export function createNavigationLink(
     factories: Factories,
     navigation: readonly NavigationRoute[],
@@ -67,6 +75,9 @@ export function createNavigationLink(
     const pools = new WeakMap<NativeZero, Map<string, { owners: Set<object>; stop: () => void }>>();
     const stops = new Set<() => void>();
     let disposed = false;
+
+    // Inertia can restore keys from its boot history even after the active entry changes.
+    const restored = typeof window !== 'undefined' && retainedState(window.history.state?.page);
 
     function destination(props: ZeroLinkProps): Record<string, PageBinding> | undefined {
         if (typeof window === 'undefined' || !props.href) return undefined;
@@ -311,7 +322,7 @@ export function createNavigationLink(
         }
         return { route, url };
     }
-    const uninstall = installMutationNavigation(currentPage, (name, parameters) => {
+    function resolve(name: string, parameters: Record<string, unknown>) {
         const next = namedDestination(name, parameters);
         if (!next) return undefined;
         return {
@@ -320,12 +331,42 @@ export function createNavigationLink(
                 ? destination({ href: next.url.href, component: next.route.component })
                 : undefined,
         };
-    });
+    }
+    const uninstall = installMutationNavigation(currentPage, resolve);
     return {
         Link,
-        redirect(name: string, parameters: Record<string, unknown>): (() => void) | undefined {
-            const next = namedDestination(name, parameters);
+        redirect(name: string, parameters: Record<string, unknown>, internal = false): (() => void) | undefined {
+            const next = resolve(name, parameters);
             if (!next) return undefined;
+            const source = currentPage();
+            const { route, url, bindings } = next;
+            if (
+                internal &&
+                !restored &&
+                source &&
+                !retainedState(source) &&
+                !retainedState(window.history.state?.page) &&
+                route.client &&
+                route.component &&
+                bindings &&
+                Object.values(bindings).length > 0 &&
+                Object.values(bindings).every((b) => b.access && !b.pending)
+            ) {
+                // Only destination bindings and explicitly shared props cross the swap.
+                const shared = Object.fromEntries(
+                    (source.sharedProps ?? [])
+                        .filter((k) => k !== '__zero' && k !== 'errors' && !Object.hasOwn(bindings, k))
+                        .map((k) => [k, source.props[k]]),
+                );
+                router.cancelAll();
+                router.flushAll();
+                router.replace({
+                    component: route.component,
+                    url: url.pathname + url.search + url.hash,
+                    props: { ...shared, errors: {}, __zero: { version: 1, mode: 'replace', bindings } },
+                });
+                return undefined;
+            }
             // Even an Inertia HTTP visit can restore private remembered state
             // from its initial history snapshot. Start a fresh document instead,
             // without leaving an Inertia response that can outlive this page.

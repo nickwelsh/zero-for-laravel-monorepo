@@ -141,8 +141,11 @@ Changing one decision removes only that binding's result; its client immediately
 rechecks it. Unaffected bindings retain their approval and business-query identity,
 even when they share a batch with the affected binding. Denied decisions also have
 live predicates, so regrant triggers a fresh authoritative check.
-The browser blocks protected content until current status and business generations
-complete; confirmed loss unmounts it before `access.onRevoked`. Initial denial,
+Pages with protected ordinary props wait for current status and business queries.
+A client-resolvable live-only page can display its exact previously synchronized
+query during a background check or its own pending insert before server binding.
+Neither case grants additional replication. Confirmed denial hides the page;
+confirmed loss unmounts it before `access.onRevoked`. Initial denial,
 transport failure, and empty collections are not revocation events. Default denial
 presentation is 403 or 404 according to configuration and policy overrides.
 

@@ -12,8 +12,11 @@ Laravel authenticates reads and authorizes writes. Zero owns replication, local
 subscriptions, optimistic replay, and reconciliation. One resolved model contract
 controls queries, mutation inputs, and the PostgreSQL publication's columns.
 
-These docs cover **v0.12.0**, with **Zero 1.11.4**, **Laravel 12 or 13**, and
-**PHP 8.3+**. [Install matching packages](./docs/getting-started.mdx) to get started.
+The latest release is **v0.12.0**, with **Zero 1.11.4**, **Laravel 12 or 13**,
+and **PHP 8.3+**. This checkout also documents changes since that release:
+the two-import form migration, local mutation redirects, live class guards, and
+guarded pages that read from the replica during background access checks. Use
+matching PHP and client packages and regenerate their contracts together.
 
 ## Start building
 
@@ -21,6 +24,7 @@ These docs cover **v0.12.0**, with **Zero 1.11.4**, **Laravel 12 or 13**, and
 - [Declare models and their allowed interface](./docs/models.mdx).
 - [Protect reads and writes](./docs/authorization.mdx).
 - [Subscribe from React](./docs/react.mdx).
+- [Migrate an existing Inertia form](./docs/mutations.mdx#migrate-an-inertia-form-by-changing-two-imports).
 - [Browse the generated PHP and TypeScript API](/docs/0.x/api).
 
 ## How data moves

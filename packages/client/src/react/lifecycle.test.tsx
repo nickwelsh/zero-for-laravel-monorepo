@@ -223,6 +223,61 @@ it.each([403, 404] as const)(
 
 const protectedBinding = { query: 'tasks', args: { title: '' }, access: { status: 403 as const } };
 
+it('renders a retained query without a live approval, not an unknown result or a revoked one', async () => {
+    const args = { title: '', __route: 'index', __routeArgs: {} };
+    const access = { scope: 'page', status: 403 } as const;
+    const page = {
+        component: 'tasks',
+        props: {
+            __zero: {
+                version: 1,
+                mode: 'replace',
+                bindings: {
+                    tasks: { query: 'tasks', args, access },
+                },
+            },
+        },
+    };
+    const adapter = createInertiaAdapter(
+        { tasks: () => index.tasks.live(args) },
+        {
+            navigation: [
+                {
+                    component: 'tasks',
+                    route: 'index',
+                    client: true,
+                    pattern: '^/tasks$',
+                    protocol: null,
+                    host: null,
+                    defaults: {},
+                    bindings: { tasks: { query: 'tasks', one: false, parameters: {}, access } },
+                },
+            ],
+        },
+    );
+    const Page = adapter.wrap(
+        () => <p>{useLiveProps<{ tasks: Data<readonly { title: string }[]> }>().tasks.data[0]?.title}</p>,
+        page,
+    );
+    const queryArgs = index.tasks.live(args).request().args;
+    put(queryArgs, rows, 'unknown');
+    const view = render(<Page {...page.props} />);
+    try {
+        expect(screen.queryByText('A')).toBeNull();
+        put(queryArgs, rows, 'cached');
+        view.rerender(<Page {...page.props} />);
+        expect(screen.getByText('A')).toBeTruthy();
+        await ready();
+        await answer('denied', 403);
+        expect(screen.queryByText('A')).toBeNull();
+        await act(async () => native.zero.connect('disconnected'));
+        expect(screen.queryByText('A')).toBeNull();
+    } finally {
+        view.unmount();
+        adapter.dispose();
+    }
+});
+
 it('owns one class check for two distinct business registrations and revokes the whole page once', async () => {
     const list = index.tasks.live({ title: '' });
     const detail = show.task.live({ task: 'a' });
@@ -291,10 +346,13 @@ it('keeps watching the current class approval until renewal completes, and hides
     const identity = screen.getByText(/^Private/).textContent;
     await act(() => vi.advanceTimersByTime(15_000));
     expect(checks()[0]!.destroy).not.toHaveBeenCalled();
+    act(() => checks()[1]!.send([])); // New query completes before its result row replicates.
+    expect(screen.getByText(/^Private/).textContent).toBe(identity);
     await answer();
     expect(screen.getByText(/^Private/).textContent).toBe(identity);
     expect(checks()[0]!.destroy).toHaveBeenCalledOnce();
     await act(() => vi.advanceTimersByTime(15_000));
+    act(() => checks()[2]!.send([]));
     act(() => checks()[1]!.send([]));
     expect(screen.queryByText(/^Private/)).toBeNull();
     await answer('allowed', undefined, checks()[2]); // Detached pending renewal cannot bring the page back.

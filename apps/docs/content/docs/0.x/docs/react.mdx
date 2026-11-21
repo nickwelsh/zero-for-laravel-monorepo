@@ -11,12 +11,16 @@ Install the query bindings in Inertia's page resolver:
 
 ```tsx
 import { createInertiaAdapter } from '@nickwelsh/zero-for-laravel/inertia';
-import { bindings } from '@/zero/generated.queries';
+import { bindings, navigation } from '@/zero/generated.queries';
 
-const livePages = createInertiaAdapter(bindings);
+const livePages = createInertiaAdapter(bindings, { navigation });
 // After loading the requested component in createInertiaApp.resolve:
 return livePages.wrap(module.default, page);
 ```
+
+`navigation` maps named routes to page components and query arguments. Pass it
+to this same adapter for [local mutation redirects](./mutations.mdx#navigate-after-a-local-write)
+and [guarded pages that can render from the replica](./authorization.mdx#when-the-permission-watch-starts).
 
 Put the generated `ZeroProvider` in the authenticated persistent layout, outside
 the wrapped page. Supply both native `userID` and the generated typed `context`
@@ -132,6 +136,7 @@ prop, and field (component names match `Inertia::render`):
 
 ```ts
 const livePages = createInertiaAdapter(bindings, {
+    navigation,
     url: { dashboard: { lists: { status: 'status' } } },
     history: 'replace', // Use 'push' for back/forward filter navigation.
 });

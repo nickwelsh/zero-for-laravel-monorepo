@@ -81,6 +81,7 @@ function text(value: unknown): value is string {
 /** Coalesced checks per native instance AND actor context; no broadcast subscription. */
 function monitor(zero: NativeZero, context: string) {
     const entries = new Map<string, Entry>();
+    const denied = new Set<string>();
     let running = false;
     let epoch = zero.connection.state.current;
     let connectionStop: (() => void) | undefined;
@@ -111,6 +112,9 @@ function monitor(zero: NativeZero, context: string) {
         const revocation = before.revocation + (state === 'denied' && entry.previouslyAllowed ? 1 : 0);
         if (state === 'denied') entry.previouslyAllowed = false;
         if (state === 'allowed') entry.previouslyAllowed = true;
+        const key = selectionKey([entry.binding.query, entry.binding.args, entry.binding.permission]);
+        if (state === 'denied' && entry.binding.query) denied.add(key);
+        if (state === 'allowed') denied.delete(key);
         // Renewal alone must not remount business queries (or nested boundaries).
         const generation = state === before.state ? before.generation : crypto.randomUUID();
         if (before.state === state && before.status === status && before.revocation === revocation) return;
@@ -237,7 +241,10 @@ function monitor(zero: NativeZero, context: string) {
                             invalidate(entry);
                             queue();
                         } else if (type === 'error' || type === 'complete') {
-                            if (entry.previous) {
+                            // The new query can complete before the status row
+                            // written by its transform replicates. Keep watching
+                            // the previous unexpired decision, without extending it.
+                            if (entry.previous && !(type === 'complete' && matching.length === 0)) {
                                 detach(entry, 'previous');
                                 entry.lease = 0;
                                 emit(entry, 'unknown');
@@ -309,9 +316,11 @@ function monitor(zero: NativeZero, context: string) {
             // renders must not leave watches or timers behind.
             let entry: Entry | undefined;
             return {
+                denied: () => denied.has(key),
                 snapshot: () => {
-                    if (!entry) return initial;
-                    return connected() && entry.lease > performance.now() ? entry.snapshot : entry.pending;
+                    const watched = entry ?? entries.get(key);
+                    if (!watched) return initial;
+                    return connected() && watched.lease > performance.now() ? watched.snapshot : watched.pending;
                 },
                 initial: () => initial,
                 subscribe(this: void, listener: () => void) {
@@ -358,7 +367,7 @@ function monitor(zero: NativeZero, context: string) {
 }
 
 const idle: Snapshot = { state: 'unknown', status: 404, revocation: 0, generation: '' };
-const idleStore = { snapshot: () => idle, initial: () => idle, subscribe: () => () => {} };
+const idleStore = { denied: () => false, snapshot: () => idle, initial: () => idle, subscribe: () => () => {} };
 
 function useAccessState(binding: AccessBinding | null) {
     const zero = useZero<Schema, undefined, ClientContext>();
@@ -390,19 +399,31 @@ export function usePermission(model: string, ability: string, id?: string | null
     return state.state === 'unknown' ? undefined : state.state === 'allowed';
 }
 
+export function accessDenied(status: 403 | 404) {
+    return (
+        <div role="alert" data-zero-access={status}>
+            {status === 404 ? 'Not found' : 'Not authorized'}
+        </div>
+    );
+}
+
 /** Unmounts protected content before invoking the optional confirmed-loss callback. */
 export function AccessBoundary({
     binding,
     prop,
     options,
+    replica = false,
+    pendingInsert = false,
     children,
 }: {
     binding: AccessBinding & { query: string };
     prop: string;
     options: AccessOptions;
+    replica?: boolean;
+    pendingInsert?: boolean;
     children: ReactNode;
 }) {
-    const { store, state } = useAccessState(binding);
+    const { store, state } = useAccessState(pendingInsert ? null : binding);
     const notified = useRef({ store, count: 0 });
     useEffect(() => {
         if (notified.current.store !== store) notified.current = { store, count: 0 };
@@ -416,14 +437,8 @@ export function AccessBoundary({
             });
         }
     }, [state, options, binding, prop, store]);
-    if (state.state === 'denied')
-        return (
-            options.onError?.(state.status) ?? (
-                <div role="alert" data-zero-access={state.status}>
-                    {state.status === 404 ? 'Not found' : 'Not authorized'}
-                </div>
-            )
-        );
+    if (state.state === 'denied') return options.onError?.(state.status) ?? accessDenied(state.status);
+    if (replica && !store.denied()) return children;
     if (state.state !== 'allowed')
         return options.onPending?.() ?? <output data-zero-access="unknown">Checking access…</output>;
     return <AccessGeneration.Provider value={state.generation}>{children}</AccessGeneration.Provider>;

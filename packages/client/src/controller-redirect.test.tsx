@@ -35,7 +35,10 @@ it('replays checked redirects as data with stable IDs and no navigation effects'
                 type: 'success',
                 data: { kind: 'visit', route: 'todos.show', parameters: { todo: id } },
             };
-            expect(await zero.mutate(prepared).client).toEqual(expected);
+            expect(await zero.mutate(prepared).client).toEqual({
+                ...expected,
+                data: { ...expected.data, inserted: { table: 'tasks', id } },
+            });
             const bound = layer.actions[`${prefix}bound`];
             expect(await zero.mutate(bound.prepare({}, { todo: 'not-cached' })).client).toEqual({ type: 'success' });
             expect(await zero.mutate(bound.prepare({}, { todo: id })).client).toEqual(expected);

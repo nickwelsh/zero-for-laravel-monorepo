@@ -52,9 +52,9 @@ FormRequest contracts through Surveyor, and emits coordinated PHP/native ZQL.
 Generation never executes an HTTP controller to sample its result.
 
 The Inertia integration removes live result keys from ordinary props before
-serialization. Reserved `__zero` metadata carries only query names and normalized
-arguments. A directly returned eligible route-bound model becomes a live `one()`
-query after normal Laravel binding. Initial missing models still produce Laravel's
+serialization. Reserved `__zero` metadata identifies the queries, their arguments
+and any access checks. A directly returned eligible route-bound model becomes a
+live `one()` query after normal Laravel binding. Initial missing models still produce Laravel's
 normal response. Direct query transforms rerun the required binding/middleware and
 FormRequest boundary, not the page controller or its unrelated effects.
 
@@ -124,7 +124,10 @@ public function store(StoreTaskRequest $request): array
 The checked compiler lowers supported writes, branches, transaction reads, shared
 helpers, and returns to one operation definition. PHP executes real Eloquent writes;
 the browser executes native Zero transactions. Prepared IDs and time are reused.
-Actions return void or explicit JSON, never redirects or implicitly serialized models.
+Actions return void or explicit JSON, not serialized models. A checked
+`RedirectResponse` compiles to a navigation instruction with a void public result:
+`back()` stays at the current URL; `to_route()` can open a named page after the
+local write, before server acceptance. See [local mutation navigation](apps/docs/content/docs/0.x/docs/mutations.mdx#navigate-after-a-local-write).
 
 `#[ZeroMutation(optimism: 'custom')]` requires a declared client projection.
 `optimism: 'disabled'` sends the same typed native intent without speculative writes.
@@ -178,7 +181,7 @@ Only registered Zero props are customized; shared and ordinary props stay with
 Wayfinder, without duplicate declarations or global overrides. The controller
 module root is configurable with `zero.wayfinder.module` (default `@/zero`).
 
-Install `createInertiaAdapter(bindings)` from the `/inertia` export in your
+Install `createInertiaAdapter(bindings, { navigation })` from the `/inertia` export in your
 `createInertiaApp` resolver and call `livePages.wrap(module.default, page)`.
 Put the generated `ZeroProvider` in the authenticated persistent layout, outside
 the wrapped page. Pass `userID` and `context={{ user_id: user.id }}`. Changing identity
@@ -226,7 +229,12 @@ Outside React, construct Zero with the `mutators` returned by
 whereas native results retain wire values. A committed result decode failure is
 not a rolled-back write and must not trigger resubmission.
 
-React 19 apps can use Formbraid **0.3** with generated controller descriptors:
+To migrate an existing Inertia form, change the `Form` and Wayfinder controller
+imports and keep the JSX. The native form handles submission and draft recovery;
+see the [two-import migration](apps/docs/content/docs/0.x/docs/mutations.mdx#migrate-an-inertia-form-by-changing-two-imports)
+or the [runnable Todo fixture](tests/integration/todo-migration/README.md).
+
+React 19 apps can also use Formbraid **0.3** with generated controller descriptors:
 import `store` from `@/formbraid/zero/App/Http/Controllers/TodoListController`
 and render `<Form form={store} />`. `zero:formbraid` reuses Formbraid's component
 metadata and request generator, attaching native Zero submission callbacks.

@@ -18,9 +18,12 @@ The test copies `forms.tsx`, replaces exactly its two imports, typechecks the
 result against the freshly generated controller, and bundles it for a real
 Inertia React page. A fixture login establishes an ordinary Laravel web session;
 native Zero callbacks forward the session cookie. The test holds the actual
-mutation push before Laravel handles it. It checks the browser's URL, history,
-private component mounts, recovered controls, request log and Postgres rows
-before and after release. A separate WAL update proves that the departed page
+mutation push before Laravel handles it. The ordinary show page must render the
+locally created row (including its decoded timestamp) with working controls and
+stay mounted through confirmation. A warm reload must show persisted rows even
+with the Zero WebSocket blocked; delete must show the surviving sibling before
+commit. The test also checks the URL, history, recovered controls, request log and
+Postgres rows. A separate WAL update proves that the departed page
 remains mounted after the client has received the committed change. A late
 rejection must leave the same Notes heading mounted and show the provider's
 default mutation-error notice. The last checks independently revoke row

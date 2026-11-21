@@ -196,6 +196,62 @@ it('resolves revocation parameters into document replacements even for client-ca
     ambiguous.dispose();
 });
 
+it('replaces a revoked page with fresh guarded bindings internally, unless remembered state needs isolation', async () => {
+    vi.useRealTimers();
+    vi.stubGlobal('scrollTo', vi.fn());
+    window.history.replaceState(null, '', '/source');
+    const source = {
+        component: 'source',
+        url: '/source',
+        version: null,
+        rescuedProps: [],
+        flash: {},
+        rememberedState: {},
+        sharedProps: ['auth'],
+        props: { errors: {}, auth: 'bob', privateDraft: 'private' },
+    };
+    router.init({ initialPage: source, resolveComponent: () => null, swapComponent: async () => {} });
+    await waitFor(() => expect(window.history.state?.page.url).toBe('/source'));
+    const length = window.history.length;
+    const target = {
+        ...route,
+        name: 'tasks.index',
+        uri: 'tasks/{label}',
+        domain: null,
+        client: true,
+        bindings: { tasks: { ...route.bindings.tasks!, access: { status: 404 as const, scope: 'page' as const } } },
+    };
+    const links = createNavigationLink({ tasks: factory }, [target], () => source);
+    try {
+        links.redirect('tasks.index', { label: 'B' }, true);
+        await waitFor(() => expect(window.location.pathname).toBe('/tasks/B'));
+        expect(window.history.length).toBe(length);
+        expect(window.history.state.page.props).toEqual({
+            auth: 'bob',
+            errors: {},
+            __zero: {
+                version: 1,
+                mode: 'replace',
+                bindings: {
+                    tasks: expect.objectContaining({
+                        query: 'tasks',
+                        access: target.bindings.tasks.access,
+                        args: { __route: 'route-identity', __routeArgs: { label: 'B' }, title: 'B' },
+                    }),
+                },
+            },
+        });
+        expect(http.visit).not.toHaveBeenCalled();
+        expect(replaceDocument).not.toHaveBeenCalled();
+        router.remember('private remembered draft', 'editor');
+        await waitFor(() => expect(window.history.state.page.rememberedState.editor).toBe('private remembered draft'));
+        links.redirect('tasks.index', { label: 'C' }, true);
+        expect(replaceDocument).toHaveBeenCalledExactlyOnceWith(`${window.location.origin}/tasks/C`);
+    } finally {
+        links.dispose();
+    }
+});
+
 it('keeps Inertia HTTP prefetch and its callbacks independent from Zero preload', () => {
     const Link = adapter().Link;
     const href = { url: '/tasks/A', method: 'get' as const, component: 'tasks/index' };

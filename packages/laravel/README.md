@@ -13,6 +13,12 @@ PHP registrations, native ZQL/mutators, validation schemas, result codecs, and
 named controller modules. Laravel retains real binding, middleware, FormRequests, Gates, and Eloquent.
 Zero retains replication, optimistic replay, ordering, and durable mutation results.
 
+An unconditional `$this->authorize('view', $todo)` and a returned bound `$todo`
+compile to a guarded live query. A generated create can return a checked
+`RedirectResponse` to open that page using the locally prepared ID. See the
+[bound model example](../../apps/docs/content/docs/0.x/docs/queries.mdx#return-a-route-bound-model)
+and the [form migration](../../apps/docs/content/docs/0.x/docs/mutations.mdx#migrate-an-inertia-form-by-changing-two-imports).
+
 For component-owned reads, put public methods returning
 `ZeroForLaravel\Query\ZeroQuery` in ordinary application classes such as
 `App\Zero\Queries\TaskQueries`. `zero:generate` discovers them through Composer

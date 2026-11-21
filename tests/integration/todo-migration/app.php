@@ -104,10 +104,13 @@ Route::middleware(['web', 'auth', PreserveFilterOrder::class, RejectReservedTitl
     Route::get('/notes', [TodoController::class, 'notes']);
 });
 if (PHP_SAPI === 'cli') {
+    if (($argv[1] ?? null) === 'generate') {
+        exit(Artisan::call('zero:generate', [], new ConsoleOutput));
+    }
     if (($argv[1] ?? null) === 'dev') {
         exit(Artisan::call('zero:dev', [], new ConsoleOutput));
     }
-    if (in_array($argv[1] ?? null, ['revoke-view', 'restore-view', 'revoke-viewAny'], true)) {
+    if (in_array($argv[1] ?? null, ['revoke-view', 'restore-view', 'revoke-viewAny', 'restore-viewAny'], true)) {
         [$operation, $ability] = explode('-', $argv[1]);
         $policy = ['user:alice', 'todo', $ability, 'any', 'allow'];
         exit(($operation === 'restore' ? Casbin::addPolicy(...$policy) : Casbin::removePolicy(...$policy)) ? 0 : 1);

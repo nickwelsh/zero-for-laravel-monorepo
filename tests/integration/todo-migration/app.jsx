@@ -41,19 +41,17 @@ function Index({ todos }) {
 }
 function Show({ todo }) {
     useLayoutEffect(() => {
-        // A transient mount is still disclosure, even if the next render hides it.
         window.todoShowMounts++;
     }, []);
-    return todo.data ? (
-        <section data-private>
+    if (!todo.data) return <p>Todo removed.</p>;
+    return (
+        <section data-private data-created={todo.data.created_at?.toISOString()} data-complete={todo.complete}>
             <h1>{todo.data.title}</h1>
             <EditTodoForm todo={todo.data} />
             <button type="button" onClick={() => void TodoController.destroy.mutate(todo.data.id)}>
                 Delete todo
             </button>
         </section>
-    ) : (
-        <p>Todo removed.</p>
     );
 }
 function Notes({ activity }) {

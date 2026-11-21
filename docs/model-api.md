@@ -64,8 +64,10 @@ Initial missing rows remain normal binding failures. Later unauthorized, deleted
 or missing singular rows block protected rendering while fresh access is checked.
 Captured instance guards are rechecked through reserved native Zero status queries;
 denied states preserve the configured 403/404 and unmount the page before
-`onRevoked`. Disconnects are unknown, not revocation. Reconnects require fresh
-status and business-query generations. Checks renew after 15 seconds and expire
+`onRevoked`. Disconnects are unknown, not revocation. A client-resolvable live-only
+page can show the same actor's synchronized query while access is rechecked, or
+its own pending insert without waiting for server binding. Protected ordinary
+props still wait for fresh approval. Checks renew after 15 seconds and expire
 after 20. Live subject/resource/ability predicates invalidate only affected access
 results through replication; unrelated permission edits do not trigger a recheck
 or rotate a protected business query's generation.
@@ -95,6 +97,10 @@ Prepared IDs and time are stable across replay. Required bound rows are resolved
 before optimistic writes; missing local data yields the declared no-op prediction.
 Server binding and authorization still run. Late errors roll back the transaction.
 `reloadForUpdate()` locks current state before state-dependent authorization.
+
+For a checked `RedirectResponse`, the public result is void. The generated form
+and `.mutate()` apply the local `stay` or named `visit` instruction when predictable;
+Zero replay never moves the browser. See [navigation and draft recovery](../apps/docs/content/docs/0.x/docs/mutations.mdx#navigate-after-a-local-write).
 
 `findUnique`, `insertUnlessExists`, and `upsertUnique` require real nonnullable,
 unconditional unique keys. Reads see preceding writes. Conditional insertion never
@@ -210,8 +216,9 @@ Inertia props, callbacks, and refs pass through to its `Link`.
 
 The adapter supplies generated bindings through Inertia's `pageProps` callback
 for the instant shell, preserving shared props and any supplied `pageProps`.
-Laravel's response then replaces the speculative bindings. Protected props still
-require fresh authorization checks; preloading is not permission to display rows.
+Laravel's response then replaces the speculative bindings. Preloading does not
+grant access. See [the guarded-page rules](../apps/docs/content/docs/0.x/docs/authorization.mdx#when-the-permission-watch-starts)
+for cached results, pending inserts and confirmed denial.
 
 Preloads deduplicate within the active Zero session, expire after 30 seconds, and
 retain at most 32 queries per adapter/session. Unmount, identity changes, rejection,

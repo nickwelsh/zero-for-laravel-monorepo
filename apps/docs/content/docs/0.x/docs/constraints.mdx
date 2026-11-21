@@ -19,7 +19,9 @@ description: The checked v0.6 subset and native integration boundaries.
   the contract; generation reflects them without invoking resolver methods.
 - Generated mutations support checked expressions, branching, bounded keyed loops,
   shared helpers, transaction reads/writes, authorization guards, and JSON results.
-  Use custom or disabled optimism deliberately for unsupported PHP.
+  Use custom or disabled optimism deliberately for nonportable writes. A redirect
+  action still needs one final checked `RedirectResponse` return, even when the
+  client does not predict it. Use an ordinary HTTP route for arbitrary responses.
 - Generated creates require UUID/ULID keys. Keyed repeated creation uses UUIDs.
   Numeric-key authoritative creation can use disabled optimism. No temporary-ID
   remapping is inferred.

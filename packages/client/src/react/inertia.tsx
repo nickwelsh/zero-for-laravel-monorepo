@@ -12,8 +12,8 @@ import {
     type ReactNode,
 } from 'react';
 import { object, selectionKey } from '../validation';
-import { useData, QueryAccessError, type Data, type ReadSelection, type QueryInputs } from './data';
-import { StartingZero } from './provider';
+import { useSelectionData, QueryAccessError, type Data, type ReadSelection, type QueryInputs } from './data';
+import { PendingInserts, StartingZero } from './provider';
 import { AccessBoundary, type AccessOptions } from './access';
 import { createNavigationLink, type NavigationRoute, type PageBinding } from './inertia-navigation';
 export type { NavigationRoute, ZeroLinkProps } from './inertia-navigation';
@@ -37,6 +37,8 @@ export interface InertiaInputOptions {
     url?: Record<string, Record<string, Record<string, string>>>;
     history?: 'replace' | 'push';
     access?: AccessOptions;
+    /** Opt in only if persistent layouts and Inertia history never retain protected page data. */
+    revocationNavigation?: 'document' | 'client';
 }
 const EffectiveProps = createContext<Record<string, unknown> | undefined>(undefined);
 
@@ -167,14 +169,31 @@ function Subscription({
     selection,
     access,
     pageGuard,
+    replica,
+    inserted,
     children,
 }: {
     selection: ReadSelection;
     access?: AccessOptions | undefined;
     pageGuard: boolean;
+    replica: boolean;
+    inserted: string | undefined;
     children: (data: Data<unknown>) => ReactNode;
 }) {
-    const data = useData(selection);
+    const data = useSelectionData(selection, {}, inserted !== undefined);
+    // Preserve the mounted editor during the transition to the normal wire
+    // query. Only this selection's own locally inserted primary key qualifies.
+    const [created, setCreated] = useState<{ selection: string; id: string }>();
+    if (inserted && (created?.selection !== selection.key || created.id !== inserted))
+        setCreated({ selection: selection.key, id: inserted });
+    else if (created && !inserted && (data.complete || data.error || selection.key !== created.selection))
+        setCreated(undefined);
+    const ownRow =
+        created?.selection === selection.key &&
+        selection.entity &&
+        data.data &&
+        typeof data.data === 'object' &&
+        Reflect.get(data.data, selection.entity.key) === created.id;
     if (access) {
         if (data.error instanceof QueryAccessError)
             return (
@@ -184,7 +203,16 @@ function Subscription({
                     </div>
                 )
             );
-        if (!data.complete || data.error || (!pageGuard && selection.one && data.data === undefined))
+        if (replica && !data.error) {
+            // Cached means Zero previously synchronized this exact named query,
+            // unlike an unknown result populated by an unrelated subscription.
+            if (
+                (!data.complete && data.details.type !== 'cached' && !ownRow) ||
+                (inserted && !ownRow) ||
+                (!pageGuard && selection.one && data.data === undefined)
+            )
+                return access.onPending?.() ?? null;
+        } else if (!data.complete || data.error || (!pageGuard && selection.one && data.data === undefined))
             return access.onPending?.() ?? <output data-zero-access="unknown">Checking access…</output>;
     }
     return children(data);
@@ -197,6 +225,7 @@ function InputSubscription({
     synchronize,
     prop,
     access,
+    replica,
     children,
 }: {
     binding: Binding;
@@ -205,6 +234,7 @@ function InputSubscription({
     synchronize: (args: Record<string, unknown>, values: object) => boolean;
     prop: string;
     access: AccessOptions;
+    replica: boolean;
     children: (data: Data<unknown> & { inputs: QueryInputs<Record<string, unknown>, object> }) => ReactNode;
 }) {
     const source = selectionKey(binding);
@@ -231,6 +261,12 @@ function InputSubscription({
         };
     }, [state]);
     const selection = factory(state.args);
+    const inserts = useContext(PendingInserts);
+    const routeIds = Object.values(object(binding.args['__routeArgs'] ?? {}, 'route arguments'));
+    const inserted =
+        replica && binding.access && binding.access.scope !== 'page' && selection.one && routeIds.length === 1
+            ? inserts.find((row) => row.table === selection.entity?.table && row.id === routeIds[0])?.id
+            : undefined;
     function update(patch: object | ((values: Readonly<Record<string, unknown>>) => object), reset = false) {
         const before = latest.current;
         if (!before || before.source !== source) return;
@@ -264,12 +300,20 @@ function InputSubscription({
             selection={selection}
             access={binding.access ? access : undefined}
             pageGuard={binding.access?.scope === 'page'}
+            replica={replica}
+            inserted={inserted}
         >
             {(data) => children({ ...data, inputs })}
         </Subscription>
     );
     return binding.access && binding.access.scope !== 'page' ? (
-        <AccessBoundary binding={{ ...binding, args: state.args }} prop={prop} options={access}>
+        <AccessBoundary
+            binding={{ ...binding, args: state.args }}
+            prop={prop}
+            options={access}
+            replica={replica}
+            pendingInsert={inserted !== undefined}
+        >
             {subscription}
         </AccessBoundary>
     ) : (
@@ -394,6 +438,18 @@ export function createInertiaAdapter(factories: BindingFactories, options: Inert
                 // Every registration for this action replays the same class Gate
                 // and route. One representative watches it for the mounted page.
                 const pageGuard = entries.find(([, binding]) => binding.access?.scope === 'page');
+                const replica =
+                    !Object.keys(contract.pageProps ?? {}).length &&
+                    entries.length > 0 &&
+                    options.navigation?.some(
+                        (route) =>
+                            route.client &&
+                            route.component === (pages.get(snapshot) ?? page)?.component &&
+                            entries.every(
+                                ([prop, b]) =>
+                                    b.args['__route'] === route.route && route.bindings[prop]?.query === b.query,
+                            ),
+                    ) === true;
                 if (
                     contract.awaitingMutation ||
                     // An unresolved instant visit can arrive with only shared
@@ -401,6 +457,7 @@ export function createInertiaAdapter(factories: BindingFactories, options: Inert
                     (guardedPages.has((pages.get(snapshot) ?? page)?.component ?? null) && !pageGuard) ||
                     entries.some(([, binding]) => binding.access && (starting || binding.pending))
                 ) {
+                    if (replica && starting) return options.access?.onPending?.() ?? null; // IndexedDB is opening.
                     return <output data-zero-access="unknown">Checking access…</output>;
                 }
                 function accessOptions(binding: Binding): AccessOptions {
@@ -429,6 +486,7 @@ export function createInertiaAdapter(factories: BindingFactories, options: Inert
                                     const cancel = navigation.redirect(
                                         response.route,
                                         object(binding.args['__routeArgs'] ?? {}, 'route arguments'),
+                                        options.revocationNavigation === 'client',
                                     );
                                     // beforeunload can synchronously end this owner
                                     // before location.replace returns its stop handle.
@@ -513,6 +571,7 @@ export function createInertiaAdapter(factories: BindingFactories, options: Inert
                             synchronize={synchronize}
                             prop={prop}
                             access={accessOptions(binding)}
+                            replica={replica}
                         >
                             {(data) => render(index + 1, { ...effective, [prop]: data })}
                         </InputSubscription>
@@ -522,7 +581,7 @@ export function createInertiaAdapter(factories: BindingFactories, options: Inert
                 if (!pageGuard) return body;
                 const [prop, binding] = pageGuard;
                 return (
-                    <AccessBoundary binding={binding} prop={prop} options={accessOptions(binding)}>
+                    <AccessBoundary binding={binding} prop={prop} options={accessOptions(binding)} replica={replica}>
                         {body}
                     </AccessBoundary>
                 );

@@ -103,6 +103,7 @@ export function liveQuery<Q extends NativeQuery, D extends ContractMap, N extend
     const selection = {
         key: selectionKey([query.queryName, input, pageSize, cursorFields]),
         one,
+        entity: { table: definitions[model]!.table, key: definitions[model]!.key },
         pageSize,
         cursorFields,
         definitions,

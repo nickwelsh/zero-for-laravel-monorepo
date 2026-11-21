@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- Migrate supported Inertia forms by changing the `Form` and generated controller
+  imports. A checked `to_route()` can navigate after the local write; `back()`
+  preserves the current URL. On rejection, Zero rolls back the write and the form
+  can recover its draft and field errors. Formbraid remains optional.
+- A guarded, client-resolvable page with only live props can render its own
+  pending insert or a previously synchronized query while access is checked.
+  An unconditional `viewAny` can guard a live index independently of row visibility.
+  Laravel still authorizes the server subscription and the write.
+
 ## [0.12.0] - 2026-11-19
 
 - Use Laravel controller authorization in generated queries and mutations. Mutations

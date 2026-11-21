@@ -90,6 +90,8 @@ export function installMutationNavigation(
                     return;
                 }
                 const replace = predicted !== undefined;
+                const live = Object.keys(bindings).length > 0 && Object.values(bindings).every((b) => b.access);
+                if (confirmed && live && predicted === url.href) return;
                 predicted = url.href;
                 const shared = Object.fromEntries(
                     (source.sharedProps ?? [])
@@ -105,7 +107,7 @@ export function installMutationNavigation(
                             version: 1,
                             mode: 'replace',
                             bindings,
-                            ...(!confirmed ? { awaitingMutation: true } : {}),
+                            ...(!confirmed && !live ? { awaitingMutation: true } : {}),
                         },
                     },
                     replace,

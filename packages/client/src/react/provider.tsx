@@ -9,12 +9,12 @@ import {
     type ReactNode,
 } from 'react';
 import { ZeroContext, ZeroProvider as NativeProvider } from '@rocicorp/zero/react';
-import type { AnyMutatorRegistry, Schema, Zero, ZeroOptions } from '@rocicorp/zero';
+import type { AnyMutatorRegistry, MutatorResult, Schema, Zero, ZeroOptions } from '@rocicorp/zero';
 import type { ClientContext, ContextContract } from '../contract';
 import { validateContext } from '../validation';
 import { ControllerMutations } from './controller-mutation';
 import { mountFormSession } from './form-action';
-import type { ControllerMutationBinding } from '../controller-mutation';
+import type { ControllerMutationBinding, MutationDestination } from '../controller-mutation';
 
 export type ProviderOptions<C extends ClientContext = ClientContext> = Omit<
     ZeroOptions<Schema, undefined, C>,
@@ -28,6 +28,9 @@ export type ProviderProps<C extends ClientContext = ClientContext> = {
 };
 
 export const StartingZero = createContext(false);
+type Insert = { table: string; id: string };
+// Only identities of in-flight inserts. Row contents always belong to Zero.
+export const PendingInserts = createContext<readonly Insert[]>([]);
 
 /** Bind generated contracts once; native Zero retains ownership of its lifecycle. */
 export function createZeroProvider<C extends ClientContext = ClientContext>(
@@ -42,14 +45,31 @@ export function createZeroProvider<C extends ClientContext = ClientContext>(
     function Client({ children }: { children: ReactNode }) {
         const zero = useContext(ZeroContext) as Zero<Schema, undefined, C>;
         const [notice, setNotice] = useState('');
+        const [inserts, setInserts] = useState<readonly Insert[]>([]);
         useLayoutEffect(() => {
             clients.add(zero);
+            async function trackInsert(call: MutatorResult) {
+                const result = await call.client;
+                const visit = result.type === 'success' ? (result.data as MutationDestination) : undefined;
+                const row = visit?.kind === 'visit' ? visit.inserted : undefined;
+                if (!row) return;
+                setInserts((rows) => [...rows, row]);
+                try {
+                    await call.server;
+                } finally {
+                    setInserts((rows) => rows.filter((item) => item !== row));
+                }
+            }
             const release = mountFormSession({
                 actions: controllers.actions,
                 notify: setNotice,
                 invoke(name, input, route) {
                     const action = controllers.actions[name] as ControllerMutationBinding<unknown, unknown, Schema, C>;
-                    return zero.mutate(action.prepare(input, route, controllers.preparation));
+                    const call = zero.mutate(action.prepare(input, route, controllers.preparation));
+                    if (action.navigateAfter === 'local') {
+                        void trackInsert(call).catch(() => {}); // The submitting form owns errors and recovery.
+                    }
+                    return call;
                 },
             });
             return () => {
@@ -58,10 +78,10 @@ export function createZeroProvider<C extends ClientContext = ClientContext>(
             };
         }, [zero]);
         return (
-            <>
+            <PendingInserts.Provider value={inserts}>
                 {children}
                 {notice && <output data-zero-mutation-error="">{notice}</output>}
-            </>
+            </PendingInserts.Provider>
         );
     }
     function Session({ userID, context, auth, children }: ProviderProps<C>) {

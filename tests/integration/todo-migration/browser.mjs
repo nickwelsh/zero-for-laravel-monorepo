@@ -132,7 +132,15 @@ try {
     ])
         mkdirSync(join(root, path), { recursive: true });
     symlinkSync(resolve('node_modules'), join(root, 'node_modules'), 'dir');
-    copyFileSync(join(fixture, 'app.blade.php'), join(root, 'resources/views/app.blade.php'));
+    write(
+        'resources/views/app.blade.php',
+        readFileSync(join(fixture, 'app.blade.php'), 'utf8').replace(
+            '<script defer',
+            `<script>if (sessionStorage.blockSync) window.WebSocket = class extends WebSocket {
+            constructor() { super('ws://127.0.0.1:1'); }
+        };</script><script defer`,
+        ),
+    );
     copyFileSync(join(fixture, 'app.jsx'), join(root, 'app.jsx'));
     const baseline = readFileSync(join(fixture, 'forms.tsx'), 'utf8');
     const swapped = baseline
@@ -177,28 +185,77 @@ try {
     wait('input[name=title]');
     checkURL(filtered);
     if (artifacts) mkdirSync(artifacts, { recursive: true });
+    sql("INSERT INTO todos (id, title) VALUES (gen_random_uuid(), 'Keep this sibling')");
+    ab('wait', '--text', 'Keep this sibling');
+    // Reload the authorized Inertia document, but make native synchronization
+    // impossible in this document. The server page contains bindings, not rows.
+    // A row can render before Zero's asynchronous IndexedDB commit. Only call
+    // this a *warm* reload once the fixture row actually exists on disk.
+    await until(
+        () =>
+            ab(
+                'eval',
+                `
+        (async () => {
+            const request = req => new Promise((ok, fail) => { req.onsuccess = () => ok(req.result); req.onerror = fail; });
+            for (const {name} of await indexedDB.databases()) {
+                const db = await request(indexedDB.open(name));
+                try {
+                    for (const store of db.objectStoreNames) {
+                        const rows = await request(db.transaction(store).objectStore(store).getAll());
+                        if (JSON.stringify(rows).includes('Keep this sibling')) return true;
+                    }
+                } finally { db.close(); }
+            }
+            return false;
+        })()`,
+            ) === 'true',
+        'Zero did not persist the sibling',
+    );
+    ab('eval', 'sessionStorage.blockSync = "1"');
+    ab('reload');
+    ab('wait', '--text', 'Keep this sibling');
+    fact('Warm reload without Zero transport', { retained: 'Keep this sibling' });
+    screenshots('00-warm-reload');
+    ab('eval', 'delete sessionStorage.blockSync');
+    ab('reload');
+    ab('wait', '--text', 'Keep this sibling');
     if (recorder && artifacts) {
         run('node', [recorder, 'start', join(root, 'raw.mp4'), '--fps', '15']);
         recording = true;
     }
     const initialRequests = text('requests');
     const initialHistory = Number(ab('eval', 'history.length'));
+    ab(
+        'eval',
+        `window.accessFlashes = []; new MutationObserver(records => {
+        for (const r of records) for (const n of r.addedNodes) if (n.matches?.('[data-zero-access="unknown"]') || n.querySelector?.('[data-zero-access="unknown"]')) window.accessFlashes.push(location.pathname);
+    }).observe(document.querySelector('main'), {childList:true, subtree:true}); true`,
+    );
     fill('Review launch checklist');
     input('click', 'input[type=checkbox]');
     hold();
     submit();
     await arrived();
-    wait('[data-zero-access="unknown"]');
+    wait('[data-private]');
+    assert.equal(ab('get', 'text', 'h1'), 'Review launch checklist');
     const predicted = ab('get', 'url');
     assert.match(predicted.slice(base.length), /^\/todos\/[\da-f-]{36}$/);
-    assert.equal(ab('eval', 'window.todoShowMounts'), '0');
+    assert.equal(ab('eval', 'window.todoShowMounts'), '1');
+    assert.equal(ab('is', 'enabled', '[data-private] button[type=button]'), 'true');
+    const createdAt = ab('get', 'attr', '[data-private]', 'data-created');
+    assert.ok(Number.isFinite(Date.parse(createdAt)), 'Show must receive the decoded Zero creation timestamp');
+    assert.equal(ab('get', 'attr', '[data-private]', 'data-complete'), 'false');
     assert.equal(count('Review launch checklist'), '0');
     assert.equal(Number(ab('eval', 'history.length')), initialHistory + 1);
-    fact('Before ACK', { path: predicted.slice(base.length), privateMounts: 0, rows: 0 });
-    if (recording) input('hover', '[data-zero-access="unknown"]');
+    fact('Before ACK', { path: predicted.slice(base.length), showMounts: 1, createdAt, rows: 0 });
+    if (recording) input('hover', '[data-private] h1');
     screenshots('01-before-ack');
     release();
-    wait('[data-private]');
+    await until(() => count('Review launch checklist') === '1', 'Create did not commit');
+    wait('[data-private][data-complete=true]');
+    assert.equal(ab('eval', 'window.todoShowMounts'), '1', 'Confirmation remounted the editor');
+    assert.equal(ab('eval', 'window.accessFlashes.length'), '0', 'Access shell flashed during create');
     checkURL(predicted);
     assert.equal(Number(ab('eval', 'history.length')), initialHistory + 1);
     assert.equal(ab('get', 'text', 'h1'), 'Review launch checklist');
@@ -210,27 +267,39 @@ try {
         pageGets: 0,
     });
     screenshots('02-accepted');
-    if (recording) {
-        input('hover', '[data-private] h1');
-        run('node', [recorder, 'stop', join(artifacts, 'create-todo.mp4')]);
-        recording = false;
-    }
+    if (recording) input('hover', '[data-private] h1');
     fill('Reviewed launch checklist');
     submit();
     await until(() => count('Reviewed launch checklist') === '1', 'Bound edit did not commit');
     ab('wait', '--text', 'Reviewed launch checklist');
     checkURL(predicted);
     hold();
-    ab('find', 'role', 'button', 'click', '--name', 'Delete todo');
+    input('click', '[data-private] button[type=button]');
     await arrived();
-    ab('wait', '--fn', '!document.querySelector("[data-private]")');
-    checkURL(predicted);
-    assert.equal(count('Reviewed launch checklist'), '1');
-    release();
     wait('input[type=checkbox]');
     checkURL(`${base}/todos`);
-    assert.equal(count('Reviewed launch checklist'), '0');
-    fact('Direct delete (server-timed)', { beforeACK: predicted.slice(base.length), afterACK: '/todos', rows: 0 });
+    assert.equal(ab('get', 'text', 'ul'), 'Keep this sibling');
+    screenshots('05-delete-before-ack');
+    assert.equal(count('Reviewed launch checklist'), '1');
+    fill('My next draft');
+    ab('eval', 'window.deleteForm = document.querySelector("form"); true');
+    release();
+    await until(() => count('Reviewed launch checklist') === '0', 'Delete did not commit');
+    sql("UPDATE todos SET title='Sibling after commit' WHERE title='Keep this sibling'");
+    ab('wait', '--text', 'Sibling after commit');
+    checkURL(`${base}/todos`);
+    assert.equal(
+        ab('eval', 'window.accessFlashes.length'),
+        '0',
+        `Access shell flashed during delete: ${ab('eval', 'window.accessFlashes')}`,
+    );
+    assert.equal(ab('eval', 'window.deleteForm === document.querySelector("form")'), 'true');
+    assert.equal(ab('get', 'value', 'input[name=title]'), 'My next draft');
+    fact('Optimistic delete', { beforeACK: '/todos', afterACK: '/todos', sibling: 'Keep this sibling', rows: 0 });
+    if (recording) {
+        run('node', [recorder, 'stop', join(artifacts, 'optimistic-todos.mp4')]);
+        recording = false;
+    }
 
     ab('find', 'role', 'link', 'click', '--name', 'Todos');
     ab('wait', '--url', filtered);
@@ -252,7 +321,7 @@ try {
     hold();
     submit();
     await arrived();
-    wait('[data-zero-access="unknown"]');
+    wait('[data-private]');
     assert.notEqual(ab('get', 'url'), filtered);
     release();
     wait('[role=alert]');
@@ -274,7 +343,7 @@ try {
     hold();
     submit();
     await arrived();
-    wait('[data-zero-access="unknown"]');
+    wait('[data-private]');
     ab('find', 'role', 'link', 'click', '--name', 'Notes');
     ab('wait', '--text', 'My notes');
     const notesResults = text('results').length;
@@ -300,7 +369,7 @@ try {
     hold();
     submit();
     await arrived();
-    wait('[data-zero-access="unknown"]');
+    wait('[data-private]');
     assert.match(ab('get', 'url').slice(base.length), /^\/todos\/[\da-f-]{36}$/);
     ab('find', 'role', 'link', 'click', '--name', 'Notes');
     ab('wait', '--text', 'My notes');
@@ -335,6 +404,8 @@ try {
         noViewAny: '404 without form',
         storedRow: 1,
     });
+    run('php', [app, 'restore-viewAny']);
+    ab('wait', '--text', 'Finished on the server');
     assert.doesNotMatch(text('requests'), /^(POST|PATCH|PUT|DELETE) \/todos/m);
     if (artifacts) writeFileSync(join(artifacts, 'observations.json'), JSON.stringify(facts, null, 2));
     console.log('Todo browser proof passed.');

@@ -58,7 +58,7 @@ final class TodoController
         return back();
     }
 
-    #[ZeroMutation(navigateAfter: 'server')]
+    #[ZeroMutation]
     public function destroy(Todo $todo): RedirectResponse
     {
         $this->authorize('delete', $todo);

@@ -18,7 +18,12 @@ import { columnValue, encodeDate, freeze } from './validation';
 export type NavigateAfter = 'local' | 'server';
 export type MutationDestination =
     | { kind: 'stay' }
-    | { kind: 'visit'; route: string; parameters: Record<string, string | number> };
+    | {
+          kind: 'visit';
+          route: string;
+          parameters: Record<string, string | number>;
+          inserted?: { table: string; id: string };
+      };
 
 /** Compiler-owned JSON nodes. Never accept these from mutation arguments. */
 export type MutationNode =
@@ -255,6 +260,7 @@ export async function runControllerMutation<S extends Schema>(
     const native = tx as unknown as Transaction<Schema>;
     const locals: Record<string, unknown> = Object.create(null);
     const records = new WeakMap<object, ModelContract>();
+    const inserted = new WeakSet<object>();
     let itemKey: string | undefined;
     const modelFor = (type: string) => {
         const model = models[type.split('\\').at(-1)!];
@@ -321,10 +327,14 @@ export async function runControllerMutation<S extends Schema>(
             }
             case 'visit': {
                 const entries: [string, string | number][] = [];
+                let created: { table: string; id: string } | undefined;
                 for (const parameter of node.parameters) {
                     let value = await e(parameter.value);
                     if (parameter.model) {
                         if (!parameter.predictKey || !value || typeof value !== 'object') return undefined;
+                        const model = records.get(value);
+                        if (inserted.has(value) && model?.key === parameter.predictKey && node.parameters.length === 1)
+                            created = { table: model.table, id: String(Reflect.get(value, model.key)) };
                         value = Reflect.get(value, parameter.predictKey);
                     }
                     if (
@@ -338,6 +348,7 @@ export async function runControllerMutation<S extends Schema>(
                     kind: 'visit',
                     route: node.route,
                     parameters: Object.fromEntries(entries),
+                    ...(created ? { inserted: created } : {}),
                 } satisfies MutationDestination;
             }
             case 'safeExcept':
@@ -467,6 +478,7 @@ export async function runControllerMutation<S extends Schema>(
                         row[field] = encodeDate(new Date(args.prepared.timestamp), model.columns[field]!.dateFormat);
                 await native.mutate[model.table]!.insert(row);
                 records.set(row, model);
+                inserted.add(row);
                 return row;
             }
             case 'reload': {

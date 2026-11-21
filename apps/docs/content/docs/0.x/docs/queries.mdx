@@ -34,17 +34,43 @@ pages. These require deterministic ordering. Raw cursor values retain storage
 precision; decoded `Date` values are not used to reconstruct cursor boundaries.
 Relationship queries retain native Zero semantics, including junction restrictions.
 
-Normal route model binding still runs its database lookup. Returning an eligible
-bound model as an Inertia prop converts it into a live singular query after the
-controller executes. It does not eliminate Laravel binding or its authorization.
-
-The live prop is absent from serialized Inertia page props, including initial
-HTML. Reserved page metadata carries its identity. The [React adapter](./react.mdx)
-injects its live value into the component; ordinary props remain ordinary props.
-
 Generation supports a checked PHP subset around query declarations. Unknown calls,
 unsupported control flow, or ambiguous output fail with source diagnostics. It
 does not run arbitrary controllers to guess what queries they might return.
+
+## Return a route-bound model
+
+```php
+public function show(Todo $todo): \Inertia\Response
+{
+    $this->authorize('view', $todo);
+
+    return Inertia::render('todos/show', ['todo' => $todo]);
+}
+```
+
+The type `Todo` identifies the registered model; `$todo` identifies the route
+parameter. The compiler matches the returned variable to the unconditional `view`
+guard on that same variable. Laravel resolves the policy. A protected bound prop
+requires this instance guard even when the model uses `VisibleToCurrentUser`.
+
+The browser gets a named query whose local body is:
+
+```ts
+({ args }) => zql['todos'].where('id', args['todo']).one();
+```
+
+The matching PHP registration builds
+`Todo::zeroQuery()->where('id', $args['todo'])->one()->guardedBy(request()->user(), 'view')`.
+An initial HTTP visit still runs Laravel route binding and authorization. Later
+server subscriptions recheck the bound route and Gate and include the permission
+condition in the stream. The local ID lookup alone cannot grant access to a row.
+
+The row is absent from serialized Inertia props, even in the initial HTML.
+The [React adapter](./react.mdx) binds the query to the `todo` prop. Show renders
+`todo.data.title` whether the row came from a pending local insert or from sync.
+See [when the permission watch starts](./authorization.mdx#when-the-permission-watch-starts)
+for warm reloads and revocation.
 
 ## Standalone query classes
 

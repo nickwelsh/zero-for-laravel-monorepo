@@ -57,6 +57,16 @@ final readonly class QueryProcessor
                     Input::fail('args', 'Expected one argument object.');
                 }
 
+                // A guarded singleton can exist only in the optimistic replica.
+                // There is no server row to bind or grant. Never use any client
+                // argument to select a table, row, or predicate for this view.
+                if ($request['name'] === '__zero_pending_insert') {
+                    $result['ast'] = ['table' => 'permission_access_results', 'where' => ['type' => 'or', 'conditions' => []]];
+                    $queries[] = $result;
+
+                    continue;
+                }
+
                 if ($request['name'] === AccessQueries::STATUS) {
                     $result['ast'] = resolve(AccessQueries::class)->transform($request['name'], $request['args'][0], $context);
                     $queries[] = $result;

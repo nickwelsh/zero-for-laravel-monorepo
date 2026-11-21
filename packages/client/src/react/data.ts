@@ -1,4 +1,5 @@
 import { useQuery, useZero, useConnectionState, type UseQueryOptions } from '@rocicorp/zero/react';
+import { defineQueries, defineQuery } from '@rocicorp/zero';
 import type { Schema, QueryResultDetails, ConnectionState, QueryRequest, ReadonlyJSONValue } from '@rocicorp/zero';
 import { useContext, useMemo, useState } from 'react';
 import type { ClientContext } from '../contract';
@@ -58,6 +59,7 @@ export interface Data<T> {
 
 export interface ReadSelection {
     readonly key: string;
+    readonly entity?: { table: string; key: string };
     readonly pageSize?: number | undefined;
     readonly cursorFields?: readonly string[] | undefined;
     readonly one: boolean;
@@ -107,6 +109,14 @@ type NativeRequest = QueryRequest<
 >;
 
 export function useData<Q extends ReadSelection>(input: Q, options: UseQueryOptions = {}): Data<SelectionData<Q>> {
+    return useSelectionData(input, options, false);
+}
+
+export function useSelectionData<Q extends ReadSelection>(
+    input: Q,
+    options: UseQueryOptions,
+    pendingInsert: boolean,
+): Data<SelectionData<Q>> {
     type Result = SelectionData<Q>;
     const zero = useZero<Schema, undefined, ClientContext>();
     const connection = useConnectionState();
@@ -149,7 +159,25 @@ export function useData<Q extends ReadSelection>(input: Q, options: UseQueryOpti
                   },
         [request, generation],
     );
-    const [raw, details] = useQuery(authorizedRequest, generation === undefined ? options : { ...options, ttl: 0 });
+    // Same generated ZQL, different wire identity: there is nothing for Laravel
+    // to bind until the insert commits. This subscription downloads no rows.
+    const local = useMemo(
+        () =>
+            pendingInsert
+                ? defineQueries({
+                      __zero_pending_insert: defineQuery(({ ctx }: { args: ReadonlyJSONValue; ctx: ClientContext }) =>
+                          request.query.fn({ args: request.args, ctx }),
+                      ),
+                  })['__zero_pending_insert'](selection.key)
+                : undefined,
+        [pendingInsert, request, selection.key],
+    );
+    const [raw, nativeDetails] = useQuery(
+        local ?? authorizedRequest,
+        generation === undefined && !local ? options : { ...options, ttl: 0 },
+    );
+    // An empty wire subscription completing does not confirm the local write.
+    const details = local && nativeDetails.type !== 'error' ? ({ type: 'unknown' } as const) : nativeDetails;
     const enabled = options.enabled ?? true;
     const [committed, setCommitted] = useState({ scope, complete: false });
     if (committed.scope !== scope || (enabled && details.type === 'complete' && !committed.complete)) {
@@ -192,6 +220,7 @@ export function useData<Q extends ReadSelection>(input: Q, options: UseQueryOpti
         (generation === undefined || complete) &&
         ((committed.scope === scope && committed.complete) ||
             complete ||
+            details.type === 'cached' ||
             (Array.isArray(data) ? data.length > 0 : data !== undefined));
     const error = decodedResult.error ?? (details.type === 'error' ? new Error(details.error.message) : undefined);
     const status: DataStatus = !enabled

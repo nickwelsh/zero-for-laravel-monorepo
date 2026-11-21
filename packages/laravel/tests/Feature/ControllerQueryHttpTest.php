@@ -32,6 +32,16 @@ use ZeroForLaravel\Tests\ProtectedHttpTestCase as HttpTestCase;
 
 uses(HttpTestCase::class);
 
+test('an optimistic singleton subscription never selects any server rows', function (): void {
+    /** @var HttpTestCase $this */
+    $this->actingAs(OwnerUser::findOrFail('alice'))->withHeader('X-Api-Key', 'private-test-secret');
+    $this->postJson('/zero/query', ['transform', [
+        ['id' => 'local', 'name' => '__zero_pending_insert', 'args' => [['table' => 'tasks', 'id' => 'another-row']]],
+    ]])->assertOk()->assertJsonPath('queries.0.ast', [
+        'table' => 'permission_access_results', 'where' => ['type' => 'or', 'conditions' => []],
+    ]);
+});
+
 test('standalone queries authorize and validate each native invocation without registering routes', function (): void {
     /** @var HttpTestCase $this */
     $this->discover([...$this->models(), TaskQueries::class]);

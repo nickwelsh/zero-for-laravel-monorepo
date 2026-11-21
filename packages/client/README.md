@@ -17,9 +17,9 @@ query bindings in the page resolver:
 
 ```tsx
 import { createInertiaAdapter } from '@nickwelsh/zero-for-laravel/inertia';
-import { bindings } from '@/zero/generated.queries';
+import { bindings, navigation } from '@/zero/generated.queries';
 
-const livePages = createInertiaAdapter(bindings);
+const livePages = createInertiaAdapter(bindings, { navigation });
 // Inside createInertiaApp's resolver, after loading the page component:
 return livePages.wrap(module.default, page);
 ```
@@ -72,7 +72,7 @@ with `actions` from the generated provider. Outside React, construct Zero with
 `mutators` and use `actions` from the same `createControllerMutationBindings` call.
 Infer business input and decoded server output with `InferMutationInput<typeof create>`
 and `InferMutationResult<typeof create>`. Native results remain success/error envelopes;
-parse successful server data with `create.serverResultSchema` when bypassing the hook.
+for this JSON-returning action, parse successful server data with `create.serverResultSchema`.
 
 Use a bound route argument map for update/delete actions. The hook exposes pending,
 local application, server acceptance, field errors, and committed-result decoding
@@ -81,8 +81,10 @@ errors separately. Unmounting does not cancel or undo an enqueued native mutatio
 For native lifecycle control, obtain a binding from the generated binding factory
 and call `binding.prepare(input, routeArguments, preparation)`, then
 `zero.mutate(request)`. Await `.client` for local prediction and `.server` for the
-authoritative outcome. Parse data with `clientResultSchema` or `serverResultSchema`;
-the two contracts can intentionally differ. Preparation captures IDs and time once.
+authoritative outcome. For data-returning actions, parse with `clientResultSchema` or
+`serverResultSchema`; the two contracts can differ. For redirect actions the raw
+result carries navigation instructions, not the public void result. Use the form
+or `.mutate()` for automatic navigation. Preparation captures IDs and time once.
 
 These **prepared fields** are separate from required form input. Model traits select
 UUID/ULID generation and Eloquent timestamp settings select the time columns.
@@ -93,6 +95,15 @@ apps pass projections first: `createZeroBindings(projections, preparation)`.
 Custom optimism is passed to the generated binding factory; disabled optimism is
 an explicit no-op client recipe using the same native protocol. Unsupported code
 in generated mode fails generation rather than silently disabling optimism.
+
+## Migrating Inertia forms
+
+Import `Form` from `@nickwelsh/zero-for-laravel/react` and the controller from
+the generated Zero module instead of Wayfinder. Keep `<Form {...TodoController.store.form()}>`
+and your named controls. For redirect actions the public result is void: the form
+or `.mutate()` handles the navigation instruction. A rejected create rolls back
+in Zero; if you are still on the predicted page, the form restores the submitted
+controls and field errors at the original URL. See the [form migration guide](../../apps/docs/content/docs/0.x/docs/mutations.mdx#migrate-an-inertia-form-by-changing-two-imports).
 
 ## Formbraid forms
 

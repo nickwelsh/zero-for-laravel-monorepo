@@ -104,10 +104,12 @@ optimistic projection: Zero can replay it more than once.
 Supply route arguments for bound actions. For direct native control, prepare once
 with a binding from `createControllerMutationBindings`, using
 `binding.prepare(input, routeArguments, preparation)`, then call `zero.mutate(request)`.
-`.client` means local application; `.server` means authoritative outcome. Parse
-result data with the generated client/server result schemas. `void`, explicit
-null, and structured JSON remain distinct. Model and HTTP-response serialization
-are not implicit result contracts.
+`.client` means local application; `.server` means authoritative outcome. For
+data-returning actions, parse result data with the generated client/server schemas.
+For redirect actions the raw native result carries an internal navigation
+instruction, not a value to pass to the public void result schema. Use the form
+or `.mutate()` below to handle it. Models and HTTP responses are not implicit
+result contracts.
 
 The hook tracks pending state, field errors, local application, server acceptance,
 and committed-but-undecodable results separately. Unmounting the hook stops its
@@ -165,7 +167,8 @@ Inertia routes for forms that need those features.
 public function store(StoreTodoRequest $request): RedirectResponse
 {
     $this->authorize('create', Todo::class);
-    $todo = Todo::create($request->safe()->except(['open_after_saving']));
+    $attributes = $request->safe()->except(['open_after_saving']);
+    $todo = Todo::create($attributes);
 
     return $request->boolean('open_after_saving')
         ? to_route('todos.show', ['todo' => $todo])
@@ -173,26 +176,64 @@ public function store(StoreTodoRequest $request): RedirectResponse
 }
 ```
 
+For this example, declare `title` as a required string and `open_after_saving`
+as an optional boolean in the FormRequest. Keep `title` writable on the model;
+the checkbox controls navigation and is never a Todo attribute.
+
+`zero:generate` reads the controller source and checks the types of the request
+and model. It emits the same operations into `generated.mutations.ts` and the
+PHP mutation registration. For this action they are, in execution order:
+
+1. `guard`: Laravel runs `Gate::authorize('create', Todo::class)`. The browser
+   does not evaluate the policy to decide whether it can predict the insert.
+2. `safeExcept`: copy the validated fields except `open_after_saving` into
+   `attributes`. Generation rejects unknown or dynamic exclusion keys.
+3. `create`: insert those attributes into `todos` using the ID and timestamps
+   prepared for this submission. The generated `s0` names this create instruction,
+   not a row. Each submission gets its own ID; replay uses the same one.
+4. `redirectWhen`: a checked box yields `visit` with route `todos.show` and the
+   new model's `id`; an unchecked box yields `stay`. The compiler checks the
+   literal GET route name and its parameters. A custom request hook that can
+   change the boolean makes the client wait for Laravel to choose the branch.
+
 `back()` means stay: it does not go back in history or drop query parameters.
 `to_route()` names a registered GET route. The redirect is an instruction, not
 an HTTP response, flash payload, or public return value. The form and `.mutate()`
-observe it in the originating tab. A predictable local write can open the show
-URL before the server accepts it. A guarded destination shows a pending shell,
-not the new private row. On acceptance the guarded page starts its authorized
-subscriptions; pages that need server props use a GET. Neither pushes the same
+observe it in the originating tab. When a generated create redirects to the new
+model's primary key, the normal show page reads that row from Zero immediately.
+Use the generated `navigation` with `createInertiaAdapter`. There is no second
+component or prop built from the form. The local query observes the prepared ID,
+timestamps and defaults, and switches to the authorized server stream after the write.
+Returning to a previously synchronized list after delete reads the same replica;
+it does not require keeping the list mounted. Zero reconciles either write with Laravel.
+Pages that need server props use a GET. Neither path pushes the same
 history entry twice. A server-only key, missing local row or non-predictable
 destination waits for the authoritative result.
 Use `#[ZeroMutation(navigateAfter: 'server')]` to delay **navigation** for a
-sensitive action without disabling its optimistic write.
+sensitive action without disabling its optimistic write. See [how Show reads the
+new row](./queries.mdx#return-a-route-bound-model) and [when its permission watch
+starts](./authorization.mdx#when-the-permission-watch-starts).
 
-If Laravel rejects the write while the submission still owns its speculative
-page, the form returns to its original URL with the draft and errors. If you
-have navigated elsewhere, it leaves the new page in place and shows a status
-message. To supply your own notification, handle the window event
-`zero:mutation-error` and call `event.preventDefault()`. Drafts live
-only in memory for the same session; reloading does not rerun the submission.
-Pending while disconnected does not mean rejected. JSON and void controller
-results continue to work as before.
+### What happens if Laravel rejects the create?
+
+Zero rolls back the optimistic insert. The `Form` restores the draft separately:
+it captured the named controls as `FormData` _before_ `transform` or boolean
+normalization. That is why it can restore a checkbox that was never in the row.
+
+- **Still on the predicted Show page:** the adapter replaces that history entry
+  with the exact submit URL, including its filters. On mount the matching form
+  consumes the draft once, restores the controls and displays the server's field
+  errors. The original defaults still apply, so the user can edit or reset the draft.
+- **Stayed on the index:** the form is still mounted. It displays the error in
+  place; there is no draft handoff or history change.
+- **Already navigated elsewhere:** the adapter leaves the current page alone and
+  reports “A previous change could not be saved.” Handle `zero:mutation-error`
+  on `window` and call `event.preventDefault()` to replace the default notice.
+
+The handoff lives in the current provider's memory and matches the original URL,
+controller action and bound route arguments. It does not survive a full reload or
+retry the submission. A disconnected, pending write is not a rejection. If the
+write committed but the client could not apply the response, do not resubmit it.
 
 ## Formbraid 0.3
 

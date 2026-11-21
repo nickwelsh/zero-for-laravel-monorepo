@@ -252,10 +252,14 @@ Publish `permissions-config` and `permissions-migrations`, migrate, configure
 resolved by Laravel, not a second configuration map.
 
 `permissions.denied_status` defaults to 403; choose 404 for concealment. Policy
-responses can override it with `asNotFound()` or `asNotAuthorized()`. Access-watch
-controls live under `permissions.access`: maximum 32 active watches per actor,
-300-second renewable leases, 20-second streaming connections and 250-millisecond
-revision polling by default. `middleware` defaults to `['web', 'auth']`; use the
-application's browser authentication guard and retain CSRF protection on writes.
-Permission predictions are opt-in through `permissions.predictions` safe attribute
-and ability allowlists. See [authorization](./authorization.mdx).
+responses can override it with `asNotFound()` or `asNotAuthorized()`.
+`permissions.access.max_bindings` limits the number of checks accepted per batch
+(default and maximum 32). `permissions.access.abilities` allowlists the abilities
+available to explicit `usePermission` calls; it defaults to empty. A generated
+page guard uses its registered query instead and needs no entry in this list.
+See [when the permission watch starts](./authorization.mdx#when-the-permission-watch-starts)
+for renewal and expiry. There is no browser polling interval to configure.
+
+Advisory predictions are separate. Opt in through `permissions.predictions`
+ability and attribute allowlists. `permissions.predictions.middleware` defaults
+to `['web', 'auth']` for the optional predictions endpoint.
