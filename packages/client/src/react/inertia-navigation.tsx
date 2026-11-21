@@ -6,6 +6,7 @@ import type { ClientContext } from '../contract';
 import { selectionKey } from '../validation';
 import type { ReadSelection } from './data';
 import { paginatedArgs } from './pagination-url';
+import type { ScrollHistory } from './scroll-context';
 import { StartingZero } from './provider';
 import type { AccessContract } from './access';
 import { installMutationNavigation } from './mutation-navigation';
@@ -13,6 +14,7 @@ import { installMutationNavigation } from './mutation-navigation';
 export interface PageBinding {
     query: string;
     args: Record<string, unknown>;
+    scroll?: ScrollHistory;
     access?: AccessContract;
     /** Client-only shell until authoritative arguments arrive. Never subscribed. */
     pending?: boolean;

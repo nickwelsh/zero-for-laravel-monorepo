@@ -8,9 +8,15 @@ import { liveQuery, withQueryInputs } from '../live-query';
 import { z } from 'zod';
 import { router } from '@inertiajs/react';
 import { useData, QueryAccessError, type Data, type QueryInputs } from './data';
-import { createInertiaAdapter, useLiveProps, withoutLiveProps } from './inertia';
+import {
+    createInertiaAdapter,
+    InfiniteScroll,
+    type InfiniteScrollRef,
+    useLiveProps,
+    withoutLiveProps,
+} from './inertia';
 import { AccessBoundary, AccessGeneration, usePermission } from './access';
-import { StrictMode, useContext } from 'react';
+import { createRef, StrictMode, useContext } from 'react';
 
 const native = vi.hoisted(() => ({
     results: new Map<
@@ -202,6 +208,11 @@ it('opens a cold scroll page without showing the prefix, then grows just its dis
     expect(result.current.currentPage).toBe(3);
     expect(result.current.stopReason).toBe('maximum');
     expect(result.current.exhausted).toBe(false);
+    put({ __window: 7 }, prefix);
+    expect(result.current.hasPreviousPage).toBe(true);
+    act(() => result.current.previousPage());
+    expect(result.current.data.map((row) => row.id)).toEqual(['a', 'b', 'c', 'd', 'e', 'f']);
+    expect(result.current.hasPreviousPage).toBe(false);
 });
 
 it('hydrates two independent page parameters before subscribing and restores Back/Forward snapshots', () => {
@@ -272,6 +283,74 @@ it('hydrates two independent page parameters before subscribing and restores Bac
     } finally {
         adapter.dispose();
         push.mockRestore();
+        replace.mockRestore();
+        window.history.replaceState(null, '', original);
+    }
+});
+
+it('restores a named InfiniteScroll range independently of the page in the preserved URL', () => {
+    const adapter = createInertiaAdapter({
+        feed: (args: Parameters<typeof paginated.tasks>[0]) =>
+            liveQuery(paginated.tasks, args, definitions, 'Task', false, 2, undefined, 9, {
+                mode: 'scroll',
+                name: 'feed_page',
+            }),
+    });
+    const original = window.location.href;
+    const url = '/list?feed_page=3&keep=yes#mine';
+    window.history.replaceState(null, '', url);
+    const page = {
+        component: 'List',
+        url,
+        props: { __zero: { version: 1, mode: 'replace', bindings: { lists: { query: 'feed', args: {} } } } },
+    };
+    const prefix = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i'].map((id) => ({ id }));
+    put({ __page: 3, __window: 7 }, prefix.slice(0, 7));
+    put({ __page: 2, __window: 7 }, prefix.slice(0, 7));
+    put({ __page: 2, __window: 9 }, prefix);
+    const ref = createRef<InfiniteScrollRef>();
+    const replace = vi.spyOn(router, 'replace').mockImplementation(() => {});
+    const Page = ({ lists }: { lists: Data<readonly { id: string }[]> }) => (
+        <InfiniteScroll
+            data="lists"
+            as="nav"
+            ref={ref}
+            manualAfter={2}
+            preserveUrl
+            next={({ manualMode }) => manualMode && 'manual'}
+        >
+            {lists.data.map(({ id }) => (
+                <span key={id}>{id}</span>
+            ))}
+        </InfiniteScroll>
+    );
+    const Wrapped = adapter.wrap(Page, page);
+    type Props = Parameters<typeof Page>[0];
+    try {
+        const view = render(<Wrapped {...(page.props as unknown as Props)} />);
+        expect(screen.getByRole('navigation').textContent).toBe('ef');
+        act(() => ref.current!.fetchPrevious());
+        expect(screen.getByRole('navigation').textContent).toBe('cdef');
+        act(() => ref.current!.fetchNext());
+        expect(screen.getByRole('navigation').textContent).toBe('cdefgh');
+        expect(screen.getByText('manual')).toBeDefined();
+        expect(ref.current!.hasNext()).toBe(false);
+        expect(ref.current!.hasPrevious()).toBe(true);
+        const visit = replace.mock.lastCall![0];
+        expect(visit.url).toBe(url);
+        if (typeof visit.props !== 'function') throw new Error('Missing history snapshot');
+        const warm = visit.props(page.props, {});
+        expect(JSON.stringify(warm)).not.toContain('"id":');
+        view.unmount();
+        native.requests.length = 0;
+        render(<Wrapped {...(warm as unknown as Props)} />);
+        expect(screen.getByRole('navigation').textContent).toBe('cdefgh');
+        expect(screen.getByText('manual')).toBeDefined();
+        expect(new Set(native.requests.map((req) => JSON.stringify(req.args)))).toEqual(
+            new Set(['{"__page":2,"__window":9}']),
+        );
+    } finally {
+        adapter.dispose();
         replace.mockRestore();
         window.history.replaceState(null, '', original);
     }

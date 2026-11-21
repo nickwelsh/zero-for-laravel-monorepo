@@ -68,15 +68,29 @@ export function livePagination(
 
 export type LivePagination = ReturnType<typeof livePagination>;
 
+export function scrollPosition(
+    range: LivePagination['initial'],
+    size: number,
+    side: 'previous' | 'next',
+): PagePosition {
+    return side === 'next'
+        ? { ...range.wire, __window: range.end + size + 1 }
+        : { __page: (range.wire['__page'] ?? 1) - 1, __window: range.end + 1 };
+}
+
 /** Reverse queries arrive in traversal order; use raw rows, before casts or display reversal. */
 export function pageSteps(
-    mode: PaginationDeclaration['mode'],
+    { mode, size }: LivePagination,
     range: LivePagination['initial'],
     rows: readonly unknown[] | undefined,
     cursor: (row: unknown) => Readonly<Record<string, unknown>>,
 ) {
     let next: PagePosition | undefined;
     let previous: PagePosition | undefined;
+    if (mode === 'scroll') {
+        if (rows && rows.length > range.end && !range.capped) next = scrollPosition(range, size, 'next');
+        if ((range.wire['__page'] ?? 1) > 1) previous = scrollPosition(range, size, 'previous');
+    }
     if (mode === 'numbered') {
         if (rows && rows.length > range.end && !range.capped) next = { __page: range.page + 1 };
         if (range.page > 1) previous = { __page: range.page - 1 };

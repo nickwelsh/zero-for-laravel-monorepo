@@ -257,8 +257,8 @@ export function useSelectionData<Q extends ReadSelection>(
     const capped = range?.capped ?? limit >= max;
     const ready = enabled && !error && complete;
     const steps =
-        pagination && range && pagination.mode !== 'scroll'
-            ? pageSteps(pagination.mode, range, ready && Array.isArray(raw) ? raw : undefined, selection.cursor!)
+        pagination && range
+            ? pageSteps(pagination, range, ready && Array.isArray(raw) ? raw : undefined, selection.cursor!)
             : undefined;
     function move(position: PagePosition, history: 'push' | 'replace') {
         if (!pagination || !ready) return;
@@ -307,8 +307,8 @@ export function useSelectionData<Q extends ReadSelection>(
                           capped
                       )
                           return;
-                      if (pagination && range) {
-                          move({ ...range.wire, __window: limit + pagination.size + 1 }, 'replace');
+                      if (steps) {
+                          if (steps.next) move(steps.next, 'replace');
                           return;
                       }
                       setPage((current) =>
@@ -357,7 +357,7 @@ export function useSelectionData<Q extends ReadSelection>(
         isChangingPage: (pagination?.mode === 'numbered' || selection.cursorFields !== undefined) && !complete,
         nextPage: () => {
             if (steps) {
-                if (steps.next) move(steps.next, 'push');
+                if (steps.next) move(steps.next, pagination?.mode === 'scroll' ? 'replace' : 'push');
                 return;
             }
             if (selection.cursorFields === undefined || infinite?.hasMore !== true || !Array.isArray(raw)) return;
@@ -370,7 +370,7 @@ export function useSelectionData<Q extends ReadSelection>(
         },
         previousPage: () => {
             if (steps) {
-                if (steps.previous) move(steps.previous, 'push');
+                if (steps.previous) move(steps.previous, pagination?.mode === 'scroll' ? 'replace' : 'push');
                 return;
             }
             if (selection.cursorFields === undefined || !enabled || !complete || error) return;

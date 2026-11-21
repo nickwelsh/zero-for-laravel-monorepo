@@ -25,7 +25,12 @@ function decodeCursor(name: string, value: string): PagePosition {
     }
 }
 
-export function paginatedArgs(args: Record<string, unknown>, pagination: LivePagination, url: URL) {
+export function paginatedArgs(
+    args: Record<string, unknown>,
+    pagination: LivePagination,
+    url: URL,
+    scrollPage?: number,
+) {
     const { mode, name } = pagination;
     const values = url.searchParams.getAll(name);
     if (values.length > 1 || [...url.searchParams.keys()].some((field) => field.startsWith(`${name}[`)))
@@ -37,7 +42,8 @@ export function paginatedArgs(args: Record<string, unknown>, pagination: LivePag
         if (value !== undefined && !/^[1-9]\d*$/u.test(value)) fail(name, 'Expected a positive page number.');
         const page = value === undefined ? 1 : Number(value);
         // A warm history entry remembers the start of the expanded scroll range. A cold URL has only the end.
-        if (page === pagination.initial.page) return args;
+        if (page === (mode === 'scroll' ? (scrollPage ?? pagination.initial.page) : pagination.initial.page))
+            return args;
         position = { __page: page };
     }
     return { ...withoutPosition(args), ...pagination.range(position).wire };

@@ -1,8 +1,16 @@
 import { router } from '@inertiajs/react';
 import { inertiaURLAdapter, inertiaURLVisit } from './inertia-url';
 import { paginatedArgs, writePagination } from './pagination-url';
+import { NamedScroll, ScrollWindow, type ScrollHistory } from './scroll-context';
 import { withoutPosition, type PagePosition } from '../pagination';
 export { inertiaURLAdapter } from './inertia-url';
+export { InfiniteScroll } from './infinite-scroll';
+export type {
+    InfiniteScrollProps,
+    InfiniteScrollRef,
+    InfiniteScrollSlotProps,
+    InfiniteScrollActionSlotProps,
+} from './infinite-scroll';
 import {
     createContext,
     createElement,
@@ -53,6 +61,12 @@ export function useLiveProps<P extends object>(): P {
     return props as P;
 }
 
+function ordinal(value: unknown, min: number) {
+    if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < min)
+        throw new Error('Invalid scroll history.');
+    return value;
+}
+
 function metadata(input: unknown): Metadata {
     if (input === undefined) return { version: 1, mode: 'replace', bindings: {} };
     const source = object(input, '__zero');
@@ -87,9 +101,19 @@ function metadata(input: unknown): Metadata {
                     return [field, choices as (string | number)[]];
                 }),
             );
+            const scroll = binding.scroll === undefined ? undefined : object(binding.scroll, 'scroll history');
             bindings[prop] = {
                 query: binding.query,
                 args: object(binding.args, 'args'),
+                ...(scroll
+                    ? {
+                          scroll: {
+                              viewed: ordinal(scroll.viewed, 1),
+                              urlPage: ordinal(scroll.urlPage, 1),
+                              count: ordinal(scroll.count, 0),
+                          },
+                      }
+                    : {}),
                 ...(access
                     ? {
                           access: {
@@ -236,7 +260,13 @@ function InputSubscription({
     binding: Binding;
     factory: (args: unknown) => ReadSelection;
     starting: boolean;
-    synchronize: (args: Record<string, unknown>, next: ReadSelection, history?: 'push' | 'replace') => boolean;
+    synchronize: (
+        args: Record<string, unknown>,
+        next: ReadSelection,
+        history?: 'push' | 'replace',
+        scroll?: ScrollHistory,
+        writePage?: number,
+    ) => boolean;
     prop: string;
     access: AccessOptions;
     replica: boolean;
@@ -246,15 +276,24 @@ function InputSubscription({
     const [stored, setStored] = useState(() => ({
         source,
         args: binding.args,
+        scroll: binding.scroll,
+        revision: 0,
         initial: binding.args,
         pending: [] as string[],
     }));
     let state = stored;
     if (stored.source !== source) {
-        const acknowledgement = stored.pending.indexOf(selectionKey(binding.args));
+        const acknowledgement = stored.pending.indexOf(selectionKey([binding.args, binding.scroll]));
         state =
             acknowledgement === -1
-                ? { source, args: binding.args, initial: binding.args, pending: [] }
+                ? {
+                      source,
+                      args: binding.args,
+                      scroll: binding.scroll,
+                      revision: stored.revision + 1,
+                      initial: binding.args,
+                      pending: [],
+                  }
                 : { ...stored, source, pending: stored.pending.slice(acknowledgement + 1) };
         setStored(state);
     }
@@ -272,11 +311,19 @@ function InputSubscription({
         replica && binding.access && binding.access.scope !== 'page' && selection.one && routeIds.length === 1
             ? inserts.find((row) => row.table === selection.entity?.table && row.id === routeIds[0])?.id
             : undefined;
-    function commit(before: typeof state, args: Record<string, unknown>, history?: 'push' | 'replace') {
-        if (selectionKey(args) === selectionKey(before.args)) return;
-        const synchronized = synchronize(args, factory(args), history);
-        latest.current = { ...before, args, pending: synchronized ? [...before.pending, selectionKey(args)] : [] };
+    function commit(
+        before: typeof state,
+        args: Record<string, unknown>,
+        history?: 'push' | 'replace',
+        scroll?: ScrollHistory,
+        writePage?: number,
+    ) {
+        const key = selectionKey([args, scroll]);
+        if (key === selectionKey([before.args, before.scroll])) return false;
+        const synchronized = synchronize(args, factory(args), history, scroll, writePage);
+        latest.current = { ...before, args, scroll, pending: synchronized ? [...before.pending, key] : [] };
         setStored(latest.current);
+        return true;
     }
     function update(patch: object | ((values: Readonly<Record<string, unknown>>) => object), reset = false) {
         const before = latest.current;
@@ -297,8 +344,17 @@ function InputSubscription({
         set: (patch) => update(patch),
         reset: () => update({}, true),
     };
-    // oxlint-disable-next-line react/refs -- Only input event handlers access the ref; rendering reads immutable values.
-    if (starting) return children({ ...loading(selection), inputs });
+    if (starting) {
+        // oxlint-disable-next-line react/refs -- Only input event handlers access the ref; rendering reads immutable values.
+        const body = children({ ...loading(selection), inputs });
+        return selection.pagination?.mode === 'scroll' ? (
+            <NamedScroll name={prop} handle={null}>
+                {body}
+            </NamedScroll>
+        ) : (
+            body
+        );
+    }
     const subscription = (
         <Subscription
             selection={selection}
@@ -311,7 +367,33 @@ function InputSubscription({
                 commit(state, { ...withoutPosition(state.args), ...position }, history);
             }}
         >
-            {(data) => children({ ...data, inputs })}
+            {(data) => {
+                const body = children({ ...data, inputs });
+                if (selection.pagination?.mode !== 'scroll') return body;
+                return (
+                    <ScrollWindow
+                        name={prop}
+                        identity={selectionKey([binding.query, withoutPosition(state.args), state.revision])}
+                        pagination={selection.pagination}
+                        data={data}
+                        history={state.scroll}
+                        save={(position, scroll, writePage) => {
+                            return (
+                                latest.current === state &&
+                                commit(
+                                    state,
+                                    { ...withoutPosition(state.args), ...position },
+                                    'replace',
+                                    scroll,
+                                    writePage,
+                                )
+                            );
+                        }}
+                    >
+                        {body}
+                    </ScrollWindow>
+                );
+            }}
         </Subscription>
     );
     return binding.access && binding.access.scope !== 'page' ? (
@@ -481,7 +563,24 @@ export function createInertiaAdapter(factories: BindingFactories, options: Inert
                     if (claimed.has(pagination.name))
                         throw new Error(`Pagination URL parameter ${pagination.name} is already in use.`);
                     claimed.add(pagination.name);
-                    if (pageURL) binding.args = paginatedArgs(binding.args, pagination, pageURL);
+                    if (pageURL) {
+                        const args = paginatedArgs(binding.args, pagination, pageURL, binding.scroll?.urlPage);
+                        if (args !== binding.args) delete binding.scroll;
+                        binding.args = args;
+                    }
+                    if (binding.scroll) {
+                        const first = pagination.initial.wire['__page'] ?? 1;
+                        const last = pagination.initial.page;
+                        if (
+                            pagination.mode !== 'scroll' ||
+                            binding.scroll.viewed < first ||
+                            binding.scroll.viewed > last ||
+                            binding.scroll.urlPage < first ||
+                            binding.scroll.urlPage > last ||
+                            binding.scroll.count > last - first
+                        )
+                            throw new Error('Scroll history is outside the live window.');
+                    }
                 }
                 function accessOptions(binding: Binding): AccessOptions {
                     return {
@@ -532,13 +631,17 @@ export function createInertiaAdapter(factories: BindingFactories, options: Inert
                     if (Object.hasOwn(effective, prop))
                         throw new Error(`Ordinary prop ${prop} collides with a live binding.`);
                     if (binding.pending) {
-                        return render(index + 1, {
-                            ...effective,
-                            [prop]: {
-                                ...loading({ one: binding.one ?? false }),
-                                inputs: { values: {}, options: binding.options ?? {}, set: noop, reset: noop },
-                            },
-                        });
+                        return (
+                            <NamedScroll name={prop} handle={null}>
+                                {render(index + 1, {
+                                    ...effective,
+                                    [prop]: {
+                                        ...loading({ one: binding.one ?? false }),
+                                        inputs: { values: {}, options: binding.options ?? {}, set: noop, reset: noop },
+                                    },
+                                })}
+                            </NamedScroll>
+                        );
                     }
                     if (!Object.hasOwn(factories, binding.query))
                         throw new Error('Unknown Zero query contract. Reload the application.');
@@ -547,11 +650,17 @@ export function createInertiaAdapter(factories: BindingFactories, options: Inert
                         args: Record<string, unknown>,
                         next: ReadSelection,
                         history?: 'push' | 'replace',
+                        scroll?: ScrollHistory,
+                        writePage?: number,
                     ) => {
                         const fields = urlFields?.[prop];
                         if (!fields && !next.pagination) return false;
                         const url = new URL(inertiaURLAdapter.getURL());
-                        if (next.pagination) writePagination(url.searchParams, next.pagination);
+                        if (next.pagination && !scroll) writePagination(url.searchParams, next.pagination);
+                        if (next.pagination && writePage !== undefined) {
+                            if (writePage === 1) url.searchParams.delete(next.pagination.name);
+                            else url.searchParams.set(next.pagination.name, String(writePage));
+                        }
                         const input = object(next.input?.values ?? {}, 'inputs');
                         for (const [field, parameter] of Object.entries(history ? {} : (fields ?? {}))) {
                             const value = input[field];
@@ -581,7 +690,7 @@ export function createInertiaAdapter(factories: BindingFactories, options: Inert
                                         mode: 'replace',
                                         bindings: {
                                             ...previous.bindings,
-                                            [prop]: { ...binding, args },
+                                            [prop]: { ...binding, args, scroll },
                                         },
                                     },
                                 };
