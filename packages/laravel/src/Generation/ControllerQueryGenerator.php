@@ -87,6 +87,7 @@ final readonly class ControllerQueryGenerator
             } elseif ($query->expression->kind === 'infinite') {
                 $pageSize .= ', undefined';
             }
+
             if (in_array($query->expression->kind, ['infinite', 'paginate'], true)) {
                 $pageSize .= ', '.QueryLimits::liveWindow();
             }

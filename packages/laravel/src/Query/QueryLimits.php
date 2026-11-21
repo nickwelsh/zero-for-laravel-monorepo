@@ -9,7 +9,7 @@ use LogicException;
 /** Shared resource boundaries for authenticated query transforms and live windows. */
 final class QueryLimits
 {
-    public const NATIVE_MAX = 2147483647;
+    public const int NATIVE_MAX = 2147483647;
 
     public static function transformBatch(): int
     {

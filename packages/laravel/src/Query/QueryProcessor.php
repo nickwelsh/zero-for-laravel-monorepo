@@ -31,6 +31,7 @@ final readonly class QueryProcessor
         if (! is_array($body) || ! array_is_list($body) || count($body) !== 2 || $body[0] !== 'transform' || ! is_array($body[1]) || ! array_is_list($body[1])) {
             return ['kind' => 'TransformFailed', 'origin' => 'server', 'reason' => 'parse', 'message' => 'Invalid transform envelope.', 'queryIDs' => []];
         }
+
         if (count($body[1]) > QueryLimits::transformBatch()) {
             return ['kind' => 'TransformFailed', 'origin' => 'server', 'reason' => 'parse', 'message' => 'Query transform exceeds the configured batch limit.', 'queryIDs' => []];
         }
