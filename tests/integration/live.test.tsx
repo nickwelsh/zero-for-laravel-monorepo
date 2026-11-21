@@ -320,7 +320,7 @@ it.skipIf(!enabled)(
                 headers: { 'X-Api-Key': key, Authorization: 'Bearer alice', 'Content-Type': 'application/json' },
                 body: JSON.stringify([
                     'transform',
-                    Array.from({ length: 257 }, (_, i) => ({
+                    Array.from({ length: 256 }, (_, i) => ({
                         id: String(i),
                         name: queryName,
                         args: [{ direction: 'asc' }],
@@ -328,7 +328,7 @@ it.skipIf(!enabled)(
                 ]),
             });
             const transformed = (await batch.json()) as { queries: { ast?: unknown; error?: string }[] };
-            expect(transformed.queries).toHaveLength(257);
+            expect(transformed.queries).toHaveLength(256);
             expect(transformed.queries[0]).toHaveProperty('ast');
             expect(transformed.queries.every((query) => query.ast && !query.error)).toBe(true);
             symlinkSync(join(process.cwd(), 'node_modules'), join(root, 'node_modules'), 'dir');

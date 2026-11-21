@@ -61,7 +61,7 @@ final readonly class RegisteredOptionQuery
         $window = null;
         if (array_key_exists('__window', $args)) {
             $window = $args['__window'];
-            if (! is_int($window) || $window < 1 || $window > 2147483647) {
+            if (! is_int($window) || $window < 1 || $window > QueryLimits::liveWindow()) {
                 Input::fail('window', 'Invalid option query window.');
             }
         }

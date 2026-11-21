@@ -7,6 +7,7 @@ namespace ZeroForLaravel\Query;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Auth\AuthenticationException;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
+use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Validation\ValidationException;
 use Symfony\Component\HttpKernel\Exception\HttpExceptionInterface;
 use ZeroForLaravel\Access\AccessQueries;
@@ -27,11 +28,11 @@ final readonly class QueryProcessor
      */
     public function process(mixed $body, ResolvedContext $context): array
     {
-        // Zero can revalidate every retained query in one batch, including
-        // queries no longer displayed. AuthenticateZeroCache bounds the body
-        // to 1 MiB; a separate count limit rejects valid protocol messages.
         if (! is_array($body) || ! array_is_list($body) || count($body) !== 2 || $body[0] !== 'transform' || ! is_array($body[1]) || ! array_is_list($body[1])) {
             return ['kind' => 'TransformFailed', 'origin' => 'server', 'reason' => 'parse', 'message' => 'Invalid transform envelope.', 'queryIDs' => []];
+        }
+        if (count($body[1]) > QueryLimits::transformBatch()) {
+            return ['kind' => 'TransformFailed', 'origin' => 'server', 'reason' => 'parse', 'message' => 'Query transform exceeds the configured batch limit.', 'queryIDs' => []];
         }
 
         $requests = [];
@@ -47,6 +48,14 @@ final readonly class QueryProcessor
             }
         } catch (ValidationException) {
             return ['kind' => 'TransformFailed', 'origin' => 'server', 'reason' => 'parse', 'message' => 'Invalid query invocation.', 'queryIDs' => []];
+        }
+
+        if ($requests !== []) {
+            $identity = $context->userId() === null ? 'anonymous' : "user\0".$context->userId();
+            $key = 'zero:query-transform:'.hash('sha256', config()->string('zero.app_id', 'zero')."\0".$identity);
+            if (RateLimiter::increment($key, decaySeconds: 60, amount: count($requests)) > QueryLimits::transformBudget()) {
+                return ['kind' => 'TransformFailed', 'origin' => 'server', 'reason' => 'parse', 'message' => 'Query transform work budget exceeded.', 'queryIDs' => array_column($requests, 'id')];
+            }
         }
 
         $queries = [];

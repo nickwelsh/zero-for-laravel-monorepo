@@ -787,9 +787,10 @@ export class TableSession<Row, C extends Capabilities = Capabilities> {
         }
     }
     private grow(leaf: Leaf<Row>, amount = this.descriptor.capabilities.pageSize) {
-        if (!leaf.data?.complete || leaf.data.data.length <= leaf.limit || leaf.limit >= 2147483647) return false;
+        const max = this.descriptor.capabilities.maxWindow ?? 10000;
+        if (!leaf.data?.complete || leaf.data.data.length <= leaf.limit || leaf.limit >= max) return false;
         this.pendingMore.delete(leaf.key);
-        leaf.limit = Math.min(2147483647, leaf.limit + amount);
+        leaf.limit = Math.min(max, leaf.limit + amount);
         return true;
     }
     private cancelPreload() {
@@ -1063,7 +1064,7 @@ function LeafOwner<Row, C extends Capabilities>({
         sort: table.state.sort,
         groupBy: table.state.groupBy,
         path: leaf.path,
-        __window: Math.min(2147483647, limit + 1),
+        __window: Math.min(table.descriptor.capabilities.maxWindow ?? 10000, limit + 1),
     });
     const result = useData(selection);
     useLayoutEffect(() => table.report(leaf.key, result), [table, leaf.key, result]);

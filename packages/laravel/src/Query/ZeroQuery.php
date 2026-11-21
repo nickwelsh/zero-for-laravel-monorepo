@@ -291,7 +291,7 @@ final class ZeroQuery implements JsonSerializable
 
     public function limit(int $limit): self
     {
-        if ($limit < 0 || $limit > 2147483647) {
+        if ($limit < 0 || $limit > QueryLimits::NATIVE_MAX) {
             throw new InvalidArgumentException('Native limits must be non-negative signed 32-bit integers.');
         }
 
@@ -338,7 +338,7 @@ final class ZeroQuery implements JsonSerializable
     /** A live growing window with one additional row as the exhaustion probe. */
     public function infinite(int $pageSize): self
     {
-        if ($this->singular || $pageSize < 1 || $pageSize >= 2147483647 || isset($this->ast['limit']) || isset($this->ast['start'])) {
+        if ($this->singular || $pageSize < 1 || $pageSize >= QueryLimits::liveWindow() || isset($this->ast['limit']) || isset($this->ast['start'])) {
             throw new InvalidArgumentException('Infinite queries require a collection and a positive page size.');
         }
 

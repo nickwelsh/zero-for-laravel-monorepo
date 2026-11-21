@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace ZeroForLaravel\Generation;
 
 use LogicException;
+use ZeroForLaravel\Query\QueryLimits;
 use ZeroForLaravel\Tables\TableDefinition;
 
 /** Emits deployable registrations; never executes an HTTP action to sample its query. */
@@ -83,6 +84,11 @@ final readonly class ControllerQueryGenerator
             $pageSize = in_array($query->expression->kind, ['infinite', 'paginate'], true) ? ', '.$query->expression->value : '';
             if ($query->expression->kind === 'paginate') {
                 $pageSize .= ', '.json_encode($query->expression->cursorFields(), JSON_THROW_ON_ERROR);
+            } elseif ($query->expression->kind === 'infinite') {
+                $pageSize .= ', undefined';
+            }
+            if (in_array($query->expression->kind, ['infinite', 'paginate'], true)) {
+                $pageSize .= ', '.QueryLimits::liveWindow();
             }
 
             $request = null;

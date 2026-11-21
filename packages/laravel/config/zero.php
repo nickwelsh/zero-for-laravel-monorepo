@@ -160,6 +160,23 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Query Resource Limits
+    |--------------------------------------------------------------------------
+    |
+    | Bound retained-query work for each callback and authenticated identity.
+    | The live window limit is emitted into generated client contracts and must
+    | match every application instance serving the paired PHP registrations.
+    |
+    */
+
+    'limits' => [
+        'max_transform_queries' => (int) env('ZERO_MAX_TRANSFORM_QUERIES', 256),
+        'max_transform_queries_per_minute' => (int) env('ZERO_MAX_TRANSFORM_QUERIES_PER_MINUTE', 4096),
+        'max_live_window' => (int) env('ZERO_MAX_LIVE_WINDOW', 10000),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Request Context
     |--------------------------------------------------------------------------
     |

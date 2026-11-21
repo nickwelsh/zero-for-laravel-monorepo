@@ -1049,7 +1049,7 @@ it('decodes controller query rows and resets live data when route arguments chan
     expect(() => detail.decode([first])).toThrow('single replicated row');
 });
 
-it('grows a controller window with lookahead and resets it on changed arguments', () => {
+it('grows and caps a controller window with lookahead and resets it on changed arguments', () => {
     const queries = defineQueries({
         window: defineQuery(({ args }: { args: { title: string; __window?: number } }) =>
             createBuilder(schema)
@@ -1060,7 +1060,7 @@ it('grows a controller window with lookahead and resets it on changed arguments'
     });
     put({ title: 'A', __window: 3 }, [...rows, { id: 'c', title: 'C' }]);
     const { result, rerender } = renderHook(
-        ({ title }) => useData(liveQuery(queries.window, { title }, definitions, 'Task', false, 2)),
+        ({ title }) => useData(liveQuery(queries.window, { title }, definitions, 'Task', false, 2, undefined, 4)),
         { initialProps: { title: 'A' } },
     );
     expect(result.current.data.map((row) => row.id)).toEqual(['a', 'b']);
@@ -1072,10 +1072,13 @@ it('grows a controller window with lookahead and resets it on changed arguments'
     });
     expect(result.current.isLoadingMore).toBe(true);
     expect(result.current.infinite?.limit).toBe(4);
-    put({ title: 'A', __window: 5 }, [...rows, { id: 'c', title: 'C' }]);
+    put({ title: 'A', __window: 4 }, [...rows, { id: 'c', title: 'C' }, { id: 'd', title: 'D' }]);
     rerender({ title: 'A' });
-    expect(result.current.data.map((row) => row.id)).toEqual(['a', 'b', 'c']);
+    expect(result.current.data.map((row) => row.id)).toEqual(['a', 'b', 'c', 'd']);
     expect(result.current.hasMore).toBe(false);
+    expect(result.current.capped).toBe(true);
+    expect(result.current.exhausted).toBe(false);
+    expect(result.current.stopReason).toBe('maximum');
     rerender({ title: 'B' });
     act(oldLoadMore);
     expect(result.current.data).toEqual([]);

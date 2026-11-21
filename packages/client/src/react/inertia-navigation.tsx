@@ -217,7 +217,9 @@ export function createNavigationLink(
                             selection.cursorFields !== undefined
                                 ? selection.page!(undefined).request()
                                 : selection.pageSize !== undefined && !selection.one
-                                  ? selection.limit!(Math.min(selection.pageSize + 1, 2147483647)).request()
+                                  ? selection
+                                        .limit!(Math.min(selection.pageSize + 1, selection.maxWindow ?? 10000))
+                                        .request()
                                   : selection.request();
                         const handle = zero.preload(request as NativeRequest, { ttl: 0 });
                         const stop = () => {

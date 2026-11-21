@@ -13,6 +13,7 @@ use LogicException;
 use ZeroForLaravel\Generation\ControllerDiscovery;
 use ZeroForLaravel\Generation\ControllerQueryCompiler;
 use ZeroForLaravel\Generation\ControllerQueryGenerator;
+use ZeroForLaravel\Generation\EffectSchemaDriver;
 use ZeroForLaravel\Generation\NavigationGenerator;
 use ZeroForLaravel\Generation\RequestContract;
 use ZeroForLaravel\Generation\ZodSchemaDriver;
@@ -69,6 +70,7 @@ test('navigation generation preserves real route identities and only resolves kn
 });
 
 test('finite FormRequest choices generate literal unions and runtime options without requiring optional fields', function (): void {
+    config(['zero.limits.max_live_window' => 7]);
     app()->register(SurveyorServiceProvider::class);
     // QueryDirection is declared alongside this fixture controller.
     class_exists(QueryController::class);
@@ -79,7 +81,8 @@ test('finite FormRequest choices generate literal unions and runtime options wit
         ->and($contract->fields['direction']->typescript())->toBe('"asc" | "desc" | null')
         ->and($contract->fields['direction']->optional)->toBeTrue();
     $schema = (new ZodSchemaDriver)->object(['input' => 'request:'.ChoiceQueryRequest::class]);
-    expect($schema)->toContain('z.literal(2)', 'z.literal(7)', 'z.literal("active")', '.nullable().optional()');
+    expect($schema)->toContain('z.literal(2)', 'z.literal(7)', 'z.literal("active")', '.nullable().optional()', '__window: z.number().int().min(1).max(7)');
+    expect((new EffectSchemaDriver)->object([]))->toContain('EffectSchema.isLessThanOrEqualTo(7)');
 });
 
 test('registered controller queries preserve input branches without executing the HTTP action', function (): void {

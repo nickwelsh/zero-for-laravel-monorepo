@@ -19,6 +19,7 @@ use ZeroForLaravel\Permissions\Binding;
 use ZeroForLaravel\Permissions\EloquentVisibility;
 use ZeroForLaravel\Permissions\VisibleToCurrentUser;
 use ZeroForLaravel\Query\Condition;
+use ZeroForLaravel\Query\QueryLimits;
 use ZeroForLaravel\Query\ZeroQuery;
 use ZeroForLaravel\ResolvedContext;
 use ZeroForLaravel\Support\Input;
@@ -181,7 +182,7 @@ final class Table
 
     public function pageSize(int $size): self
     {
-        if ($size < 1 || $size >= 2147483647) {
+        if ($size < 1 || $size >= QueryLimits::liveWindow()) {
             throw new InvalidArgumentException('Invalid table page size.');
         }
 
