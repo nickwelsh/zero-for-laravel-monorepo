@@ -6,6 +6,7 @@ namespace ZeroForLaravel\Search;
 
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Typesense\Client;
 use ZeroForLaravel\Context\ContextDefinition;
 use ZeroForLaravel\Metadata\ModelRegistry;
 
@@ -20,9 +21,10 @@ final class ScoutSearchRevisionController
         foreach ($registry->all() as $model) {
             $search = $model->search;
             if ($search !== null && $search->metadata()['index'] === $index) {
-                $search->filter(ContextDefinition::configured()->resolve($request));
+                $filter = $search->filter(ContextDefinition::configured()->resolve($request));
+                $documents = resolve(Client::class)->collections[$index]->documents->export(['filter_by' => $filter]);
 
-                return response()->json(['revision' => SearchRevision::current($index)])
+                return response()->json(['revision' => SearchRevision::current($index, $filter, $documents)])
                     ->header('Cache-Control', 'no-store, private');
             }
         }
