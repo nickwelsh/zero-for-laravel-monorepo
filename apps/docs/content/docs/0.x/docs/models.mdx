@@ -57,23 +57,23 @@ business input. Authorize ownership and association changes explicitly in contro
 Authority-only attributes may remain private in maintained permission projections.
 They do not need to become public business columns.
 
-## Zero scopes and creation defaults
+## Scopes and creation defaults
 
-Use `#[ZeroScope]` on a nonpublic method accepting `ZeroQuery` to define local
-query construction. It may return the supplied builder or `void`. Eloquent scopes
-remain separate. Zero builders are mutable; aliases share changes, and `clone`
+Define one Eloquent local scope using `#[Scope]` or the `scopeFoo` convention.
+Its portable body applies to both Eloquent reads and `Model::zeroQuery()->foo()`.
+Zero builders are mutable; aliases share changes, and `clone`
 creates an independent branch. Use `with()`, `whereHas()` and `whereDoesntHave()`
 for relationships, and query-builder callbacks for grouped `where()` conditions.
 
-`ZeroGlobalScope` implementations can be registered using `#[ZeroScopedBy]` or
-`addZeroGlobalScope()`. Globals remain AND constraints outside caller OR groups.
+Register Eloquent globals using `#[ScopedBy]` or `addGlobalScope()`.
+Globals remain AND constraints outside caller OR groups.
 `withoutGlobalScope()` / `withoutGlobalScopes()` remove their predicates and defaults.
 These business scopes do not replace explicit policy visibility.
 
 `withAttributes(['user_id' => ZeroContext::USER_ID], asConditions: false)` supplies
 creation-only defaults from the application's typed context enum. Without
 `asConditions: false`, the attributes also constrain reads. Register a creator
-default in `booted()` with `addZeroGlobalScope()` when needed. Explicit creation
+default in `booted()` with `addGlobalScope()` when needed. Explicit creation
 attributes override defaults; updates do not receive them. These defaults are
 not an ownership authorization boundary. Context enum cases are symbolic;
 `ZeroContext::USER_ID->value` is just a literal string. See

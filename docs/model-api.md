@@ -38,9 +38,8 @@ builder changes; clone a builder for independent branches. `with()`, `whereHas()
 and `whereDoesntHave()` replace the old public `related()` API. Group callbacks
 receive a mutable `ZeroQuery`, not an expression builder.
 
-Local Zero scopes are nonpublic `#[ZeroScope]` methods accepting `ZeroQuery`.
-Global query construction uses `ZeroGlobalScope`, `#[ZeroScopedBy]`, or named
-`addZeroGlobalScope()` registrations. Removing a global removes its predicates
+Use Eloquent local scopes (`#[Scope]` or `scopeFoo`) and global scope registrations
+(`#[ScopedBy]` or `addGlobalScope()`). Removing a global removes its predicates
 and creation defaults. Global constraints remain outside caller OR groups.
 `withAttributes()` supplies creation defaults and, unless `asConditions: false`,
 query predicates. Explicit creation attributes override defaults; updates do not
@@ -48,16 +47,12 @@ receive defaults. Defaults are not authorization. Application enum context field
 resolve through `#[ResolvesContext]` methods; authenticated identity is independent
 of those values. Literal enum `->value` is not a context reference.
 
-The ZQL construction surface targets Zero 1.11.3: comparisons, membership, patterns,
-null tests, grouped query predicates, correlated existence,
-relationship refinement, ordering, raw cursors, limits, and singular results.
-Existence supports `flip` and `scalar`; native scalar hints require unique-key
-constraints. Sort direction may be literal or an asc/desc backed enum.
-
-`infinite(size)` and `paginate(size)` must be the final operation on an unbounded
-collection. They append a primary-key tie breaker when necessary. Infinite queries
-grow one live window; cursor pages use raw storage values and reset when query or
-identity changes. They do not promise total counts or snapshot pagination.
+Use Eloquent methods for comparisons, membership, null tests, grouped predicates,
+relationship filters, ordering and limits. End the chain in `get()`, `first()`,
+`find($id)`, or a paginator. Unsupported SQL and relationship count thresholds
+fail generation. `paginate()` and `simplePaginate()` provide bounded numbered
+pages; `cursorPaginate()` provides cursor traversal. `Zero::scroll()` wraps a
+numbered paginator to grow its live window. None promises total counts.
 
 Directly returned bound models become live singular queries after Laravel binding.
 Initial missing rows remain normal binding failures. Later unauthorized, deleted,

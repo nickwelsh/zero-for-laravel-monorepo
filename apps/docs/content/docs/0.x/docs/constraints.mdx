@@ -19,7 +19,7 @@ keys. If a required key is missing from the published columns, generation fails.
 - **Queries:** [`ZeroQuery`](./queries.mdx) builds native Zero queries (ZQL), not
   arbitrary Eloquent SQL. Use `with()` to include related rows and `whereHas()`
   to filter parent rows. Clone a builder before using it for independent branches.
-  The generator checks local and global Zero scopes and relationship filters;
+  The generator checks local and global Eloquent scopes and relationship filters;
   it rejects a filter it can't translate rather than returning unfiltered rows.
 - **Request context:** Declare [context fields](./configuration.mdx#typed-context-and-resolver)
   as cases of a string-backed enum. Give each case one public `#[ResolvesContext]`

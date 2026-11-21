@@ -366,12 +366,12 @@ public function fields(): array
                 ->where('organization_id', OptionInput::field('organization_id'))
                 ->where('id', '!=', OptionInput::context('party'))
                 ->where('name', 'ILIKE', ZeroOptions::contains(OptionInput::value()))
-                ->orderBy('name', 'asc')->orderBy('id', 'asc')->limit(20),
+                ->orderBy('name')->orderBy('id')->limit(20)->get(),
             value: 'id', label: 'name',
             resolve: Party::zeroQuery()
                 ->where('organization_id', OptionInput::field('organization_id'))
                 ->where('id', '!=', OptionInput::context('party'))
-                ->where('id', OptionInput::field('other_party_id'))->one(),
+                ->find(OptionInput::field('other_party_id')),
             authorize: ['party' => 'view'],
         )),
     ];
@@ -393,7 +393,7 @@ actor's visibility; related protected paths still require explicit visibility.
 the typed value are escaped. Without it, operands keep the query operator's normal
 meaning. Listing requires an explicit literal limit from 1 through 100 and ordering
 that includes the model's primary key. The optional `resolve` query must end in
-`one()` and must not use `value()`. Give it the same eligibility/dependency filters,
+`first()` or `find()` and must not use `value()`. Give it the same eligibility/dependency filters,
 but compare the ID with the selected draft field. It resolves labels independently
 of the current search or result window, even while the picker is closed. Without
 a resolver, an existing selection is reported as unavailable. No dependency change
@@ -465,7 +465,7 @@ For example, an authorized Zero controller action can add root defaults, then
 override a default with explicit data:
 
 ```php
-$todo = Todo::zeroQuery()
+$todo = Todo::query()
     ->withAttributes(['completed' => false])
     ->create([
         'list_id' => $data['list_id'],

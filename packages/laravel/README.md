@@ -7,7 +7,7 @@ and TypeScript contracts together. PHP 8.3+, Laravel 12/13, and PostgreSQL 15+ w
 required targets. Automatic live page props require Inertia Laravel 3 and the
 optional JavaScript Inertia adapter.
 
-Controllers declare immutable `Model::zeroQuery()` live props and explicitly opt
+Controllers build `Model::zeroQuery()` live props with Eloquent methods and explicitly opt
 actions into `#[ZeroMutation]`. Ranger/Surveyor-backed generation emits coordinated
 PHP registrations, native ZQL/mutators, validation schemas, result codecs, and
 named controller modules. Laravel retains real binding, middleware, FormRequests, Gates, and Eloquent.

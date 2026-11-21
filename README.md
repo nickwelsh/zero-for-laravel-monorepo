@@ -40,8 +40,8 @@ public function index(\Illuminate\Http\Request $request): \Inertia\Response
             ->visibleTo($request->user())
             ->where('done', false)
             ->with('list', fn ($list) => $list->visibleTo($request->user()))
-            ->orderBy('created_at', 'desc')
-            ->infinite(25),
+            ->latest()
+            ->paginate(25),
     ]);
 }
 ```
@@ -56,14 +56,14 @@ Generation never executes an HTTP controller to sample its result.
 The Inertia integration removes live result keys from ordinary props before
 serialization. Reserved `__zero` metadata identifies the queries, their arguments
 and any access checks. A directly returned eligible route-bound model becomes a
-live `one()` query after normal Laravel binding. Initial missing models still produce Laravel's
+live singular query after normal Laravel binding. Initial missing models still produce Laravel's
 normal response. Direct query transforms rerun the required binding/middleware and
 FormRequest boundary, not the page controller or its unrelated effects.
 
-Native comparisons, expressions, relationships, ordering, cursors, and cardinality
-remain explicit. `infinite()` grows a live window; `paginate()` navigates raw cursors.
-Neither promises total counts or immutable historical pages. Plain queries acquire
-no hidden limit or ordering.
+End a live read with `get()`, `first()`, `find($id)`, or a paginator. Use
+`paginate()` for numbered pages and `cursorPaginate()` for deep traversal.
+`Zero::scroll($query->paginate(25))` keeps earlier pages visible. Live paginators
+do not promise total counts or immutable historical pages.
 
 ## Use ordinary Laravel policies
 
@@ -79,7 +79,7 @@ public function view(User $user, Task $task): Response
 
 Gate::authorize('view', $task); // REST and Inertia show routes.
 Task::query()->visibleTo($user)->paginate(); // REST collections.
-Task::zeroQuery()->visibleTo($request->user()); // Live collections.
+Task::zeroQuery()->visibleTo($request->user())->get(); // Live collections.
 ```
 
 Add `HasPolicyVisibility` alongside `HasZeroQueries` to opt into the Eloquent local
@@ -97,8 +97,8 @@ captured instance Gate can also cover its bound resource. Declare `#[ZeroPublic]
 on an intentionally public model. Creation
 defaults use `withAttributes()` and typed application context; explicit creation
 attributes override defaults. Defaults are not write authorization or update stamps.
-Use checked `#[ZeroScope]` methods for local Zero scopes and `ZeroGlobalScope` for
-reusable query constraints. Search uses `zeroSearch()` or explicit registration.
+Reuse portable Eloquent local and global scopes for live query constraints.
+Search uses `zeroSearch()` or explicit registration.
 Write authorization stays in FormRequests, middleware and controller Gates.
 
 Captured show Gates also create actor-owned access watches: confirmed access loss

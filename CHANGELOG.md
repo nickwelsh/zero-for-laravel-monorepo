@@ -1,5 +1,24 @@
 # Changelog
 
+## Unreleased — breaking live query migration
+
+`Model::zeroQuery()` now declares live reads using Eloquent syntax. Ordinary
+`Model::query()` still executes SQL. Regenerate and deploy the PHP registrations
+and client contracts together; do not reuse old generated query identities.
+
+| Before                                                    | After                                                  |
+| --------------------------------------------------------- | ------------------------------------------------------ |
+| Bare returned builder or `->all()`                        | `->get()`                                              |
+| `->one()`                                                 | `->first()`, or `->find($id)` for a primary-key lookup |
+| `where('status', 'IN', $list)`                            | `whereIn('status', $list)`                             |
+| `whereExists('comments', ...)`                            | `whereHas('comments', ...)`; remove native hints       |
+| `->start($row)` or the old cursor-based `->paginate(25)`  | `->cursorPaginate(25)` and paginator navigation        |
+| `->infinite(25)`                                          | `Zero::scroll($query->paginate(25))`                   |
+| `#[ZeroScope]`, `#[ZeroScopedBy]`, `addZeroGlobalScope()` | Eloquent `#[Scope]`, `#[ScopedBy]`, `addGlobalScope()` |
+
+`paginate()` now means numbered pages. Like `simplePaginate()`, it has no count
+query or last-page promise. See the [query guide](apps/docs/content/docs/0.x/docs/queries.mdx).
+
 ## [0.13.0] - 2026-11-21
 
 - Migrate supported Inertia forms by changing the `Form` and generated controller

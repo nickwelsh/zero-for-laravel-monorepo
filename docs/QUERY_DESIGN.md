@@ -14,7 +14,7 @@ supported constraints are documented in [the contract guide](model-api.md) and
 
 The accepted 0.x context/scopes/relationships redesign supersedes the original
 builder spellings and immutability decision: use mutable `ZeroQuery`, explicit
-clones for branches, portable local/global Zero scopes, `with` includes, and
+clones for branches, portable local/global Eloquent scopes, `with` includes, and
 `whereHas` parent filters. Application-owned context enums and attributed resolver
 signatures replace package context keys; runtime values use `ResolvedContext`.
 Relationships come from opted-in Eloquent models, without silent target enrollment

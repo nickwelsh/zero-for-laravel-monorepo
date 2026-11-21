@@ -18,8 +18,8 @@ case without invoking methods; runtime Laravel DI resolves trusted values into
 `ResolvedContext`. Native Zero identity remains independent of application context
 keys. Both `userID` and typed `context` are supplied to the client provider.
 
-`ZeroQuery` is a separate mutable declaration builder. Local `#[ZeroScope]` methods
-and registered Zero global scopes share the checked query subset, not arbitrary
+`ZeroQuery` is a separate mutable declaration builder. Eloquent local scopes
+and registered global scopes share the checked query subset, not arbitrary
 Eloquent behavior. Clone explicitly for independent branches. Eloquent relationship
 methods between opted-in models provide checked schema paths; `with` includes rows
 and `whereHas` filters parents, lowering to native related/EXISTS semantics. There

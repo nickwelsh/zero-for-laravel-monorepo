@@ -286,7 +286,7 @@ The optional `@nickwelsh/zero-table/formbraid` entry exports `editorFromForm`,
 patch to the full generated request explicitly: required siblings are not inferred.
 Relation editors reuse the existing generated Zero option sources, independently
 resolve selected IDs, search authorized choices, and grow server-declared infinite
-queries. Pass an `->infinite(20)` query to `ZeroOptions::query(...)` in the source
+queries. Pass `Zero::scroll($query->paginate(20))` to `ZeroOptions::query(...)` in the source
 definition; a browser cannot turn a fixed query into an unlimited one. Submit IDs, not labels.
 Candidate visibility does not imply assignment permission.
 
