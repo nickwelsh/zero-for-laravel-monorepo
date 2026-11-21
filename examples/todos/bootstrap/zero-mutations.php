@@ -2,7 +2,7 @@
 declare(strict_types=1);
 // Generated controller mutation registrations.
 return static fn (\ZeroForLaravel\Metadata\ModelRegistry $models, \ZeroForLaravel\Http\ControllerRouteDispatcher $routes): \ZeroForLaravel\Mutation\ControllerMutationRegistry => new \ZeroForLaravel\Mutation\ControllerMutationRegistry($models, $routes, [
-'m_3439551a925d171fa3f8a37c940e63b3' => ['contract' => array (
+'m_01a1b7de4a0bd25b2b86ad242cb39003' => ['contract' => array (
   'action' => 'App\\Http\\Controllers\\ShareListController@destroy',
   'optimism' => 'disabled',
   'conceal' => true,
@@ -26,10 +26,10 @@ return static fn (\ZeroForLaravel\Metadata\ModelRegistry $models, \ZeroForLarave
   'sites' =>
   array (
   ),
-  'version' => '3439551a925d171fa3f8a37c940e63b32fe13c8aed801fe52ce47cde528d32be',
+  'version' => '01a1b7de4a0bd25b2b86ad242cb39003dccd76035b7b5431536b07b02a6ed096',
   'returnType' => 'void',
 ), 'guards' => [], 'result' => static fn (mixed $value): mixed => (new \ZeroForLaravel\Generation\Mutations\ValueContract('void', [], [], false, false))->normalize($value)],
-'m_1b2cd1117df53ae57d3ee164925c6b62' => ['contract' => array (
+'m_035ff3eaa2e85a3e2b77524e42d1749e' => ['contract' => array (
   'action' => 'App\\Http\\Controllers\\ShareListController@store',
   'optimism' => 'disabled',
   'conceal' => true,
@@ -53,10 +53,10 @@ return static fn (\ZeroForLaravel\Metadata\ModelRegistry $models, \ZeroForLarave
   'sites' =>
   array (
   ),
-  'version' => '1b2cd1117df53ae57d3ee164925c6b6254c3b0f3e1a3d69fc4f8dbc3ef19afa1',
+  'version' => '035ff3eaa2e85a3e2b77524e42d1749e364edef3f0c122e3738e519b7c4f2433',
   'returnType' => 'void',
 ), 'guards' => [], 'result' => static fn (mixed $value): mixed => (new \ZeroForLaravel\Generation\Mutations\ValueContract('void', [], [], false, false))->normalize($value)],
-'m_77dcca5755be0fb1a99a2cb34ce3bc53' => ['contract' => array (
+'m_be9b60fa04f7e5c9cb8f2fd78eee38c9' => ['contract' => array (
   'action' => 'App\\Http\\Controllers\\TodoController@destroy',
   'optimism' => 'disabled',
   'conceal' => true,
@@ -75,10 +75,10 @@ return static fn (\ZeroForLaravel\Metadata\ModelRegistry $models, \ZeroForLarave
   'sites' =>
   array (
   ),
-  'version' => '77dcca5755be0fb1a99a2cb34ce3bc530a6ac575eee5ba4ca7d23074abe54300',
+  'version' => 'be9b60fa04f7e5c9cb8f2fd78eee38c943da9b6739e6dfe3ee7668daf43a7ad5',
   'returnType' => 'void',
 ), 'guards' => [], 'result' => static fn (mixed $value): mixed => (new \ZeroForLaravel\Generation\Mutations\ValueContract('void', [], [], false, false))->normalize($value)],
-'m_4db8b12df7c8e209f0c07c08e677d6a3' => ['contract' => array (
+'m_b197eac8dbc761cb5b20323220612616' => ['contract' => array (
   'action' => 'App\\Http\\Controllers\\TodoController@store',
   'optimism' => 'disabled',
   'conceal' => false,
@@ -97,10 +97,10 @@ return static fn (\ZeroForLaravel\Metadata\ModelRegistry $models, \ZeroForLarave
   'sites' =>
   array (
   ),
-  'version' => '4db8b12df7c8e209f0c07c08e677d6a34035cc364f8d70bfe840dc4780abecbf',
+  'version' => 'b197eac8dbc761cb5b20323220612616db41422754b83f4cc0821afbabe61032',
   'returnType' => 'array',
 ), 'guards' => [], 'result' => static fn (mixed $value): mixed => (new \ZeroForLaravel\Generation\Mutations\ValueContract('object', ['id' => new \ZeroForLaravel\Generation\Mutations\ValueContract('string', [], [], false, false)], [], false, false))->normalize($value)],
-'m_f267bc7741a50fbef6024dcd0f9602d5' => ['contract' => array (
+'m_df5cb0f85c49e9e9538c310d5c971b16' => ['contract' => array (
   'action' => 'App\\Http\\Controllers\\TodoController@update',
   'optimism' => 'disabled',
   'conceal' => true,
@@ -124,10 +124,10 @@ return static fn (\ZeroForLaravel\Metadata\ModelRegistry $models, \ZeroForLarave
   'sites' =>
   array (
   ),
-  'version' => 'f267bc7741a50fbef6024dcd0f9602d570dc6e62677fe283c62ad1f3ec5b03a1',
+  'version' => 'df5cb0f85c49e9e9538c310d5c971b1666676179d18c142e97df5717f26d4f56',
   'returnType' => 'void',
 ), 'guards' => [], 'result' => static fn (mixed $value): mixed => (new \ZeroForLaravel\Generation\Mutations\ValueContract('void', [], [], false, false))->normalize($value)],
-'m_8304615915f3b301c7f745ec6692b02e' => ['contract' => array (
+'m_97734ef87866f3d5e44ab7d7686c5435' => ['contract' => array (
   'action' => 'App\\Http\\Controllers\\TodoListController@destroy',
   'optimism' => 'disabled',
   'conceal' => true,
@@ -146,10 +146,10 @@ return static fn (\ZeroForLaravel\Metadata\ModelRegistry $models, \ZeroForLarave
   'sites' =>
   array (
   ),
-  'version' => '8304615915f3b301c7f745ec6692b02e9d3803a8890bdbff1097911fbe3aa693',
+  'version' => '97734ef87866f3d5e44ab7d7686c5435a94fc528678b77fe94bfa2acc007a8d0',
   'returnType' => 'void',
 ), 'guards' => [], 'result' => static fn (mixed $value): mixed => (new \ZeroForLaravel\Generation\Mutations\ValueContract('void', [], [], false, false))->normalize($value)],
-'m_2469dc0ac4a1cd1c6fe49d8e5e529276' => ['contract' => array (
+'m_477971a45fdd403c1243cdcfeb1a5425' => ['contract' => array (
   'action' => 'App\\Http\\Controllers\\TodoListController@store',
   'optimism' => 'disabled',
   'conceal' => false,
@@ -168,10 +168,10 @@ return static fn (\ZeroForLaravel\Metadata\ModelRegistry $models, \ZeroForLarave
   'sites' =>
   array (
   ),
-  'version' => '2469dc0ac4a1cd1c6fe49d8e5e529276a05bc6f7bbe913bba9a239d164448399',
+  'version' => '477971a45fdd403c1243cdcfeb1a5425b01e25fd085f3caa209d23adf1a21b0c',
   'returnType' => 'array',
 ), 'guards' => [], 'result' => static fn (mixed $value): mixed => (new \ZeroForLaravel\Generation\Mutations\ValueContract('object', ['id' => new \ZeroForLaravel\Generation\Mutations\ValueContract('string', [], [], false, false)], [], false, false))->normalize($value)],
-'m_e305f732176f617431bb82bade637738' => ['contract' => array (
+'m_393c6f49ab702f21be9ccb6cf25898d2' => ['contract' => array (
   'action' => 'App\\Http\\Controllers\\TodoListController@update',
   'optimism' => 'disabled',
   'conceal' => true,
@@ -195,7 +195,7 @@ return static fn (\ZeroForLaravel\Metadata\ModelRegistry $models, \ZeroForLarave
   'sites' =>
   array (
   ),
-  'version' => 'e305f732176f617431bb82bade6377383fad349e8ac0d1712e1ff83f1e0a22b2',
+  'version' => '393c6f49ab702f21be9ccb6cf25898d24b8064b061bb3a0ad7451ee4ab645dc9',
   'returnType' => 'void',
 ), 'guards' => [], 'result' => static fn (mixed $value): mixed => (new \ZeroForLaravel\Generation\Mutations\ValueContract('void', [], [], false, false))->normalize($value)],
 ]);

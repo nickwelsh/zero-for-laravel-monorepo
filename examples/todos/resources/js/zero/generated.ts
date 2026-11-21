@@ -179,7 +179,7 @@ export const definitions = {
             "name",
             "user_id"
         ],
-        "scopeFingerprint": "2f0354f35f7762d687719a371f35a2ca17653f34a4608b43816b528c5cc3fd4d",
+        "scopeFingerprint": "6c6e71d35766ba93666f47e6775db822460d95b0b64d2bbacac35025c523eb6a",
         "creationDefaults": {
             "op": "merge",
             "values": [
