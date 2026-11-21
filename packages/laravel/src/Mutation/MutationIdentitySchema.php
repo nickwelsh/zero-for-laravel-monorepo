@@ -9,7 +9,7 @@ use Illuminate\Database\Schema\Blueprint;
 
 final class MutationIdentitySchema
 {
-    public const TABLE = 'zero_mutation_identities';
+    public const string TABLE = 'zero_mutation_identities';
 
     public static function create(Connection $connection): void
     {

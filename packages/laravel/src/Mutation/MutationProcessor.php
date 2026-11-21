@@ -237,10 +237,8 @@ final readonly class MutationProcessor
             'INSERT INTO '.$table.' AS bindings ("upstream_hash", "client_group_id", "identity_hash") SELECT ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM '.$schema.'.clients WHERE "clientGroupID" = ?) AND NOT EXISTS (SELECT 1 FROM '.$schema.'.mutations WHERE "clientGroupID" = ?) ON CONFLICT ("upstream_hash", "client_group_id") DO UPDATE SET "identity_hash" = bindings."identity_hash" RETURNING "identity_hash"',
             [$storage, $group, $expected, $group, $group],
         );
-        if ($owner === null) {
-            $owner = $connection->table(MutationIdentitySchema::TABLE)
-                ->where('upstream_hash', $storage)->where('client_group_id', $group)->value('identity_hash');
-        }
+        $owner ??= $connection->table(MutationIdentitySchema::TABLE)
+            ->where('upstream_hash', $storage)->where('client_group_id', $group)->value('identity_hash');
 
         if (! is_string($owner) || ! hash_equals($owner, $expected)) {
             throw new MutationIdentityConflict;
