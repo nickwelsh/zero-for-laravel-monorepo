@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## [0.13.0] - 2026-11-21
 
 - Migrate supported Inertia forms by changing the `Form` and generated controller
   imports. A checked `to_route()` can navigate after the local write; `back()`
@@ -10,6 +10,13 @@
   pending insert or a previously synchronized query while access is checked.
   An unconditional `viewAny` can guard a live index independently of row visibility.
   Laravel still authorizes the server subscription and the write.
+- Opt into `revocationNavigation: 'client'` to replace a revoked page inside
+  Inertia when its guarded destination can be resolved safely. Full-document
+  replacement remains the default.
+
+Upgrade `nickwelsh/zero-for-laravel`, `@nickwelsh/zero-for-laravel`, and the optional
+`@nickwelsh/zero-table` together to **0.13.0**. Regenerate and deploy the PHP and
+TypeScript contracts together. Table protocol **v2** and Zero **1.11.4** are unchanged.
 
 ## [0.12.0] - 2026-11-19
 
@@ -219,6 +226,7 @@ Deploy generated PHP and TypeScript contracts together. Supported targets are PH
 8.3+, Laravel 12/13, PostgreSQL 15+, and React 18/19. Automatic live pages require
 Inertia Laravel 3 and `@inertiajs/react` ^3.8.0.
 
+[0.13.0]: https://github.com/nickwelsh/zero-for-laravel-monorepo/releases/tag/v0.13.0
 [0.12.0]: https://github.com/nickwelsh/zero-for-laravel-monorepo/releases/tag/v0.12.0
 [0.11.1]: https://github.com/nickwelsh/zero-for-laravel-monorepo/releases/tag/v0.11.1
 [0.11.0]: https://github.com/nickwelsh/zero-for-laravel-monorepo/releases/tag/v0.11.0
