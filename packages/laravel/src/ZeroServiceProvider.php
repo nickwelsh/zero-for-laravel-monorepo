@@ -119,6 +119,7 @@ final class ZeroServiceProvider extends ServiceProvider
             $kernel->prependToMiddlewarePriority(Http\CaptureTransportCookies::class);
         });
         if ($this->app->runningInConsole()) {
+            $this->loadMigrationsFrom(__DIR__.'/../database/core-migrations');
             $this->publishes([__DIR__.'/../config/zero.php' => config_path('zero.php')], 'zero-config');
             $this->commands([GenerateCommand::class, FormbraidCommand::class, SyncPublicationCommand::class, DevCommand::class, DoctorCommand::class, ResetCommand::class, ExposureCommand::class]);
             Event::listen(MigrationsEnded::class, function (MigrationsEnded $event): void {
