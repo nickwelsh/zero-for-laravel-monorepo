@@ -15,6 +15,7 @@ final class SearchRevision
                 $revisions[] = hash('sha256', $document);
             }
         }
+
         sort($revisions, SORT_STRING);
 
         $domain = json_encode([$index, $filter], JSON_THROW_ON_ERROR);
