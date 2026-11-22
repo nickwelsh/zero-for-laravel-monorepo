@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased — breaking live query migration
+## [0.14.0] - 2026-11-21
+
+### Breaking live query migration
 
 `Model::zeroQuery()` now declares live reads using Eloquent syntax. Ordinary
 `Model::query()` still executes SQL. Regenerate and deploy the PHP registrations
@@ -22,6 +24,10 @@ query or last-page promise. See the [query guide](apps/docs/content/docs/0.x/doc
 Use the Zero `/inertia` `InfiniteScroll` component with `Zero::scroll()` for
 bidirectional automatic or manual loading and viewport-aware page URLs.
 The component does not issue partial reloads or accept Inertia reload options.
+
+Upgrade `nickwelsh/zero-for-laravel`, `@nickwelsh/zero-for-laravel`, and the optional
+`@nickwelsh/zero-table` together to **0.14.0**. Table protocol **v2** and Zero
+**1.11.4** are unchanged.
 
 ## [0.13.0] - 2026-11-21
 
@@ -249,6 +255,7 @@ Deploy generated PHP and TypeScript contracts together. Supported targets are PH
 8.3+, Laravel 12/13, PostgreSQL 15+, and React 18/19. Automatic live pages require
 Inertia Laravel 3 and `@inertiajs/react` ^3.8.0.
 
+[0.14.0]: https://github.com/nickwelsh/zero-for-laravel-monorepo/releases/tag/v0.14.0
 [0.13.0]: https://github.com/nickwelsh/zero-for-laravel-monorepo/releases/tag/v0.13.0
 [0.12.0]: https://github.com/nickwelsh/zero-for-laravel-monorepo/releases/tag/v0.12.0
 [0.11.1]: https://github.com/nickwelsh/zero-for-laravel-monorepo/releases/tag/v0.11.1
