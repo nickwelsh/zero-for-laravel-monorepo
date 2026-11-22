@@ -18,6 +18,7 @@ use ZeroForLaravel\Generation\ScopeCompiler;
 use ZeroForLaravel\Metadata\ModelMetadata;
 use ZeroForLaravel\Query\ZeroQuery;
 
+/** @phpstan-type RegisteredScope Closure|GlobalScope<*> */
 final class ScopeRegistry
 {
     public static function local(string $class, string $name): ?ReflectionMethod
@@ -40,7 +41,7 @@ final class ScopeRegistry
         return $method?->isPrivate() ? null : $method;
     }
 
-    /** @return array<int|string, Closure|GlobalScope<*>> */
+    /** @return array<int|string, RegisteredScope> */
     public static function globals(ModelMetadata $metadata): array
     {
         $scopes = [];
