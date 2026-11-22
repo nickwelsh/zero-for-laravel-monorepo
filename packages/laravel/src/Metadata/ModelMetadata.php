@@ -26,6 +26,9 @@ final class ModelMetadata
     /** @var array<string, RelationConstraints> */
     public array $relationConstraints = [];
 
+    /** @var array<string, JunctionLookup> Schema-only edges, not model relationships. */
+    public array $junctionLookups = [];
+
     public ModelRegistry $registry;
 
     /**

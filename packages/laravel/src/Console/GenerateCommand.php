@@ -52,7 +52,7 @@ final class GenerateCommand extends Command
             config()->string('zero.generation.mutations') => $mutationGenerator->php($mutations),
         ];
         $public = (new PublicApiGenerator)->generate($mutations, $definitions, $base)
-            + (new TableGenerator)->typescript($tables, '../'.$base);
+            + (new TableGenerator)->typescript($tables, '../'.$base, $definitions);
         $manifest = dirname($path).'/'.$base.'.files.json';
         $previous = $files->exists($manifest) ? json_decode($files->get($manifest), true, flags: JSON_THROW_ON_ERROR) : [];
         if (! is_array($previous)) {

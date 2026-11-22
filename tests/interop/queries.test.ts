@@ -93,6 +93,27 @@ it('matches direct PHP for conditional predicates, date membership, and constrai
     }
 });
 
+it('uses PHP wire dates for scalar and list constraints on a declared table relation', () => {
+    const { typescript, ast }: { typescript: string; ast: AST } = JSON.parse(
+        execFileSync('php', ['tests/interop/export.php', 'table-relation-dates'], { encoding: 'utf8' }),
+    );
+    const zql = createBuilder(schema);
+    const native = asQueryInternals(runInNewContext(typescript, { zql }) as typeof zql.tasks).ast;
+    expect(native).toEqual(normalizeAST(ast));
+    expect(native.where).toMatchObject({
+        conditions: expect.arrayContaining([
+            expect.objectContaining({
+                left: { type: 'column', name: 'completed_at' },
+                right: { type: 'literal', value: 1767225600123 },
+            }),
+            expect.objectContaining({
+                left: { type: 'column', name: 'created_at' },
+                right: { type: 'literal', value: [1767225600000, 1767312000000] },
+            }),
+        ]),
+    });
+});
+
 it('executes standalone query exports with native ZQL, decoded selections and pagination', () => {
     const base = createBuilder(schema).tasks.where('deleted_at', 'IS', null);
     const ctx = { user_id: 'alice' };

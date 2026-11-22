@@ -4,15 +4,22 @@ declare(strict_types=1);
 
 require __DIR__.'/../../packages/laravel/vendor/autoload.php';
 
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Foundation\Auth\User;
 use Illuminate\Foundation\Http\FormRequest;
 use Inertia\Inertia;
 use Inertia\Response;
 use Laravel\Surveyor\SurveyorServiceProvider;
 use PhpParser\ParserFactory;
+use ZeroForLaravel\Attributes\ZeroPublic;
 use ZeroForLaravel\Generation\ControllerQueryCompiler;
 use ZeroForLaravel\Generation\ControllerQueryGenerator;
 use ZeroForLaravel\Generation\EffectSchemaDriver;
+use ZeroForLaravel\Generation\NativeQueryEmitter;
+use ZeroForLaravel\Generation\QueryExpression;
+use ZeroForLaravel\Generation\TableCompiler;
+use ZeroForLaravel\Generation\TableGenerator;
 use ZeroForLaravel\Generation\TypeScriptGenerator;
 use ZeroForLaravel\Generation\ZodSchemaDriver;
 use ZeroForLaravel\Metadata\ModelRegistry;
@@ -24,9 +31,24 @@ use ZeroForLaravel\Tests\Fixtures\Comment;
 use ZeroForLaravel\Tests\Fixtures\PredicateQueries;
 use ZeroForLaravel\Tests\Fixtures\PredicateTask;
 use ZeroForLaravel\Tests\Fixtures\QueryController;
+use ZeroForLaravel\Tests\Fixtures\Tag;
 use ZeroForLaravel\Tests\Fixtures\Task;
+use ZeroForLaravel\Tests\Fixtures\TaskList;
+use ZeroForLaravel\Tests\Fixtures\TaskReportTable;
 use ZeroForLaravel\Tests\OwnerTestCase as TestCase;
 use ZeroForLaravel\Zero;
+
+#[ZeroPublic]
+final class DatedInteropList extends TaskList
+{
+    /** @return HasMany<Task, $this> */
+    public function completedTasks(): HasMany
+    {
+        return $this->hasMany(Task::class, 'list_id')
+            ->where('completed_at', '>=', '2025-12-31T19:00:00.123-05:00')
+            ->whereIn('created_at', ['2026-01-01', '2026-01-02']);
+    }
+}
 
 final class PaginationInteropRequest extends FormRequest
 {
@@ -93,6 +115,29 @@ function publicAst(ZeroQuery $query): array
 }
 if (($argv[1] ?? null) === 'generate') {
     echo (new TypeScriptGenerator)->generate($registry);
+} elseif (($argv[1] ?? null) === 'table-relation-dates') {
+    $registry = new ModelRegistry([DatedInteropList::class, Task::class]);
+    $parent = $registry->get('DatedInteropList');
+    $target = $registry->get($registry->relation($parent, 'completedTasks')['model']);
+    $query = new ZeroQuery($target, $registry);
+    $parent->applyRelationConstraints('completedTasks', $query);
+    echo json_encode([
+        'typescript' => (new NativeQueryEmitter)->relationMembership($parent, 'completedTasks', new QueryExpression('query', model: $target, type: 'query')),
+        'ast' => publicAst($query),
+    ], JSON_THROW_ON_ERROR);
+} elseif (($argv[1] ?? null) === 'junction-preview') {
+    // The native construction includes application scopes. Policy is installed privately in the transform.
+    config(['zero.route_prefix' => 'zero']);
+    Tag::addGlobalScope('catalog', fn (Builder $q) => $q->where('user_id', 'alice'));
+    $definition = (new TableCompiler($registry))->compile('report', TaskReportTable::class);
+    $definition->bind(request()->user());
+    $query = $definition->rows([]);
+    echo json_encode([
+        'schema' => (new TypeScriptGenerator)->generate($registry),
+        'descriptor' => (new TableGenerator)->typescript([$definition], './generated')['tables/report.ts'],
+        'ast' => publicAst($query),
+        'authorized' => (new QueryCompiler($registry))->compileDeclaration($query, new ResolvedContext(['user_id' => 'alice'], 'alice')),
+    ], JSON_THROW_ON_ERROR);
 } elseif (($argv[1] ?? null) === 'predicates') {
     app()->register(SurveyorServiceProvider::class);
     $queries = new PredicateQueries;

@@ -5,13 +5,17 @@ declare(strict_types=1);
 namespace ZeroForLaravel\Tests\Feature;
 
 use Closure;
+use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Foundation\Auth\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Route;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Validation\ValidationException;
 use LogicException;
+use Symfony\Component\HttpKernel\Exception\HttpException;
+use ZeroForLaravel\Generation\ControllerQueryCompiler;
 use ZeroForLaravel\Generation\ControllerQueryGenerator;
 use ZeroForLaravel\Generation\TableCompiler;
 use ZeroForLaravel\Generation\TableGenerator;
@@ -20,8 +24,10 @@ use ZeroForLaravel\Http\TableMetadataController;
 use ZeroForLaravel\Metadata\ModelRegistry;
 use ZeroForLaravel\Query\QueryCompiler;
 use ZeroForLaravel\Query\RegisteredQueries;
+use ZeroForLaravel\Query\ZeroQuery;
 use ZeroForLaravel\ResolvedContext;
 use ZeroForLaravel\Support\ApplicationClasses;
+use ZeroForLaravel\Tables\AllowedRelation;
 use ZeroForLaravel\Tables\Metadata;
 use ZeroForLaravel\Tables\RegisteredTableQuery;
 use ZeroForLaravel\Tables\Table;
@@ -29,6 +35,7 @@ use ZeroForLaravel\Tables\TableContext;
 use ZeroForLaravel\Tables\TableRegistry;
 use ZeroForLaravel\Tests\Fixtures\Comment;
 use ZeroForLaravel\Tests\Fixtures\DiscoveredClasses;
+use ZeroForLaravel\Tests\Fixtures\OwnerReadScope;
 use ZeroForLaravel\Tests\Fixtures\Tag;
 use ZeroForLaravel\Tests\Fixtures\Task;
 use ZeroForLaravel\Tests\Fixtures\TaskList;
@@ -68,6 +75,75 @@ final class UnsafeTable
     public function definition(TableContext $context): Table
     {
         return Table::for(Task::class)->visibleTo($context->user())->where('title', '=', file_get_contents('/never-execute-this'));
+    }
+}
+
+final class PickerTable
+{
+    public function definition(TableContext $context): Table
+    {
+        return Table::for(Task::class)->visibleTo($context->user())
+            ->allowedRelations([AllowedRelation::named('tags')->choices('id', 'name')]);
+    }
+}
+
+final class EligibleTagCatalog
+{
+    public function eligible(Request $request): ZeroQuery
+    {
+        return Tag::zeroQuery()->visibleTo($request->user())->where('name', '!=', 'Archived')->get();
+    }
+
+    public function selectable(Request $request): ZeroQuery
+    {
+        return Tag::zeroQuery()->visibleTo($request->user())->where('name', '!=', 'Pending')->get();
+    }
+}
+
+final class CatalogPickerTable
+{
+    public function definition(TableContext $context): Table
+    {
+        return Table::for(TaskList::class)->visibleTo($context->user())
+            ->allowedRelations([AllowedRelation::named('tasks')->allowedRelations([
+                AllowedRelation::named('tags')->choices('id', 'name', 'ZeroForLaravel\\Tests\\Feature\\EligibleTagCatalog@eligible', 'ZeroForLaravel\\Tests\\Feature\\EligibleTagCatalog@selectable'),
+            ])]);
+    }
+}
+
+final class TaskCatalog
+{
+    public function uncommented(Request $request): ZeroQuery
+    {
+        return Task::zeroQuery()->visibleTo($request->user())
+            ->whereDoesntHave('comments', fn ($q) => $q->visibleTo($request->user()))->get();
+    }
+}
+
+final class UncommentedTaskPickerTable
+{
+    public function definition(TableContext $context): Table
+    {
+        return Table::for(TaskList::class)->visibleTo($context->user())
+            ->allowedRelations([AllowedRelation::named('tasks')->choices('id', 'title', 'ZeroForLaravel\\Tests\\Feature\\TaskCatalog@uncommented')]);
+    }
+}
+
+final class NullableLabelTable
+{
+    public function definition(TableContext $context): Table
+    {
+        return Table::for(TaskList::class)->visibleTo($context->user())
+            ->allowedRelations([AllowedRelation::named('tasks')->choices('id', 'list_id')]);
+    }
+}
+
+final class DateLabelTable
+{
+    public function definition(TableContext $context): Table
+    {
+        return Table::for(TaskList::class)->visibleTo($context->user())
+            ->allowedRelations([AllowedRelation::named('tasks')->choices('id', 'completed_at')]);
     }
 }
 
@@ -248,3 +324,145 @@ test('table generation is symbolic and emits paired descriptors without changing
         File::delete($path);
     }
 });
+
+test('descriptor picker registrations search a visible catalog and resolve a bounded batch independently', function (): void {
+    /** @var TableTransportTestCase $this */
+    config(['zero.limits.max_live_window' => 64]);
+    $this->discover([...$this->models(), PickerTable::class]);
+    $definition = resolve(TableRegistry::class)->all()[0];
+    $file = tempnam(sys_get_temp_dir(), 'zero-table-choices-');
+    if ($file === false) {
+        throw new LogicException('Cannot create table registration fixture.');
+    }
+
+    try {
+        File::put($file, (new ControllerQueryGenerator(new ZodSchemaDriver))->php([], [$definition]));
+        $registered = RegisteredQueries::load($file)->all();
+    } finally {
+        File::delete($file);
+    }
+
+    $typescript = (new TableGenerator)->typescript([$definition], '../generated')['tables/picker.ts'];
+    $options = [];
+    foreach ($registered as $name => $query) {
+        expect($typescript)->toContain($name);
+        if ($query instanceof RegisteredTableQuery && $query->operation !== null) {
+            $options[$query->operation] = $query;
+        }
+    }
+
+    expect(array_keys($options))->toBe(['list', 'resolve']);
+    $actor = (new User)->setKeyType('string')->forceFill(['id' => 'alice']);
+    $this->actingAs($actor);
+    request()->setUserResolver(fn () => $actor);
+    $context = new ResolvedContext(['user_id' => 'alice'], 'alice');
+    $compiler = new QueryCompiler(resolve(ModelRegistry::class));
+    $cursor = ['name' => 'R%_ repeated', 'id' => 'last-visible-id'];
+    $ast = $options['list']->invoke(['search' => 'R%_', '__cursor' => $cursor], $context, $compiler);
+    expect($ast)->toMatchArray(['table' => 'tags', 'orderBy' => [['name', 'asc'], ['id', 'asc']], 'limit' => 26]);
+    expect($ast['start'])->toEqual(['row' => (object) $cursor, 'exclusive' => true]);
+    expect(json_encode($ast, JSON_THROW_ON_ERROR))->toContain('user:alice', 'permission_index', 'R\\\\%\\\\_');
+
+    $ast = $options['resolve']->invoke(['ids' => ['one', 'two']], $context, $compiler);
+    expect($ast)->toMatchArray(['table' => 'tags', 'limit' => 2]);
+    expect(json_encode($ast, JSON_THROW_ON_ERROR))->toContain('user:alice', 'permission_index', '["one","two"]');
+
+    $ids = array_map(strval(...), range(1, 100));
+    $saved = $options['resolve']->invoke(['ids' => $ids], $context, $compiler);
+    expect($saved['limit'])->toBe(100);
+    expect(json_encode($saved, JSON_THROW_ON_ERROR))->toContain(json_encode($ids, JSON_THROW_ON_ERROR));
+    foreach ([null, ['name' => 'duplicate'], ['name' => 'duplicate', 'id' => 1], [...$cursor, 'user_id' => 'bob']] as $badCursor) {
+        expect(fn (): array => $options['list']->invoke(['search' => '', '__cursor' => $badCursor], $context, $compiler))->toThrow(ValidationException::class);
+    }
+
+    foreach ([['list', ['__window' => 65, 'search' => '']], ['list', ['search' => str_repeat('X', 257)]], ['resolve', ['ids' => [42]]], ['resolve', ['ids' => array_fill(0, 101, 'x')]], ['resolve', ['ids' => [], 'path' => 'other']]] as [$op, $args]) {
+        expect(fn (): array => $options[$op]->invoke($args, $context, $compiler))->toThrow(ValidationException::class);
+    }
+
+    expect(fn (): array => $options['list']->invoke(['search' => ''], new ResolvedContext([], 'bob'), $compiler))->toThrow(\Illuminate\Auth\Access\AuthorizationException::class);
+    config(['zero.limits.max_live_window' => 200]);
+    expect(fn (): array => $options['list']->invoke(['search' => ''], $context, $compiler))->toThrow(HttpException::class, 'Table choices changed');
+});
+
+test('nested picker bindings preserve standalone eligibility in listings and saved selections', function (): void {
+    /** @var TableTransportTestCase $this */
+    Tag::addGlobalScope(new OwnerReadScope);
+    $this->discover([...$this->models(), CatalogPickerTable::class, EligibleTagCatalog::class]);
+    $table = resolve(TableRegistry::class)->all()[0];
+    $compiler = resolve(ControllerQueryCompiler::class);
+    $queries = [...$compiler->compile(EligibleTagCatalog::class, 'eligible'), ...$compiler->compile(EligibleTagCatalog::class, 'selectable')];
+    $generator = new ControllerQueryGenerator(new ZodSchemaDriver);
+    expect(fn (): string => $generator->php([], [$table]))->toThrow(LogicException::class, 'Unknown standalone');
+    $file = tempnam(sys_get_temp_dir(), 'zero-catalog-choices-');
+    if ($file === false) {
+        throw new LogicException('Cannot create table registration fixture.');
+    }
+
+    try {
+        File::put($file, $generator->php($queries, [$table]));
+        $registry = RegisteredQueries::load($file);
+        app()->instance(RegisteredQueries::class, $registry);
+    } finally {
+        File::delete($file);
+    }
+
+    $ts = (new TableGenerator)->typescript([$table], '../generated', $queries)['tables/catalog-picker.ts'];
+    expect($ts)->toContain('Archived', 'Pending', 'tasks.tags', 'deleted_at', 'ctx["user_id"]');
+    $actor = (new User)->setKeyType('string')->forceFill(['id' => 'alice']);
+    $this->actingAs($actor);
+    request()->setUserResolver(fn () => $actor);
+    $context = new ResolvedContext(['user_id' => 'alice'], 'alice');
+    $compiler = new QueryCompiler(resolve(ModelRegistry::class));
+    $operations = [];
+    foreach ($registry->all() as $name => $registration) {
+        if ($registration instanceof RegisteredTableQuery && $registration->operation !== null) {
+            $operations[] = $registration->operation;
+            $args = $registration->operation === 'list' ? ['search' => ''] : ['ids' => ['revoked']];
+            expect($ts)->toContain($name);
+            $ast = $registration->invoke($args, $context, $compiler);
+            $wire = json_encode($ast, JSON_THROW_ON_ERROR);
+            expect($wire)->toContain('Archived', 'user:alice', 'permission_index', '"name":"user_id"', '"value":"alice"');
+            if ($registration->operation === 'resolve') {
+                expect($wire)->toContain('Pending', 'revoked');
+            } else {
+                expect($wire)->not->toContain('Pending');
+            }
+        }
+    }
+
+    expect($operations)->toBe(['list', 'resolve']);
+});
+
+test('generation rejects relation absence in a picker override without forbidding the standalone query', function (): void {
+    $queries = resolve(ControllerQueryCompiler::class)->compile(TaskCatalog::class, 'uncommented');
+    $table = resolve(TableCompiler::class)->compile('uncommented', UncommentedTaskPickerTable::class);
+    $generator = new ControllerQueryGenerator(new ZodSchemaDriver);
+
+    expect($generator->php($queries))->toContain($queries[0]->name());
+    expect(fn (): string => $generator->php($queries, [$table]))->toThrow(LogicException::class, 'relation absence');
+    expect(fn (): array => (new TableGenerator)->typescript([$table], '../generated', $queries))->toThrow(LogicException::class, 'relation absence');
+});
+
+test('a relation-aware descriptor displays JSON columns only when explicitly selected', function (): void {
+    /** @var TableTransportTestCase $this */
+    Schema::table('tasks', fn (Blueprint $table) => $table->jsonb('details')->nullable());
+    app()->instance(ModelRegistry::class, new ModelRegistry($this->models()));
+    $definition = resolve(TableCompiler::class)->compile('picker', PickerTable::class);
+    $capabilities = $definition->capabilities();
+    expect(data_get($capabilities, 'columns.details.type'))->toBe('json');
+    $fields = data_get($capabilities, 'displayColumns.*.field');
+    expect($fields)->toContain('title');
+    expect($fields)->not->toContain('details');
+
+    $definition->table->displayColumns(['details' => 'Task details', 'title']);
+    expect($definition->capabilities()['displayColumns'])->toBe([
+        ['field' => 'details', 'label' => 'Task details'], ['field' => 'title', 'label' => 'Title'],
+    ]);
+});
+
+test('generation rejects labels that do not decode to text on every selectable row', function (string $class): void {
+    expect(function () use ($class): void {
+        $table = resolve(TableCompiler::class)->compile('picker', $class);
+        (new TableGenerator)->typescript([$table], '../generated');
+    })->toThrow(LogicException::class, 'label');
+})->with([NullableLabelTable::class, DateLabelTable::class]);

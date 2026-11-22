@@ -1,28 +1,54 @@
 /* oxlint-disable unicorn/no-array-sort -- ES2022 support; only newly allocated arrays are sorted. */
-import { encodeDate, type Column } from '@nickwelsh/zero-for-laravel';
+import { encodeDate, type Column, type ContractMap, type ModelRow } from '@nickwelsh/zero-for-laravel';
+import { junctionNormalizer, projectJunction, type JunctionLookup } from './junction-lookup';
 export { column, editors, parseEditorValue } from './columns';
 export type { Editor, ColumnDefinition, CellChange, CellSubmitResult } from './columns';
+export type { FilterFieldOption, FilterOperatorOption, TableOperator, DisplayColumn } from './discovery';
 
 export type Scalar = string | number | boolean | null;
 export type GroupPath = readonly { readonly field: string; readonly value: Scalar }[];
-export interface Capabilities {
-    readonly version: 2;
-    readonly name: string;
-    readonly contract: string;
-    readonly model: string;
-    readonly key: readonly string[];
-    readonly columns: Readonly<Record<string, Column>>;
+export interface FilterScope {
     readonly filters: Readonly<
         Record<
             string,
             {
                 readonly field: string;
                 readonly kind: string;
+                readonly label?: string;
                 readonly operators: readonly string[];
                 readonly column: Column;
             }
         >
     >;
+    readonly relations?: Readonly<Record<string, RelationCapability>>;
+}
+export type RelationOperator = 'some' | 'has' | 'any' | 'all';
+export interface RelationCapability extends FilterScope {
+    readonly model: string;
+    readonly table: string;
+    readonly junction?: JunctionLookup;
+    readonly key: string;
+    readonly keyColumn: Column;
+    readonly cardinality: 'one' | 'many';
+    readonly label: string;
+    readonly operators: readonly RelationOperator[];
+    readonly choices: {
+        readonly value: string;
+        readonly label: string;
+        readonly list?: string;
+        readonly resolve?: string;
+    } | null;
+    readonly lookup: { readonly field: string; readonly limit: number } | null;
+}
+export interface Capabilities extends FilterScope {
+    readonly version: 2 | 3;
+    readonly name: string;
+    readonly contract: string;
+    readonly stateContract?: string;
+    readonly model: string;
+    readonly key: readonly string[];
+    readonly columns: Readonly<Record<string, Column>>;
+    readonly displayColumns?: readonly { readonly field: string; readonly label: string }[];
     readonly sorts: readonly string[];
     readonly groups: Readonly<
         Record<
@@ -46,7 +72,7 @@ type Value<C extends Column> = C['date'] extends true
     : C['enum'] extends readonly (string | number)[]
       ? C['enum'][number]
       : { string: string; number: number; boolean: boolean; json: never }[C['type']];
-type Condition<C extends Capabilities> = {
+type Condition<C extends FilterScope> = {
     [K in keyof C['filters'] & string]: {
         kind: 'condition';
         field: K;
@@ -62,8 +88,24 @@ type Condition<C extends Capabilities> = {
           }
     );
 }[keyof C['filters'] & string];
-export type FilterNode<C extends Capabilities = Capabilities> =
+type Relations<C extends FilterScope> = 'relations' extends keyof C ? NonNullable<C['relations']> : {};
+type RelationRule<K, R extends RelationCapability> = {
+    kind: 'relation';
+    field: K;
+    operator: R['operators'][number];
+} & (
+    | { operator: 'some'; filter: FilterNode<R> }
+    | { operator: 'has'; value: Value<R['keyColumn']> }
+    | { operator: 'any' | 'all'; value: readonly Value<R['keyColumn']>[] }
+);
+type Related<C extends FilterScope> = {
+    [K in keyof Relations<C> & string]: Relations<C>[K] extends RelationCapability
+        ? RelationRule<K, Relations<C>[K]>
+        : never;
+}[keyof Relations<C> & string];
+export type FilterNode<C extends FilterScope = Capabilities> =
     | Condition<C>
+    | Related<C>
     | { kind: 'and' | 'or'; children: readonly FilterNode<C>[] };
 export interface Sort {
     readonly field: string;
@@ -92,19 +134,42 @@ export interface Selection<Row> {
     request(): unknown;
     decode(raw: unknown): readonly Row[];
 }
+// applyTableQuery selects these target rows dynamically, so the native base query omits them from its type.
+type LookupFields<D extends ContractMap, R extends Readonly<Record<string, RelationCapability>>> = {
+    readonly [K in keyof R as R[K]['lookup'] extends NonNullable<RelationCapability['lookup']> ? K : never]: {
+        many: readonly ModelRow<D, R[K]['model']>[];
+        one: ModelRow<D, R[K]['model']> | undefined;
+    }[R[K]['cardinality']];
+};
+type TableRow<C extends Capabilities, S extends Selection<unknown>> = ReturnType<S['decode']>[number] &
+    (S['definitions'] extends ContractMap ? LookupFields<S['definitions'], NonNullable<C['relations']>> : unknown);
 export interface TableDescriptor<Row, C extends Capabilities = Capabilities> {
     readonly capabilities: C;
     rows(input: TableQueryInput<C>): Selection<Row>;
     rowId(row: Row): string;
+    options?(path: readonly string[], input: TableOptionInput): Selection<Readonly<Record<string, unknown>>>;
 }
+export type TableOptionInput =
+    | { operation: 'list'; search: string }
+    | { operation: 'resolve'; ids: readonly (string | number)[] };
 export function createTable<C extends Capabilities, S extends Selection<unknown>>(
     capabilities: C,
     rows: (input: TableQueryInput<C>) => S,
-): TableDescriptor<ReturnType<S['decode']>[number], C> {
-    type Row = ReturnType<S['decode']>[number];
+    options?: TableDescriptor<unknown, C>['options'],
+): TableDescriptor<TableRow<C, S>, C> {
+    type Row = TableRow<C, S>;
+    const normalize = junctionNormalizer(capabilities);
     return Object.freeze({
         capabilities,
-        rows: (input: TableQueryInput<C>) => ({ ...rows(input), pageSize: undefined }),
+        ...(options ? { options } : {}),
+        rows: (input: TableQueryInput<C>) => {
+            const selection = rows(input);
+            return {
+                ...selection,
+                pageSize: undefined,
+                decode: (raw: unknown) => selection.decode(normalize(raw)) as readonly Row[],
+            };
+        },
         rowId: (row: Row) =>
             'r:' + JSON.stringify(capabilities.key.map((field) => (row as Record<string, unknown>)[field])),
     });
@@ -135,7 +200,7 @@ function scalar(value: unknown, column: Column): void {
     if (value !== null && column.enum && !column.enum.includes(value as string | number)) invalid('enum value');
 }
 export function validateState<C extends Capabilities>(capabilities: C, state: TableState<C>): void {
-    if (capabilities.version !== 2) invalid('unsupported protocol');
+    if (![2, 3].includes(capabilities.version)) invalid('unsupported protocol');
     if (!Array.isArray(state.sort) || !Array.isArray(state.groupBy) || !Array.isArray(state.expanded))
         invalid('state lists');
     if (
@@ -164,17 +229,45 @@ export function validateState<C extends Capabilities>(capabilities: C, state: Ta
     )
         invalid('sort');
     state.sort.forEach((sort) => keys(sort, ['field', 'direction']));
+    if (state.filter !== null) validateFilter(capabilities, state.filter);
+}
+
+export function validateFilter(root: FilterScope, rule: FilterNode): void {
     let terms = 0;
-    function visit(node: FilterNode<C>, depth: number): void {
+    function visit(scope: FilterScope, node: FilterNode, depth: number): void {
         if (++terms > 100 || depth > 8) invalid('filter complexity');
+        if (!node || typeof node !== 'object' || Array.isArray(node)) invalid('filter node');
+        if ((node.kind === 'relation' || node.kind === 'condition') && typeof node.field !== 'string')
+            invalid('filter field');
+        if (node.kind === 'relation') {
+            const relation =
+                scope.relations && Object.hasOwn(scope.relations, node.field) ? scope.relations[node.field] : undefined;
+            if (!relation) invalid('relation capability');
+            if (!relation.operators.includes(node.operator)) invalid('relation operator');
+            if (node.operator === 'some') {
+                keys(node, ['kind', 'field', 'operator', 'filter']);
+                visit(relation, node.filter, depth + 1);
+                return;
+            }
+            keys(node, ['kind', 'field', 'operator', 'value']);
+            const ids = node.operator === 'has' ? [node.value] : node.value;
+            if (!Array.isArray(ids) || !ids.length || ids.length > 100) invalid('membership');
+            if (node.operator === 'all' && (terms += new Set(ids).size - 1) > 100) invalid('filter complexity');
+            for (const id of ids) {
+                if (typeof id !== 'string' && typeof id !== 'number') invalid('relation ID');
+                if (typeof id === 'string' && (!id.length || Array.from(id).length > 1000)) invalid('relation ID');
+                scalar(id, relation.keyColumn);
+            }
+            return;
+        }
         keys(node, node.kind === 'condition' ? ['kind', 'field', 'operator', 'value'] : ['kind', 'children']);
         if (node.kind !== 'condition') {
             if (!['and', 'or'].includes(node.kind) || !Array.isArray(node.children) || !node.children.length)
                 invalid('filter group');
-            node.children.forEach((child) => visit(child, depth + 1));
+            node.children.forEach((child) => visit(scope, child, depth + 1));
             return;
         }
-        const filter = Object.hasOwn(capabilities.filters, node.field) ? capabilities.filters[node.field] : undefined;
+        const filter = Object.hasOwn(scope.filters, node.field) ? scope.filters[node.field] : undefined;
         if (!filter || !filter.operators.includes(node.operator)) invalid('filter capability');
         if (node.operator === 'isNull' || node.operator === 'isNotNull') {
             if ('value' in node) invalid('null operation');
@@ -204,7 +297,7 @@ export function validateState<C extends Capabilities>(capabilities: C, state: Ta
                 invalid('text operand');
         }
     }
-    if (state.filter !== null) visit(state.filter, 1);
+    visit(root, rule, 1);
 }
 
 /** Restore a shareable view, falling back to initial state/defaults for invalid or outdated links. */
@@ -221,9 +314,19 @@ export function readTableState<C extends Capabilities>(
             if (search.getAll(key).length !== 1 || [...search.keys()].some((name) => name.startsWith(key + '[')))
                 invalid('ambiguous URL');
             if (new TextEncoder().encode(encoded).length > 16384) invalid('URL size');
-            const value = JSON.parse(encoded) as { version: unknown; state: Partial<TableState<C>> };
-            keys(value, ['version', 'state']);
-            if (value.version !== 2 || !value.state || Array.isArray(value.state) || typeof value.state !== 'object')
+            const value = JSON.parse(encoded) as {
+                version: unknown;
+                contract?: unknown;
+                state: Partial<TableState<C>>;
+            };
+            keys(value, capabilities.version === 3 ? ['version', 'contract', 'state'] : ['version', 'state']);
+            if (
+                value.version !== capabilities.version ||
+                (value.version === 3 && value.contract !== (capabilities.stateContract ?? capabilities.contract)) ||
+                !value.state ||
+                Array.isArray(value.state) ||
+                typeof value.state !== 'object'
+            )
                 invalid('URL state');
             return normalizeTableState(capabilities, { ...fallback, ...value.state });
         } catch {
@@ -261,7 +364,11 @@ export function writeTableState<C extends Capabilities>(
     validateState(capabilities, state);
     const next = new URLSearchParams(search);
     const { filter, sort, groupBy, expanded } = state;
-    const encoded = JSON.stringify({ version: 2, state: { filter, sort, groupBy, expanded } });
+    const encoded = JSON.stringify({
+        version: capabilities.version,
+        ...(capabilities.version === 3 ? { contract: capabilities.stateContract ?? capabilities.contract } : {}),
+        state: { filter, sort, groupBy, expanded },
+    });
     if (new TextEncoder().encode(encoded).length > 16384) invalid('URL size');
     const key = options.key ?? 'table.' + capabilities.name;
     // oxlint-disable-next-line unicorn/no-useless-spread -- Snapshot before deleting bracket variants.
@@ -273,16 +380,96 @@ export function writeTableState<C extends Capabilities>(
 // One structural bridge for generated native queries; server capabilities remain authoritative.
 interface Expressions {
     cmp(field: string, op: string, value: unknown): unknown;
+    cmpLit(left: unknown, op: string, right: unknown): unknown;
     and(...conditions: unknown[]): unknown;
     or(...conditions: unknown[]): unknown;
+    exists(field: string, callback: (query: NativeQuery) => NativeQuery): unknown;
 }
 interface NativeQuery {
     where(field: string, op: string, value: unknown): NativeQuery;
     where(expression: (builder: Expressions) => unknown): NativeQuery;
+    related(field: string, callback: (query: NativeQuery) => NativeQuery): NativeQuery;
     orderBy(field: string, direction: 'asc' | 'desc'): NativeQuery;
     limit(window: number): NativeQuery;
 }
-export function applyTableQuery<Q, C extends Capabilities>(base: Q, input: TableQueryInput<C>, capabilities: C): Q {
+export type TableRelationScopes = Readonly<Record<string, (query: NativeQuery) => NativeQuery>>;
+function scoped(query: NativeQuery, path: string, scopes: TableRelationScopes) {
+    return Object.hasOwn(scopes, path) ? scopes[path]!(query) : query;
+}
+function expression(
+    builder: Expressions,
+    scope: FilterScope,
+    node: FilterNode,
+    path: string[],
+    scopes: TableRelationScopes,
+): unknown {
+    if (node.kind === 'relation') {
+        const relation = scope.relations![node.field]!;
+        const next = [...path, node.field];
+        const exists = (refine: (q: NativeQuery) => NativeQuery) =>
+            builder.exists(node.field, (q) => refine(scoped(q, next.join('.'), scopes)));
+        switch (node.operator) {
+            case 'some':
+                return exists((q) => q.where((eb) => expression(eb, relation, node.filter, next, scopes)));
+            case 'has':
+                return exists((q) => q.where(relation.key, '=', node.value));
+            case 'any':
+                return exists((q) => q.where(relation.key, 'IN', node.value));
+            case 'all':
+                return builder.and(
+                    ...Array.from(new Set(node.value), (id) => exists((q) => q.where(relation.key, '=', id))),
+                );
+        }
+    }
+    if (node.kind !== 'condition')
+        return builder[node.kind](...node.children.map((child) => expression(builder, scope, child, path, scopes)));
+    const filter = scope.filters[node.field]!;
+    const operations: Record<string, string> = {
+        equals: '=',
+        notEquals: '!=',
+        in: 'IN',
+        gt: '>',
+        gte: '>=',
+        lt: '<',
+        lte: '<=',
+        isNull: 'IS',
+        isNotNull: 'IS NOT',
+    };
+    let value: unknown = node.value ?? null;
+    if (filter.kind === 'date' && value !== null) {
+        const date = (item: unknown) => encodeDate(new Date(item as string), filter.column.dateFormat);
+        value = Array.isArray(value) ? value.map(date) : date(value);
+    }
+    const operation = operations[node.operator] ?? 'LIKE';
+    if (operation === 'LIKE') {
+        const escaped = String(value).replace(/[\\%_]/g, '\\$&');
+        value = (node.operator === 'startsWith' ? '' : '%') + escaped + (node.operator === 'endsWith' ? '' : '%');
+    }
+    return builder.cmp(filter.field, operation, value);
+}
+
+function relatedColumns(query: NativeQuery, capabilities: Capabilities, scopes: TableRelationScopes): NativeQuery {
+    for (const [field, relation] of Object.entries(capabilities.relations ?? {})) {
+        if (!relation.lookup) continue;
+        const limit = relation.lookup.limit;
+        if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) invalid('lookup limit');
+        const visible = (q: NativeQuery) => scoped(q, field, scopes);
+        query = relation.junction
+            ? projectJunction(query, relation.junction, limit, visible)
+            : query.related(field, (q) =>
+                  visible(q)
+                      .orderBy(relation.key, 'asc')
+                      .limit(relation.cardinality === 'one' ? 1 : limit + 1),
+              );
+    }
+    return query;
+}
+export function applyTableQuery<Q, C extends Capabilities>(
+    base: Q,
+    input: TableQueryInput<C>,
+    capabilities: C,
+    scopes: TableRelationScopes = {},
+): Q {
     validateState(capabilities, { ...input, expanded: [] });
     if (input.path.length !== input.groupBy.length) invalid('complete leaf path required');
     if (input['__refresh'] !== undefined && input['__row'] === undefined) invalid('identity refresh');
@@ -304,39 +491,8 @@ export function applyTableQuery<Q, C extends Capabilities>(base: Q, input: Table
             query = query.where(field, '=', value);
         });
     }
-    if (input.filter)
-        query = query.where((builder) => {
-            function expression(node: FilterNode<C>): unknown {
-                if (node.kind !== 'condition') return builder[node.kind](...node.children.map(expression));
-                const filter = capabilities.filters[node.field]!;
-                const operations: Record<string, string> = {
-                    equals: '=',
-                    notEquals: '!=',
-                    in: 'IN',
-                    gt: '>',
-                    gte: '>=',
-                    lt: '<',
-                    lte: '<=',
-                    isNull: 'IS',
-                    isNotNull: 'IS NOT',
-                };
-                let value: unknown = node.value ?? null;
-                if (filter.kind === 'date' && value !== null) {
-                    const date = (item: unknown) => encodeDate(new Date(item as string), filter.column.dateFormat);
-                    value = Array.isArray(value) ? value.map(date) : date(value);
-                }
-                const operation = operations[node.operator] ?? 'LIKE';
-                if (operation === 'LIKE') {
-                    const escaped = String(value).replace(/[\\%_]/g, '\\$&');
-                    value =
-                        (node.operator === 'startsWith' ? '' : '%') +
-                        escaped +
-                        (node.operator === 'endsWith' ? '' : '%');
-                }
-                return builder.cmp(filter.field, operation, value);
-            }
-            return expression(input.filter!);
-        });
+    if (input.filter) query = query.where((eb) => expression(eb, capabilities, input.filter as FilterNode, [], scopes));
+    query = relatedColumns(query, capabilities, scopes);
     input.path.forEach((part, index) => {
         if (part.field !== input.groupBy[index]!.field) invalid('group path');
         const field = capabilities.groups[part.field]!.field;
@@ -368,7 +524,7 @@ export type TableItem<Row> =
     | { kind: 'loading' | 'load-more' | 'empty'; id: string; groupId: string | null }
     | { kind: 'error'; id: string; groupId: string | null; error: Error };
 export interface MetadataResponse {
-    version: 2;
+    version: Capabilities['version'];
     requestKey: string;
     observedAt: string;
     totalCount: number;
@@ -416,7 +572,7 @@ export async function readMetadata<C extends Capabilities>(
             ...(xsrf ? { 'X-XSRF-TOKEN': decodeURIComponent(xsrf) } : {}),
         },
         body: JSON.stringify({
-            version: 2,
+            version: capabilities.version,
             contract: capabilities.contract,
             filter: state.filter,
             groupBy: state.groupBy,

@@ -25,8 +25,8 @@ import {
     type ControllerMutationContract,
 } from '../../packages/client/src/controller-mutation';
 import { ZeroProvider } from '@rocicorp/zero/react';
-import { act, fireEvent, render, waitFor } from '@testing-library/react';
-import { useEffect } from 'react';
+import { act, fireEvent, render, renderHook, waitFor } from '@testing-library/react';
+import { useEffect, useState } from 'react';
 import { useData, type Data } from '../../packages/client/src/react/data';
 import { liveQuery, withQueryInputs } from '../../packages/client/src/live-query';
 import { createInertiaAdapter } from '../../packages/client/src/react/inertia';
@@ -46,7 +46,8 @@ import {
     type TableState,
 } from '../../packages/table/src';
 import { DataTable, useDataTable } from '../../packages/table/src/react';
-import { encodeDate } from '../../packages/client/src';
+import { useTableFilterOptions } from '../../packages/table/src/react/filter-options';
+import { encodeDate, optionContains } from '../../packages/client/src';
 
 type LiveSchema = typeof fixtureSchema;
 
@@ -118,6 +119,7 @@ it.skipIf(!enabled)(
             ZERO_API_KEY: key,
             ZERO_APP_ID: appID,
             ZERO_APP_PUBLICATIONS: publication,
+            ZERO_MAX_LIVE_WINDOW: '100',
         };
         const psql = (sql: string, target = database) =>
             execFileSync(
@@ -248,26 +250,30 @@ it.skipIf(!enabled)(
                 ),
                 { require: () => module.exports, module: standalone },
             );
-            const tableModule = { exports: {} as { default: TableDescriptor<{ id: string; title: string }> } };
-            runInNewContext(
-                execFileSync(
-                    'node_modules/.bin/esbuild',
-                    [join(root, 'tables/tasks.ts'), '--format=cjs', '--target=es2022'],
-                    { encoding: 'utf8' },
-                ),
-                {
-                    require: (specifier: string) =>
-                        specifier === '../generated'
-                            ? { schema, definitions }
-                            : specifier === '@nickwelsh/zero-table'
-                              ? { createTable, applyTableQuery }
-                              : specifier === '@nickwelsh/zero-for-laravel'
-                                ? { liveQuery, encodeDate }
-                                : modules[specifier],
-                    module: tableModule,
-                },
-            );
-            const tableDescriptor = tableModule.exports.default;
+            function loadTable<R>(tableName: string) {
+                const tableModule = { exports: {} as { default: TableDescriptor<R> } };
+                runInNewContext(
+                    execFileSync(
+                        'node_modules/.bin/esbuild',
+                        [join(root, `tables/${tableName}.ts`), '--format=cjs', '--target=es2022'],
+                        { encoding: 'utf8' },
+                    ),
+                    {
+                        require: (specifier: string) =>
+                            specifier === '../generated'
+                                ? { schema, definitions }
+                                : specifier === '@nickwelsh/zero-table'
+                                  ? { createTable, applyTableQuery }
+                                  : specifier === '@nickwelsh/zero-for-laravel'
+                                    ? { liveQuery, encodeDate, optionContains }
+                                    : modules[specifier],
+                        module: tableModule,
+                    },
+                );
+                return tableModule.exports.default;
+            }
+            const tableDescriptor = loadTable<{ id: string; title: string }>('tasks');
+            const eventsDescriptor = loadTable<{ id: string; name: string }>('events');
             const tasks = module.exports.actions['ZeroForLaravel\\Tests\\Fixtures\\QueryController@sorted.tasks']!;
             const queryName = tasks({ direction: 'asc' }).request().query.queryName;
             const showTask = module.exports.actions[
@@ -580,7 +586,77 @@ it.skipIf(!enabled)(
                 const condition = (field: string, operator: string, value?: unknown): FilterNode =>
                     ({ kind: 'condition', field, operator, ...(value === undefined ? {} : { value }) }) as FilterNode;
                 const date = '2025-12-31T19:00:00.123-05:00';
+                // Two gifts on the first record must not satisfy one same-gift rule. The third
+                // record has a qualifying gift that belongs to another actor and must not count.
+                const gifts = [
+                    [0, 600, '2024', 'alice'],
+                    [0, 20, '2026', 'alice'],
+                    [1, 600, '2026', 'alice'],
+                    [1, 700, '2026', 'alice'],
+                    [2, 600, '2026', 'bob'],
+                    [3, 300, '2026', 'alice'],
+                    [3, 300, '2026', 'alice'],
+                    [4, 600, '2026', 'alice'],
+                ] as const;
+                psql(
+                    `INSERT INTO comments (id, task_id, user_id, body, amount, received_at) VALUES ${gifts.map(([i, amount, year, owner]) => `('${randomUUID()}','${parityIDs[i]}','${owner}','gift',${amount},'${year}-01-01')`).join(',')}`,
+                );
+                const [tagA, tagB, hiddenTag] = [randomUUID(), randomUUID(), randomUUID()] as const;
+                psql(
+                    `INSERT INTO tags (id,user_id,name) VALUES ('${tagA}','alice','Report A'),('${tagB}','alice','Report B'),('${hiddenTag}','bob','Report hidden')`,
+                );
+                psql(
+                    `INSERT INTO task_tag (task_id,tag_id) VALUES ('${parityIDs[0]}','${tagA}'),('${parityIDs[1]}','${tagA}'),('${parityIDs[1]}','${tagB}'),('${parityIDs[2]}','${hiddenTag}'),('${parityIDs[4]}','${tagB}')`,
+                );
+                const eventID = randomUUID();
+                psql(`INSERT INTO lists (id,user_id,name) VALUES ('${eventID}','alice','Annual gala')`);
+                psql(
+                    `INSERT INTO comments (id,task_id,user_id,body,event_id) VALUES ('${randomUUID()}','${parityIDs[1]}','alice','attended','${eventID}'),('${randomUUID()}','${parityIDs[4]}','alice','registered','${eventID}')`,
+                );
+                const giftRule: FilterNode = {
+                    kind: 'relation',
+                    field: 'comments',
+                    operator: 'some',
+                    filter: {
+                        kind: 'and',
+                        children: [
+                            condition('amount', 'gt', 500),
+                            condition('received_at', 'gte', '2025-01-01T00:00:00Z'),
+                        ],
+                    },
+                };
                 const cases: [FilterNode, number[]][] = [
+                    [giftRule, [1, 4]],
+                    [
+                        {
+                            kind: 'and',
+                            children: [
+                                giftRule,
+                                { kind: 'relation', field: 'tags', operator: 'has', value: tagB },
+                                {
+                                    kind: 'relation',
+                                    field: 'comments',
+                                    operator: 'some',
+                                    filter: {
+                                        kind: 'and',
+                                        children: [
+                                            condition('status', 'equals', 'attended'),
+                                            {
+                                                kind: 'relation',
+                                                field: 'event',
+                                                operator: 'some',
+                                                filter: condition('name', 'equals', 'Annual gala'),
+                                            },
+                                        ],
+                                    },
+                                },
+                            ],
+                        },
+                        [1],
+                    ],
+                    [{ kind: 'relation', field: 'tags', operator: 'any', value: [tagA, tagB] }, [0, 1, 4]],
+                    [{ kind: 'relation', field: 'tags', operator: 'all', value: [tagA, tagB] }, [1]],
+                    [{ kind: 'relation', field: 'tags', operator: 'has', value: hiddenTag }, []],
                     [condition('title', 'equals', 'Alpha%_\\tail'), [0]],
                     [condition('title', 'contains', '%_\\'), [0]],
                     [condition('title', 'startsWith', 'Alpha%_\\'), [0]],
@@ -635,7 +711,7 @@ it.skipIf(!enabled)(
                                 Accept: 'application/json',
                             },
                             body: JSON.stringify({
-                                version: 2,
+                                version: tableDescriptor.capabilities.version,
                                 contract: tableDescriptor.capabilities.contract,
                                 filter,
                                 groupBy: [{ field: 'done', direction: 'desc' }],
@@ -648,13 +724,169 @@ it.skipIf(!enabled)(
                             directories: { groups: { value: boolean; count: number }[] }[];
                         };
                         expect(snapshot.totalCount, JSON.stringify(filter)).toBe(expected.length);
-                        expect(snapshot.directories[0]!.groups.reduce((sum, group) => sum + group.count, 0)).toBe(
-                            expected.length,
-                        );
+                        const counts = new Map(snapshot.directories[0]!.groups.map((g) => [g.value, g.count]));
+                        // Only fixture row 1 is marked done; equal totals must not hide swapped group counts.
+                        expect(counts.get(true) ?? 0).toBe(Number(indices.includes(1)));
+                        expect(counts.get(false) ?? 0).toBe(indices.filter((i) => i !== 1).length);
                     } finally {
                         remove();
                         selected.destroy();
                     }
+                }
+                // The picker searches authorized records, not values found in the loaded root rows.
+                // More identically labeled choices than can fit in any one live window.
+                const catalogIDs = Array.from(
+                    { length: 101 },
+                    (_, i) => `11111111-0000-4000-8000-${String(i).padStart(12, '0')}`,
+                );
+                const unattached = catalogIDs.map((id) => `('${id}','alice','Catalog duplicate')`);
+                psql(`INSERT INTO tags (id,user_id,name) VALUES ${unattached.join(',')}`);
+                const picker = renderHook(
+                    ({ search, enabled: open }) =>
+                        useTableFilterOptions({ descriptor: tableDescriptor }, ['tags'], {
+                            operator: 'any',
+                            selected: [tagA, tagB],
+                            search,
+                            enabled: open,
+                        }),
+                    {
+                        initialProps: { search: 'Catalog', enabled: true },
+                        wrapper: ({ children }) => <ZeroProvider zero={zero!}>{children}</ZeroProvider>,
+                    },
+                );
+                try {
+                    const expectPage = (start: number) =>
+                        waitFor(
+                            () =>
+                                expect(picker.result.current.items.map((choice) => choice.value)).toEqual(
+                                    catalogIDs.slice(start, start + 25),
+                                ),
+                            { timeout: 10000 },
+                        );
+                    await expectPage(0);
+                    for (const start of [25, 50, 75, 100]) {
+                        expect(picker.result.current.hasMore).toBe(true);
+                        act(() => picker.result.current.loadMore());
+                        await expectPage(start);
+                    }
+                    expect(picker.result.current.hasMore).toBe(false);
+                    act(() => picker.result.current.previousPage());
+                    await expectPage(75);
+                    picker.rerender({ search: 'Report', enabled: true });
+                    await waitFor(
+                        () => expect(picker.result.current.items.map((choice) => choice.value)).toEqual([tagA, tagB]),
+                        { timeout: 10000 },
+                    );
+                    picker.rerender({ search: 'Report', enabled: false });
+                    await waitFor(() =>
+                        expect(picker.result.current.selectedItems.map((item) => item.label)).toEqual([
+                            'Report A',
+                            'Report B',
+                        ]),
+                    );
+                    expect(picker.result.current.items).toEqual([]);
+                    psql(`UPDATE tags SET user_id='bob' WHERE id='${tagB}'`);
+                    await waitFor(() => expect(picker.result.current.unavailable).toEqual([tagB]), { timeout: 10000 });
+                    expect(picker.result.current.selectedItems.map((item) => item.label)).toEqual(['Report A']);
+                } finally {
+                    picker.unmount();
+                }
+                // Both props are generated by this Laravel application. The consumer owns only markup.
+                function ChoiceFilter<R>({
+                    descriptor,
+                    path,
+                    select,
+                }: {
+                    descriptor: TableDescriptor<R>;
+                    path: readonly string[];
+                    select: (id: string | number) => void;
+                }) {
+                    const [search, setSearch] = useState('');
+                    const { items } = useTableFilterOptions({ descriptor }, path, {
+                        search,
+                        enabled: !!search,
+                        operator: 'has',
+                        selected: [],
+                    });
+                    return (
+                        <>
+                            <input
+                                aria-label="Search choices"
+                                value={search}
+                                onChange={(e) => setSearch(e.target.value)}
+                            />
+                            {items.map((item) => (
+                                <button key={item.value} onClick={() => select(item.value)}>
+                                    {item.label}
+                                </button>
+                            ))}
+                        </>
+                    );
+                }
+                function Report<R>({ descriptor }: { descriptor: TableDescriptor<R> }) {
+                    const session = useDataTable(descriptor, { urlState: true });
+                    return (
+                        <DataTable.Root table={session}>
+                            <output>{session.columns.map((c) => c.header).join('|')}</output>
+                            {session
+                                .filterFields()
+                                .filter((f) => f.operators.some((op) => op.id === 'has' && op.source === 'query'))
+                                .map((f) => (
+                                    <ChoiceFilter
+                                        key={f.field}
+                                        descriptor={descriptor}
+                                        path={f.path}
+                                        select={(id) => session.setFilter(session.buildFilter(f.path, 'has', id))}
+                                    />
+                                ))}
+                            {session.items.flatMap((item) =>
+                                item.kind === 'row'
+                                    ? session.columns.map((c) => (
+                                          <DataTable.Cell
+                                              key={item.id + c.id}
+                                              rowId={item.id}
+                                              table={session}
+                                              columnId={c.id}
+                                          />
+                                      ))
+                                    : [],
+                            )}
+                        </DataTable.Root>
+                    );
+                }
+                const reportHost = render(<Report descriptor={tableDescriptor} />, {
+                    wrapper: ({ children }) => <ZeroProvider zero={zero!}>{children}</ZeroProvider>,
+                });
+                try {
+                    expect(reportHost.getByText('Title|Tags')).toBeDefined();
+                    await waitFor(
+                        () => expect(reportHost.getAllByRole('gridcell', { name: 'Title' }).length).toBeGreaterThan(0),
+                        { timeout: 10000 },
+                    );
+                    fireEvent.change(reportHost.getByRole('textbox', { name: 'Search choices' }), {
+                        target: { value: 'Report' },
+                    });
+                    fireEvent.click(await reportHost.findByRole('button', { name: 'Report A' }, { timeout: 10000 }));
+                    const expectTagged = () =>
+                        waitFor(
+                            () =>
+                                expect(
+                                    reportHost
+                                        .getAllByRole('gridcell', { name: 'Title' })
+                                        .map((cell) => cell.textContent)
+                                        .sort(),
+                                ).toEqual([titles[0], titles[1]]),
+                            { timeout: 10000 },
+                        );
+                    await expectTagged();
+                    reportHost.rerender(<Report descriptor={eventsDescriptor} />);
+                    await waitFor(() => expect(reportHost.getByText('Annual gala')).toBeDefined(), { timeout: 10000 });
+                    expect(reportHost.queryByText('Title|Tags')).toBeNull();
+                    expect(reportHost.queryByRole('textbox', { name: 'Search choices' })).toBeNull();
+                    reportHost.rerender(<Report descriptor={tableDescriptor} />);
+                    await expectTagged(); // A fresh session restores the selected tag from the report URL.
+                } finally {
+                    reportHost.unmount();
                 }
                 // Mixed grouping must describe the same authorized leaf membership as live rows.
                 const listID = '019a0000-0000-7000-8000-000000000101';
@@ -680,7 +912,7 @@ it.skipIf(!enabled)(
                                 Accept: 'application/json',
                             },
                             body: JSON.stringify({
-                                version: 2,
+                                version: tableDescriptor.capabilities.version,
                                 contract: tableDescriptor.capabilities.contract,
                                 filter: groupedFilter,
                                 groupBy,

@@ -13,6 +13,7 @@ use Illuminate\Support\Facades\Schema;
 use Illuminate\Validation\ValidationException;
 use InvalidArgumentException;
 use LogicException;
+use ZeroForLaravel\Context\ContextReference;
 use ZeroForLaravel\Metadata\ModelRegistry;
 use ZeroForLaravel\Permissions\PolicyCompiler;
 use ZeroForLaravel\Query\QueryCompiler;
@@ -20,12 +21,14 @@ use ZeroForLaravel\Query\ZeroQuery;
 use ZeroForLaravel\ResolvedContext;
 use ZeroForLaravel\Tables\AllowedFilter;
 use ZeroForLaravel\Tables\AllowedGroup;
+use ZeroForLaravel\Tables\AllowedRelation;
 use ZeroForLaravel\Tables\Table;
 use ZeroForLaravel\Tables\TableURLState;
 use ZeroForLaravel\Tests\Fixtures\Comment;
 use ZeroForLaravel\Tests\Fixtures\Tag;
 use ZeroForLaravel\Tests\Fixtures\Task;
 use ZeroForLaravel\Tests\Fixtures\TaskList;
+use ZeroForLaravel\Tests\Fixtures\ZeroContext;
 use ZeroForLaravel\Tests\OwnerPostgresTestCase;
 
 uses(OwnerPostgresTestCase::class);
@@ -93,6 +96,76 @@ test('table predicates preserve authorized membership, literal matching, nulls a
     expect(fn (): Builder => $table->sql(new ResolvedContext(['user_id' => 'bob'], 'bob')))->toThrow(AuthorizationException::class);
 });
 
+test('snapshot totals and group membership bind amount, date and a visible nested tag to the same task', function (): void {
+    $id = static fn (int $n): string => sprintf('00000000-0000-4000-8000-%012d', $n);
+    $alice = (new User)->setKeyType('string')->forceFill(['id' => 'alice']);
+    foreach ([11, 12, 13, 14, 15] as $list) {
+        DB::table('lists')->insert(['id' => $id($list), 'user_id' => 'alice', 'name' => (string) $list]);
+    }
+
+    DB::table('tags')->insert(['id' => $id(20), 'user_id' => 'alice', 'name' => 'eligible']);
+    foreach ([
+        [11, 600, 2026, 'alice'], [11, 700, 2026, 'alice'],
+        [12, 600, 2020, 'alice'], [12, 20, 2026, 'alice'],
+        [13, 300, 2026, 'alice'], [13, 300, 2026, 'alice'],
+        [14, 600, 2026, 'bob'], [15, 600, 2026, 'alice'],
+    ] as $i => [$list, $amount, $year, $owner]) {
+        $task = $id(100 + $i);
+        DB::table('tasks')->insert(['id' => $task, 'user_id' => $owner, 'list_id' => $id($list), 'title' => 'gift', 'rating' => $amount, 'completed_at' => "$year-08-01"]);
+        if ($list !== 15) {
+            DB::table('task_tag')->insert(['task_id' => $task, 'tag_id' => $id(20)]);
+        }
+    }
+
+    Tag::addGlobalScope('context-label', fn (\Illuminate\Database\Eloquent\Builder $tags) => $tags->where('name', ContextReference::current(ZeroContext::USER_ID)));
+    $table = Table::for(TaskList::class)->visibleTo($alice)->allowedGroups([AllowedGroup::field('name')])->allowedRelations([
+        AllowedRelation::named('tasks')->lookup('title', 1)->allowedFilters([
+            AllowedFilter::number('amount', 'rating')->operators(['gt']), AllowedFilter::date('received', 'completed_at')->operators(['gte']),
+        ])->allowedRelations([AllowedRelation::named('tags')->choices('id', 'name')]),
+    ]);
+    $filter = ['kind' => 'relation', 'field' => 'tasks', 'operator' => 'some', 'filter' => ['kind' => 'and', 'children' => [
+        ['kind' => 'condition', 'field' => 'amount', 'operator' => 'gt', 'value' => 500],
+        ['kind' => 'condition', 'field' => 'received', 'operator' => 'gte', 'value' => '2026-01-01T00:00:00Z'],
+        ['kind' => 'relation', 'field' => 'tags', 'operator' => 'has', 'value' => $id(20)],
+    ]]];
+    $context = new ResolvedContext(['user_id' => 'eligible'], 'alice');
+    expect($table->sql($context, $filter)->pluck('id')->all())->toBe([$id(11)]);
+    expect($table->sql($context, $filter, [['field' => 'name', 'value' => '11']])->count())->toBe(1);
+    expect($table->sql(new ResolvedContext(['user_id' => 'different'], 'alice'), $filter)->count())->toBe(0);
+
+    $native = (new QueryCompiler(resolve(ModelRegistry::class)))->compileDeclaration($table->rows($filter), $context);
+    expect(json_encode($native, JSON_THROW_ON_ERROR))->toContain('eligible', 'user:alice');
+});
+
+test('junction membership distinguishes any and every distinct visible key', function (): void {
+    $id = static fn (int $n): string => sprintf('00000000-0000-4000-8000-%012d', $n);
+    foreach ([[11, 'alice'], [12, 'alice'], [13, 'bob']] as [$n, $owner]) {
+        DB::table('tags')->insert(['id' => $id($n), 'name' => "Tag $n", 'user_id' => $owner]);
+    }
+
+    DB::table('tasks')->insert(['id' => $id(5), 'user_id' => 'alice', 'title' => 'None visible']);
+    foreach ([[1, 11], [2, 12], [3, 11], [3, 12], [4, 11], [5, 13]] as [$task, $tag]) {
+        DB::table('task_tag')->insert(['task_id' => $id($task), 'tag_id' => $id($tag)]);
+    }
+
+    $context = new ResolvedContext(['user_id' => 'alice'], 'alice');
+    // A picker is optional; raw typed IDs have the same meaning.
+    $table = taskTable()->allowedRelations([AllowedRelation::named('tags')]);
+    $node = ['kind' => 'relation', 'field' => 'tags'];
+    foreach ([
+        [['operator' => 'has', 'value' => $id(11)], [1, 3]],
+        [['operator' => 'has', 'value' => $id(13)], []],
+        [['operator' => 'any', 'value' => [$id(11), $id(12)]], [1, 2, 3]],
+        [['operator' => 'all', 'value' => [$id(11), $id(12), $id(11)]], [3]],
+    ] as [$operation, $expected]) {
+        expect($table->sql($context, $node + $operation)->orderBy('id')->pluck('id')->all())->toBe(array_map($id, $expected));
+    }
+
+    $either = ['kind' => 'or', 'children' => [$node + ['operator' => 'has', 'value' => $id(12)], $node + ['operator' => 'has', 'value' => $id(11)]]];
+    expect($table->where('rating', '>=', 2)->sql($context, $either)->orderBy('id')->pluck('id')->all())->toBe([$id(1), $id(2)]);
+    expect(fn (): Builder => $table->sql($context, $node + ['operator' => 'none']))->toThrow(ValidationException::class);
+});
+
 test('table counts intersect Eloquent global scopes with policy visibility and reject untracked membership', function (): void {
     Task::addGlobalScope('unfinished', fn (\Illuminate\Database\Eloquent\Builder $query) => $query->where('done', false));
     $table = taskTable();
@@ -109,8 +182,17 @@ test('table counts intersect Eloquent global scopes with policy visibility and r
 });
 
 test('table capabilities reject malformed or broadened query input', function (): void {
-    $table = taskTable();
+    $table = taskTable()->allowedRelations([AllowedRelation::named('tags')->choices('id', 'name')]);
+    $tags = ['kind' => 'relation', 'field' => 'tags'];
     foreach ([
+        ['kind' => 'relation', 'field' => 'comments', 'operator' => 'none'],
+        ['kind' => 'relation', 'field' => 'list.tasks', 'operator' => 'none'],
+        $tags + ['operator' => 'some', 'filter' => ['kind' => 'condition', 'field' => 'title', 'operator' => 'equals', 'value' => 'private']],
+        $tags + ['operator' => 'some'], $tags + ['operator' => 'none', 'value' => null],
+        $tags + ['operator' => 'has', 'value' => ['x']], $tags + ['operator' => 'any', 'value' => []],
+        $tags + ['operator' => 'all', 'value' => [1]], $tags + ['operator' => 'all', 'value' => [null]],
+        $tags + ['operator' => 'any', 'value' => array_fill(0, 101, 'x')],
+        ['kind' => 'or', 'children' => [$tags + ['operator' => 'all', 'value' => array_map(strval(...), range(1, 100))]]],
         ['kind' => 'condition', 'field' => 'secret', 'operator' => 'equals', 'value' => 'x'],
         ['kind' => 'condition', 'field' => 'completed', 'operator' => 'contains', 'value' => 'x'],
         ['kind' => 'condition', 'field' => 'completed', 'operator' => 'equals', 'value' => 'false'],

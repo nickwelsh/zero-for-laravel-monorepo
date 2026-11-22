@@ -231,6 +231,36 @@ final class ZeroQuery implements JsonSerializable
         return $this;
     }
 
+    /** @internal Bounded table preview; eligibility applies before ordering or exposing pivot rows. */
+    public function withJunctionLookup(string $name, int $preview, ?Authenticatable $actor): self
+    {
+        $lookup = $this->model->junctionLookups[$name] ?? throw new LogicException('Undeclared junction lookup.');
+        $target = $this->registry->get($this->model->relations[$name]['model']);
+        $child = new self($target, $this->registry);
+        $child->callScope(fn () => $this->model->applyRelationConstraints($name, $child));
+        if ($target->policyVisibility) {
+            $child->visibleTo($actor);
+        }
+
+        $eligible = clone $child;
+        $eligible->ast['alias'] = 'zsubq_'.$lookup->target;
+        $child->ast['alias'] = $lookup->target;
+        $child->singular = true;
+        $targetEdge = ['system' => 'client', 'correlation' => ['parentField' => $lookup->targetHop['source'], 'childField' => $lookup->targetHop['dest']]];
+        $this->ast['related'][] = [
+            'system' => 'client', 'correlation' => ['parentField' => $lookup->pivotHop['source'], 'childField' => $lookup->pivotHop['dest']],
+            'subquery' => [
+                'table' => $lookup->pivotHop['table'], 'alias' => $lookup->pivots,
+                'where' => ['type' => 'correlatedSubquery', 'op' => 'EXISTS', 'related' => [...$targetEdge, 'subquery' => $eligible]],
+                'orderBy' => [[$lookup->targetHop['source'][0], 'asc']], 'limit' => $preview + 1,
+                'related' => [[...$targetEdge, 'subquery' => $child]],
+            ],
+        ];
+        $this->relationships[$lookup->pivots] = ['singular' => false, 'relationships' => (object) [$lookup->target => $child->format()]];
+
+        return $this;
+    }
+
     public function orderBy(string $field, string $direction = 'asc'): self
     {
         $direction = strtolower($direction);

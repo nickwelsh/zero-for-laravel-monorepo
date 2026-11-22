@@ -240,6 +240,17 @@ rows within a leaf. Allowlists, maximum depth, authorization, mandatory scopes,
 nested filters and multi-sort retain their existing semantics. Presentation and
 grouping controls remain application-owned.
 
+For descriptor-driven controls, use `table.filterFields()` at the root or pass a declared relation path to discover
+its fields and operators. `table.sorting` and `table.grouping` describe their own menus independently. A relation
+can declare a searchable option source; `useTableFilterOptions` supplies its results, pagination and selected
+labels without requiring a particular combobox or Formbraid. Default display columns come from the descriptor,
+so the same app component can render different tables without importing their individual queries.
+
+Relation filters support `some`, `has`, `any`, and `all`, subject to the table's allowlist.
+“Has no visible related records” is not supported: Zero 1.11.4 cannot run `NOT EXISTS` on the client
+([Zero issue #3438](https://bugs.rocicorp.dev/p/zero/issue/3438)).
+This limit does not depend on tenant size. Use `isNull` for nullable scalar fields, not for empty collections.
+
 Directory pagination uses opaque keyset cursors scoped to the full grouping rules,
 including order/direction, plus contract, actor/context, filter and directory path.
 Changing rules clears metadata, cancels old requests and ignores stale responses.
@@ -251,17 +262,18 @@ identical rules preserve them. Full controlled state or URL restoration can
 explicitly supply both rules and expansion. Collapsing a parent still preserves
 descendant expansion when rules have not changed.
 
-### Version-2 migration and URL parity
+### Table versions and URL parity
 
 Replace all legacy string-array grouping in PHP defaults, TypeScript state and
-saved views with explicit `{ field, direction }` rules. Capabilities, metadata
-requests/responses and table URL envelopes now use **version 2**. Regenerate
+saved views with explicit `{ field, direction }` rules. Scalar-only tables keep **version 2**.
+Declaring `allowedRelations` or `displayColumns` opts into **version 3** for capabilities,
+metadata and saved URLs. A mismatched version restores the entire table's defaults. Regenerate
 descriptors and deploy matching PHP/TypeScript output together; contract
 fingerprints include the protocol version. Version-1 URLs and invalid version-2
 string-array grouping fall back to the whole namespace's application/descriptor
 defaults, with no silent conversion. Invalid defaults and programmatic writes throw.
 
-The browser `/react` and `/inertia` hooks use the same version-2 URL contract as PHP
+The browser `/react` and `/inertia` hooks use the same versioned URL contract as PHP
 `TableURLState`, including rule directions, expansion, validation and fallback.
 Inertia's hook restores from `usePage().url` during SSR, uses client-side router
 writes, merges pending changes across tables, and restores Back/Forward without

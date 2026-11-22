@@ -27,6 +27,7 @@ use ZeroForLaravel\Permissions\Casbin;
 use ZeroForLaravel\Permissions\VisibleToCurrentUser;
 use ZeroForLaravel\Tables\AllowedFilter;
 use ZeroForLaravel\Tables\AllowedGroup;
+use ZeroForLaravel\Tables\AllowedRelation;
 use ZeroForLaravel\Tables\Table;
 use ZeroForLaravel\Tables\TableContext;
 use ZeroForLaravel\Tests\Fixtures\Comment;
@@ -116,9 +117,26 @@ class TasksTable
                 AllowedFilter::exact('completed', 'done'),
                 AllowedFilter::exact('list', 'list_id')->nullable(),
                 AllowedFilter::date('date', 'completed_at')->operators(['equals', 'notEquals', 'in', 'gt', 'gte', 'lt', 'lte'])->nullable(),
-            ])->allowedSorts(['title', 'completed_at'])
+            ])->allowedRelations([
+                AllowedRelation::named('tags')->choices('id', 'name')->lookup('name', 2),
+                AllowedRelation::named('comments')->label('Gifts')->allowedFilters([
+                    AllowedFilter::number('amount')->operators(['gt']),
+                    AllowedFilter::date('received_at')->operators(['gte']),
+                    AllowedFilter::exact('status', 'body'),
+                ])->allowedRelations([AllowedRelation::named('event')->allowedFilters([AllowedFilter::text('name')])]),
+            ])->displayColumns(['title', 'tags'])->allowedSorts(['title', 'completed_at'])
             ->allowedGroups([AllowedGroup::field('done'), AllowedGroup::belongsTo('list')->label('name')])
             ->pageSize(2);
+    }
+}
+
+class EventsTable
+{
+    public function definition(TableContext $context): Table
+    {
+        return Table::for(TaskList::class)->visibleTo($context->user())
+            ->allowedFilters([AllowedFilter::text('name')])->allowedSorts(['name'])
+            ->allowedGroups([AllowedGroup::field('name')])->displayColumns(['name' => 'Event name']);
     }
 }
 
@@ -177,7 +195,7 @@ ini_set('error_log', $root.'/php.log');
 $kernel = $app->make(PHP_SAPI === 'cli' ? Illuminate\Contracts\Console\Kernel::class : Kernel::class);
 $kernel->bootstrap();
 app()->instance(ZeroForLaravel\Support\ApplicationClasses::class, new ZeroForLaravel\Tests\Fixtures\DiscoveredClasses([
-    Task::class, TaskList::class, Tag::class, Comment::class, TasksTable::class, TaskQueries::class, Todo::class,
+    Task::class, TaskList::class, Tag::class, Comment::class, TasksTable::class, EventsTable::class, TaskQueries::class, Todo::class,
 ]));
 OwnerPermissions::configure();
 config(['permissions.subject.class' => OwnerUser::class,

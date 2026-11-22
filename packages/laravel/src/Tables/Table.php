@@ -13,10 +13,12 @@ use InvalidArgumentException;
 use LogicException;
 use ZeroForLaravel\Context\ContextReference;
 use ZeroForLaravel\Generation\ScopeCompiler;
+use ZeroForLaravel\Metadata\JunctionLookup;
 use ZeroForLaravel\Metadata\ModelMetadata;
 use ZeroForLaravel\Metadata\ModelRegistry;
 use ZeroForLaravel\Permissions\Binding;
 use ZeroForLaravel\Permissions\EloquentVisibility;
+use ZeroForLaravel\Permissions\VisibleToCurrentUser;
 use ZeroForLaravel\Query\Condition;
 use ZeroForLaravel\Query\QueryLimits;
 use ZeroForLaravel\Query\ZeroQuery;
@@ -27,6 +29,7 @@ use ZeroForLaravel\Support\Input;
  * Mutable, application-owned capabilities. Build a fresh definition per request.
  *
  * @phpstan-type Group array{field: string, relation: string|null, label: string|null, model: string|null}
+ * @phpstan-type Relation array{declaration: AllowedRelation, target: self, cardinality: string}
  * @phpstan-type Path list<array{field: string, value: string|int|float|bool|null}>
  * @phpstan-type Sort list<array{field: string, direction: 'asc'|'desc'}>
  *
@@ -34,8 +37,13 @@ use ZeroForLaravel\Support\Input;
  */
 final class Table
 {
+    use HasDisplayColumns;
+
     /** @var array<string, AllowedFilter> */
     public array $filters = [];
+
+    /** @var array<string, Relation> */
+    public array $relations = [];
 
     /** @var list<string> */
     public array $sorts = [];
@@ -73,7 +81,10 @@ final class Table
 
     public function visibleTo(?Authenticatable $actor): self
     {
-        $this->base->visibleTo($actor);
+        if ($this->base->model->policyVisibility) {
+            $this->base->visibleTo($actor);
+        }
+
         $this->actor = $actor;
 
         return $this;
@@ -90,7 +101,7 @@ final class Table
                 'date' => $column['date'],
                 default => ! $column['date'],
             };
-            if (! $matches || isset($this->filters[$filter->name]) || (array_intersect($filter->operations, ['isNull', 'isNotNull']) !== [] && ! $column['nullable'])) {
+            if (! $matches || isset($this->filters[$filter->name]) || isset($this->relations[$filter->name]) || (array_intersect($filter->operations, ['isNull', 'isNotNull']) !== [] && ! $column['nullable'])) {
                 throw new InvalidArgumentException('Invalid or duplicate table filter '.$filter->name.'.');
             }
 
@@ -98,6 +109,35 @@ final class Table
         }
 
         return $this;
+    }
+
+    /** @param list<AllowedRelation> $relations */
+    public function allowedRelations(array $relations): self
+    {
+        $this->declareRelations($relations, 0);
+
+        return $this;
+    }
+
+    /** @return array<string, array<string, mixed>> */
+    public function relationCapabilities(): array
+    {
+        $result = [];
+        foreach ($this->relations as $name => $relation) {
+            $definition = $relation['declaration'];
+            $target = $relation['target'];
+            $model = $target->base->model;
+            $junction = $this->base->model->junctionLookups[$name] ?? null;
+            $result[$name] = ['model' => $model->name, 'table' => $model->table, 'key' => $model->key,
+                ...($definition->lookup !== null && $junction !== null ? ['junction' => $junction->capability()] : []),
+                'keyColumn' => $model->columns[$model->key], 'cardinality' => $relation['cardinality'], 'label' => $definition->label,
+                'operators' => $definition->effectiveOperators(),
+                'filters' => (object) array_map(static fn (AllowedFilter $filter): array => ['field' => $filter->field, 'kind' => $filter->kind,
+                    'operators' => $filter->operations, 'column' => $model->columns[$filter->field]], $target->filters),
+                'relations' => (object) $target->relationCapabilities(), 'choices' => $definition->choices, 'lookup' => $definition->lookup];
+        }
+
+        return $result;
     }
 
     /** @param list<string> $fields */
@@ -274,14 +314,20 @@ final class Table
      */
     public function rows(mixed $filter = null, array $path = [], array $sort = []): ZeroQuery
     {
-        $query = clone $this->base;
-        $condition = (new Predicate($query, $this->filters))->parse($filter);
-        if ($condition instanceof Condition) {
-            $query->addCondition($condition);
-        }
+        $query = $this->membership($filter, $path);
+        foreach ($this->relations as $name => $relation) {
+            $lookup = $relation['declaration']->lookup;
+            if ($lookup !== null && isset($query->model->junctionLookups[$name])) {
+                $query->withJunctionLookup($name, $lookup['limit'], $this->actor);
+            } elseif ($lookup !== null) {
+                $query->with($name, function (ZeroQuery $related) use ($lookup, $relation): void {
+                    if ($related->model->policyVisibility) {
+                        $related->visibleTo($this->actor);
+                    }
 
-        foreach ($path as $part) {
-            $query->where($this->groups[$part['field']]['field'], $part['value']);
+                    $related->orderBy($related->model->key)->limit($relation['cardinality'] === 'one' ? 1 : $lookup['limit'] + 1);
+                });
+            }
         }
 
         foreach ($sort as $item) {
@@ -311,16 +357,94 @@ final class Table
         }
 
         $sql = $query->getQuery();
-        $ast = Input::object(ContextReference::resolve($this->rows($filter, $path)->ast(), $context), 'table');
+        $ast = Input::object(ContextReference::resolve($this->membership($filter, $path)->ast(), $context), 'table');
         if (array_diff(array_keys($ast), ['table', 'where', 'orderBy', '__visibility']) !== []) {
             throw new LogicException('Table counts require unbounded, membership-only scopes.');
         }
 
         if (isset($ast['where'])) {
-            Predicate::sql($sql, Input::object($ast['where'], 'condition'), $model);
+            Predicate::sql($sql, Input::object($ast['where'], 'condition'), $model, new RelationSnapshot($model->registry, $this->actor, $context));
         }
 
         return $sql;
+    }
+
+    /** @param list<AllowedRelation> $relations */
+    private function declareRelations(array $relations, int $depth): void
+    {
+        $model = $this->base->model;
+        foreach ($relations as $declaration) {
+            $name = $declaration->name;
+            if (isset($this->relations[$name]) || isset($this->filters[$name]) || str_starts_with($name, 'zsubq_')) {
+                throw new InvalidArgumentException('Invalid or duplicate table relation '.$name.'.');
+            }
+
+            $edge = $model->registry->relation($model, $name);
+            $nextDepth = $depth + count($edge['path']);
+            if ($nextDepth > 7) {
+                throw new InvalidArgumentException('Table relationship declarations exceed the maximum query depth.');
+            }
+
+            $related = $model->registry->get($edge['model']);
+            $target = (new self(new ZeroQuery($related, $model->registry)))->allowedFilters($declaration->filters);
+            $this->assertRelationMembership($name, $target->base);
+            $target->declareRelations($declaration->relations, $nextDepth);
+            $choices = $declaration->choices;
+            $key = $target->scalar($related->key);
+            if ($key['date'] || ! in_array($key['type'], ['string', 'number'], true)) {
+                throw new InvalidArgumentException('Table relations require string or numeric keys.');
+            }
+
+            if ($choices !== null && ($choices['value'] !== $related->key || $target->scalar($choices['label'])['type'] !== 'string' || $related->columns[$choices['label']]['date'])) {
+                throw new InvalidArgumentException('Table choices require the related primary key and an exposed text label.');
+            }
+
+            if ($declaration->lookup !== null) {
+                $target->scalar($declaration->lookup['field']);
+                if ($depth !== 0) {
+                    throw new InvalidArgumentException('Bounded table lookup columns require a direct relationship.');
+                }
+
+                if (count($edge['path']) === 2) {
+                    JunctionLookup::declare($model, $name);
+                }
+            }
+
+            $this->relations[$name] = ['declaration' => clone $declaration, 'target' => $target, 'cardinality' => $edge['cardinality']];
+        }
+    }
+
+    /** Check the same scopes a filtered row will see, without binding a generation-time actor. */
+    private function assertRelationMembership(string $name, ZeroQuery $target): void
+    {
+        $scope = clone $target;
+        $scope->withoutGlobalScopes(VisibleToCurrentUser::names(new $target->model->class));
+
+        $this->base->model->applyRelationConstraints($name, $scope);
+        $ast = $scope->ast();
+        if (array_diff(array_keys($ast), ['table', 'where']) !== []) {
+            throw new LogicException('Table relations require unbounded membership-only scopes.');
+        }
+
+        if (isset($ast['where'])) {
+            Predicate::sql((new $target->model->class)->newQueryWithoutScopes()->getQuery(), Input::object($ast['where'], 'scope'), $target->model);
+        }
+    }
+
+    /** @param Path $path */
+    private function membership(mixed $filter, array $path): ZeroQuery
+    {
+        $query = clone $this->base;
+        $condition = (new Predicate($query, $this->filters, $this->relations, $this->actor))->parse($filter);
+        if ($condition instanceof Condition) {
+            $query->addCondition($condition);
+        }
+
+        foreach ($path as $part) {
+            $query->where($this->groups[$part['field']]['field'], $part['value']);
+        }
+
+        return $query;
     }
 
     /** @return Column */

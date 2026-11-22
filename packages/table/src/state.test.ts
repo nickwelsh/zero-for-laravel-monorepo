@@ -1,11 +1,12 @@
 /* oxlint-disable unicorn/no-array-reverse -- ES2022 support; only newly allocated arrays are reversed. */
 import { expect, it } from 'vite-plus/test';
 import { execFileSync } from 'node:child_process';
-import { createBuilder } from '@rocicorp/zero';
+import { createBuilder, Zero, defineMutatorsWithType, defineMutatorWithType } from '@rocicorp/zero';
 import { asQueryInternals } from '@rocicorp/zero/bindings';
 import { schema } from '../../../tests/interop/generated';
 import tasks, { queries } from '../../../tests/interop/table.generated';
 import {
+    applyTableQuery,
     groupId,
     readTableState,
     writeTableState,
@@ -15,6 +16,190 @@ import {
 } from './index';
 
 const { capabilities } = tasks;
+const tag = {
+    model: 'Tag',
+    table: 'tags',
+    key: 'id',
+    keyColumn: capabilities.columns.id,
+    cardinality: 'many',
+    label: 'Tags',
+    operators: ['some', 'has', 'any', 'all'],
+    filters: { name: { ...capabilities.filters.title, field: 'name' } },
+    relations: {},
+    choices: { value: 'id', label: 'name' },
+    lookup: { field: 'name', limit: 2 },
+} as const;
+const report = {
+    ...capabilities,
+    version: 3,
+    relations: { tags: tag },
+    displayColumns: [{ field: 'tags', label: 'Tags' }],
+} as const;
+
+it('uses full scoped relations for membership and same-record conditions, but bounded scoped rows for display', async () => {
+    const mutators = defineMutatorsWithType<typeof schema>()({
+        seed: defineMutatorWithType<typeof schema>()(async ({ tx }) => {
+            for (const id of ['a', 'b', 'both', 'none']) {
+                await tx.mutate.lists.insert({ id, name: id, user_id: 'actor' });
+                await tx.mutate.tasks.insert({ id, list_id: id, title: id, user_id: 'actor', done: false });
+            }
+            for (const id of ['A', 'B', 'hidden'])
+                await tx.mutate.tags.insert({ id, name: id, user_id: id === 'hidden' ? 'other' : 'actor' });
+            for (const [task_id, tag_id] of [
+                ['a', 'A'],
+                ['b', 'B'],
+                ['both', 'A'],
+                ['both', 'B'],
+                ['none', 'hidden'],
+            ] as const)
+                await tx.mutate.task_tag.insert({ task_id, tag_id });
+            for (const [id, task_id, body, user_id] of [
+                ['4', 'a', 'late match', 'actor'],
+                ['1', 'a', 'first', 'actor'],
+                ['2', 'a', 'second', 'actor'],
+                ['0', 'a', 'secret', 'other'],
+                ['3', 'b', 'late', 'actor'],
+                ['5', 'b', 'match', 'actor'],
+            ] as const)
+                await tx.mutate.comments.insert({ id, task_id, body, user_id });
+        }),
+    });
+    const zero = new Zero({
+        schema,
+        mutators,
+        userID: 'table-relations',
+        kvStore: 'mem',
+        cacheURL: null,
+        logLevel: 'error',
+    });
+    const cap = {
+        ...report,
+        relations: {
+            tags: { ...tag, lookup: null },
+            comments: {
+                ...tag,
+                model: 'Comment',
+                table: 'comments',
+                choices: null,
+                lookup: { field: 'body', limit: 1 },
+                filters: { body: { ...capabilities.filters.title, field: 'body' } },
+            },
+        },
+        displayColumns: [{ field: 'comments', label: 'Comments' }],
+    } as const;
+    try {
+        expect((await zero.mutate(mutators.seed()).client).type).toBe('success');
+        const run = (filter: TableState<typeof cap>['filter']) =>
+            zero.run(
+                applyTableQuery(
+                    createBuilder(schema).tasks,
+                    { filter, groupBy: [], sort: [], path: [], __window: 10 },
+                    cap,
+                    {
+                        tags: (q) => q.where('user_id', '=', 'actor'),
+                        comments: (q) => q.where('user_id', '=', 'actor'),
+                    },
+                ),
+            );
+        for (const [rule, expected] of [
+            [{ operator: 'has', value: 'A' }, ['a', 'both']],
+            [{ operator: 'any', value: ['A', 'B'] }, ['a', 'b', 'both']],
+            [{ operator: 'all', value: ['A', 'B', 'A'] }, ['both']],
+            [{ operator: 'has', value: 'hidden' }, []],
+        ] as const)
+            expect((await run({ kind: 'relation', field: 'tags', ...rule })).map((row) => row.id)).toEqual(expected);
+        const rows = await run({
+            kind: 'relation',
+            field: 'comments',
+            operator: 'some',
+            filter: {
+                kind: 'and',
+                children: [
+                    { kind: 'condition', field: 'body', operator: 'contains', value: 'late' },
+                    { kind: 'condition', field: 'body', operator: 'contains', value: 'match' },
+                ],
+            },
+        });
+        expect(rows.map((row) => row.id)).toEqual(['a']);
+        expect(rows[0]).toMatchObject({ comments: [{ id: '1' }, { id: '2' }] });
+        const lists = {
+            ...report,
+            displayColumns: [],
+            relations: {
+                tasks: {
+                    ...tag,
+                    table: 'tasks',
+                    model: 'Task',
+                    lookup: null,
+                    choices: null,
+                    relations: { tags: { ...tag, lookup: null } },
+                },
+            },
+        } as const;
+        const nested = await zero.run(
+            applyTableQuery(
+                createBuilder(schema).lists,
+                {
+                    filter: {
+                        kind: 'relation',
+                        field: 'tasks',
+                        operator: 'some',
+                        filter: {
+                            kind: 'or',
+                            children: [
+                                { kind: 'relation', field: 'tags', operator: 'has', value: 'A' },
+                                { kind: 'relation', field: 'tags', operator: 'has', value: 'hidden' },
+                            ],
+                        },
+                    },
+                    groupBy: [],
+                    sort: [],
+                    path: [],
+                    __window: 10,
+                },
+                lists,
+                { tasks: (q) => q.where('id', '!=', 'both'), 'tasks.tags': (q) => q.where('user_id', '=', 'actor') },
+            ),
+        );
+        expect(nested.map((row) => row.id)).toEqual(['a']);
+        // @ts-expect-error Absence is not a live table operator, even on an otherwise valid relation.
+        expect(() => run({ kind: 'relation', field: 'tags', operator: 'none' })).toThrow('relation operator');
+    } finally {
+        await zero.close();
+    }
+});
+
+it('restores only compatible views and validates membership against the declared relation key', () => {
+    const state: TableState<typeof report> = {
+        filter: { kind: 'relation', field: 'tags', operator: 'all', value: ['saved', 'revoked'] },
+        sort: [],
+        groupBy: [],
+        expanded: [],
+    };
+    const saved = writeTableState(report, new URLSearchParams(), state);
+    expect(readTableState(report, saved)).toEqual(state);
+    expect(readTableState({ ...report, stateContract: 'remapped-fields' }, saved).filter).toBeNull();
+    expect(readTableState(capabilities, saved).filter).toBeNull();
+    const old = writeTableState(capabilities, new URLSearchParams(), {
+        ...state,
+        filter: { kind: 'condition', field: 'title', operator: 'contains', value: 'Compatible scalar' },
+    });
+    expect(readTableState(report, old).filter).toBeNull();
+    for (const [operator, value] of [
+        ['all', []],
+        ['any', [5]],
+        ['has', ['id']],
+        ['none', 'id'],
+        ['some', 'id'],
+    ]) {
+        expect(() =>
+            validateState(report, {
+                ...state,
+                filter: { kind: 'relation', field: 'tags', operator, value },
+            } as typeof state),
+        ).toThrow('Invalid table state');
+    }
+});
 const defaults = {
     filter: null,
     sort: [{ field: 'title', direction: 'asc' }],

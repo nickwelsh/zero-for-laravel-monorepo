@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace ZeroForLaravel\Tables;
 
 use Carbon\CarbonImmutable;
+use Closure;
+use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Contracts\Database\Query\Expression;
 use Illuminate\Database\Grammar;
 use Illuminate\Database\Query\Builder;
@@ -16,32 +18,43 @@ use ZeroForLaravel\Query\ExpressionBuilder;
 use ZeroForLaravel\Query\ZeroQuery;
 use ZeroForLaravel\Support\Input;
 
-/** One checked condition tree feeds both native rows and SQL snapshots. */
+/** One checked condition tree feeds both native rows and SQL snapshots.
+ * @phpstan-import-type Relation from Table
+ */
 final readonly class Predicate
 {
-    /** @param array<string, AllowedFilter> $filters */
-    public function __construct(private ZeroQuery $base, private array $filters) {}
+    /** @param array<string, AllowedFilter> $filters
+     * @param  array<string, Relation>  $relations
+     */
+    public function __construct(private ZeroQuery $base, private array $filters, private array $relations = [], private ?Authenticatable $actor = null) {}
 
     /** Only compiler-owned conditions may enter this lowering, never request ASTs.
      * @param  array<string, mixed>  $condition
      */
-    public static function sql(Builder $query, array $condition, ModelMetadata $model): void
+    public static function sql(Builder $query, array $condition, ModelMetadata $model, ?RelationSnapshot $relations = null, ?string $qualifier = null): void
     {
         $kind = $condition['type'] ?? null;
+        $qualifier ??= $model->table;
+        if ($kind === 'correlatedSubquery' && $relations instanceof RelationSnapshot) {
+            $relations->apply($query, $condition, $qualifier);
+
+            return;
+        }
+
         if ($kind === 'and' || $kind === 'or') {
             $children = $condition['conditions'] ?? null;
             if (! is_array($children)) {
                 throw new LogicException('Invalid table condition group.');
             }
 
-            $query->where(function (Builder $nested) use ($children, $kind, $model): void {
+            $query->where(function (Builder $nested) use ($children, $kind, $model, $relations, $qualifier): void {
                 if ($children === [] && $kind === 'or') {
                     $nested->whereRaw('1 = 0');
                 }
 
                 foreach ($children as $child) {
                     $method = $kind === 'or' ? 'orWhere' : 'where';
-                    $nested->{$method}(fn (Builder $part) => self::sql($part, Input::object($child, 'condition'), $model));
+                    $nested->{$method}(fn (Builder $part) => self::sql($part, Input::object($child, 'condition'), $model, $relations, $qualifier));
                 }
             });
 
@@ -69,7 +82,7 @@ final readonly class Predicate
             $value = is_array($value) ? array_map($convert, $value) : $convert($value);
         }
 
-        $qualified = $model->table.'.'.$field;
+        $qualified = $qualifier.'.'.$field;
         if ($column['type'] === 'string' && ! $column['date'] && $query->getGrammar() instanceof PostgresGrammar) {
             // Compare replicated text, not PostgreSQL UUID coercion or locale collation.
             $qualified = new readonly class($qualified) implements Expression
@@ -108,12 +121,25 @@ final readonly class Predicate
 
     public function parse(mixed $input): ?Condition
     {
+        $build = $this->check($input);
+
+        return $build instanceof Closure ? $build() : null;
+    }
+
+    /** Check the entire tree now. Only executable queries invoke the result,
+     * which adds mandatory visibility and scopes to every relationship hop.
+     *
+     * @return (Closure(): Condition)|null
+     */
+    public function check(mixed $input): ?Closure
+    {
         $terms = 0;
 
         return $input === null ? null : $this->node($input, 1, $terms);
     }
 
-    private function node(mixed $input, int $depth, int &$terms): Condition
+    /** @return Closure(): Condition */
+    private function node(mixed $input, int $depth, int &$terms): Closure
     {
         if ($depth > 8 || ++$terms > 100) {
             Input::fail('filter', 'Filter exceeds depth or condition limits.');
@@ -133,14 +159,26 @@ final readonly class Predicate
                 $conditions[] = $this->node($child, $depth + 1, $terms);
             }
 
-            return new Condition($kind, conditions: $conditions);
+            return static fn (): Condition => new Condition($kind, conditions: array_map(static fn (Closure $build): Condition => $build(), $conditions));
         }
 
+        if ($kind === 'relation') {
+            return $this->relation($node, $depth, $terms);
+        }
+
+        $condition = $this->scalar($node);
+
+        return static fn (): Condition => $condition;
+    }
+
+    /** @param array<string, mixed> $node */
+    private function scalar(array $node): Condition
+    {
         Input::keys($node, ['kind', 'field', 'operator', 'value'], 'filter');
         $field = $node['field'] ?? null;
         $operator = $node['operator'] ?? null;
         $filter = is_string($field) ? ($this->filters[$field] ?? null) : null;
-        if ($kind !== 'condition' || $filter === null || ! is_string($operator) || ! in_array($operator, $filter->operations, true)) {
+        if (($node['kind'] ?? null) !== 'condition' || $filter === null || ! is_string($operator) || ! in_array($operator, $filter->operations, true)) {
             Input::fail('filter', 'Unknown filter or forbidden operator.');
         }
 
@@ -177,6 +215,68 @@ final readonly class Predicate
         }
 
         return (new ExpressionBuilder($this->base->model))->cmp($filter->field, $native, $value);
+    }
+
+    /** @param array<string, mixed> $node
+     * @return Closure(): Condition
+     */
+    private function relation(array $node, int $depth, int &$terms): Closure
+    {
+        $field = $node['field'] ?? null;
+        $operator = $node['operator'] ?? null;
+        if (! is_string($field) || ! isset($this->relations[$field]) || ! in_array($operator, $this->relations[$field]['declaration']->effectiveOperators(), true)) {
+            Input::fail('filter', 'Unknown table relation or operator.');
+        }
+
+        Input::keys($node, ['kind', 'field', 'operator', $operator === 'some' ? 'filter' : 'value'], 'filter');
+        $target = $this->relations[$field]['target'];
+        $model = $target->base->model;
+        $exists = fn (Condition $condition): Condition => $this->base->relationCondition($field, function (ZeroQuery $related) use ($condition): void {
+            if ($related->model->policyVisibility) {
+                $related->visibleTo($this->actor);
+            }
+
+            $related->addCondition($condition);
+        });
+
+        if ($operator === 'some') {
+            $parser = new self($target->base, $target->filters, $target->relations, $this->actor);
+            $child = $parser->node($node['filter'] ?? null, $depth + 1, $terms);
+
+            return static fn (): Condition => $exists($child());
+        }
+
+        $ids = $operator === 'has' ? [$node['value'] ?? null] : ($node['value'] ?? null);
+        if (! is_array($ids) || ! array_is_list($ids) || $ids === [] || count($ids) > 100) {
+            Input::fail('filter.value', 'Relation membership requires between 1 and 100 keys.');
+        }
+
+        $ids = array_map(static function (mixed $id) use ($model): int|float|string {
+            if ((! is_string($id) && ! is_int($id) && ! is_float($id)) || is_string($id) && ($id === '' || mb_strlen($id) > 1000)) {
+                Input::fail('filter.value', 'Invalid relation key.');
+            }
+
+            Input::value($id, [...$model->columns[$model->key], 'nullable' => false], 'filter.value');
+
+            return $id;
+        }, $ids);
+
+        $comparison = new ExpressionBuilder($model);
+        if ($operator === 'has') {
+            return static fn (): Condition => $exists($comparison->cmp($model->key, '=', $ids[0]));
+        }
+
+        if ($operator === 'any') {
+            return static fn (): Condition => $exists($comparison->cmp($model->key, 'IN', $ids));
+        }
+
+        $ids = array_values(array_unique($ids, $model->columns[$model->key]['type'] === 'number' ? SORT_NUMERIC : SORT_STRING));
+        $terms += count($ids) - 1;
+        if ($terms > 100) {
+            Input::fail('filter', 'Filter exceeds depth or condition limits.');
+        }
+
+        return static fn (): Condition => new Condition('and', conditions: array_map(static fn (mixed $id): Condition => $exists($comparison->cmp($model->key, '=', $id)), $ids));
     }
 
     private function value(AllowedFilter $filter, mixed $value): mixed

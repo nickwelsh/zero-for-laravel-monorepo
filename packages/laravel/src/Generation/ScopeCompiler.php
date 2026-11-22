@@ -4,10 +4,12 @@ declare(strict_types=1);
 
 namespace ZeroForLaravel\Generation;
 
+use Carbon\CarbonImmutable;
 use Closure;
 use Formbraid\Laravel\OptionInput;
 use Illuminate\Database\Eloquent\SoftDeletingScope;
 use Illuminate\Support\Facades\Auth;
+use InvalidArgumentException;
 use LogicException;
 use PhpParser\ParserFactory;
 use ReflectionMethod;
@@ -97,6 +99,26 @@ final class ScopeCompiler
     public static function apply(QueryExpression $scope, ZeroQuery $query): void
     {
         self::replay($scope, ['zeroScope' => $query]);
+    }
+
+    /** Compile date literals once in UTC. Never freeze a relative date into a generated operation. */
+    public static function dateValue(mixed $value, ?string $format): QueryExpression
+    {
+        if (is_array($value) && array_is_list($value)) {
+            return new QueryExpression('list', children: array_map(fn (mixed $item): QueryExpression => self::dateValue($item, $format), $value), type: 'list');
+        }
+
+        if (is_string($value)) {
+            $parts = date_parse($value);
+            if ($parts['year'] === false || $parts['month'] === false || $parts['day'] === false || isset($parts['relative']) || $parts['error_count'] || $parts['warning_count']) {
+                throw new InvalidArgumentException('Date literals must be valid absolute dates.');
+            }
+
+            $date = CarbonImmutable::parse($value, 'UTC')->utc();
+            $value = $format === null ? $date->getTimestampMs() : $date->format($format);
+        }
+
+        return self::value($value);
     }
 
     public static function value(mixed $value): QueryExpression

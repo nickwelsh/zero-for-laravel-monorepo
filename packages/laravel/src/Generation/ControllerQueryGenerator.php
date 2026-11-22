@@ -7,6 +7,7 @@ namespace ZeroForLaravel\Generation;
 use LogicException;
 use ZeroForLaravel\Query\QueryLimits;
 use ZeroForLaravel\Tables\TableDefinition;
+use ZeroForLaravel\Tables\TableRelationPath;
 
 /** Emits deployable registrations; never executes an HTTP action to sample its query. */
 final readonly class ControllerQueryGenerator
@@ -159,6 +160,18 @@ TS;
 
         foreach ($tables as $table) {
             $lines[] = '    '.var_export($table->queryName(), true).' => new \\ZeroForLaravel\\Tables\\RegisteredTableQuery('.var_export($table->name, true).', '.var_export($table->contract, true).'),';
+            foreach (TableRelationPath::all($table) as $path) {
+                if ($path->choices === null) {
+                    continue;
+                }
+
+                foreach (['list', 'resolve'] as $operation) {
+                    $bindings = array_keys(TableChoiceBindings::for($path, $operation, $queries));
+                    $name = $path->queryName($table, $operation, $bindings);
+                    $arguments = [$table->name, $table->contract, $operation, $path->path, $bindings, $name];
+                    $lines[] = '    '.var_export($name, true).' => new \\ZeroForLaravel\\Tables\\RegisteredTableQuery('.implode(', ', array_map(static fn (string|array $value): string => var_export($value, true), $arguments)).'),';
+                }
+            }
         }
 
         $lines[] = '];';

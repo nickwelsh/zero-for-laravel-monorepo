@@ -18,6 +18,12 @@ final class NativeQueryEmitter
 {
     private int $depth = 0;
 
+    /** Relationship membership is independent of any preview's ordering and limit. */
+    public function relationMembership(ModelMetadata $parent, string $relation, QueryExpression $base): string
+    {
+        return $this->emit($base, $this->relationConditions($base, $parent->relationConstraints[$relation]['wheres'] ?? []));
+    }
+
     public function emit(QueryExpression $query, ?QueryExpression $relationFilter = null): string
     {
         if (++$this->depth > 8) {
@@ -239,9 +245,14 @@ final class NativeQueryEmitter
     private function relationConditions(QueryExpression $base, array $wheres): QueryExpression
     {
         foreach ($wheres as $where) {
-            $args = $where['type'] === 'Nested'
-                ? [new QueryExpression('callback', 'zeroNested', [$this->relationConditions(new QueryExpression('local', 'zeroNested', model: $base->model, type: 'query'), ModelRegistry::relationWheres($where['wheres'], $base->queryModel(), normalized: true))], type: 'callback')]
-                : [ScopeCompiler::value($where['column']), ScopeCompiler::value($where['operator']), ScopeCompiler::value($where['value'])];
+            if ($where['type'] === 'Nested') {
+                $args = [new QueryExpression('callback', 'zeroNested', [$this->relationConditions(new QueryExpression('local', 'zeroNested', model: $base->model, type: 'query'), ModelRegistry::relationWheres($where['wheres'], $base->queryModel(), normalized: true))], type: 'callback')];
+            } else {
+                $column = $base->queryModel()->columns[$where['column']];
+                $operand = $column['date'] ? ScopeCompiler::dateValue($where['value'], $column['dateFormat'] ?? null) : ScopeCompiler::value($where['value']);
+                $args = [ScopeCompiler::value($where['column']), ScopeCompiler::value($where['operator']), $operand];
+            }
+
             $base = new QueryExpression('method', $where['boolean'] === 'or' ? 'orWhere' : 'where', [$base, ...$args], $base->model, 'query');
         }
 

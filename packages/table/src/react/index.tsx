@@ -11,6 +11,17 @@ export { useTableCell } from './cell';
 export type { CellEditorProps } from './cell';
 export { useTableViewport } from './viewport';
 export type { ViewportOptions } from './viewport';
+export { useTableFilterOptions } from './filter-options';
+import {
+    buildFilter,
+    displayColumns,
+    editFilter,
+    filterFields,
+    filterGroup,
+    orderingChoices,
+    type DisplayColumn,
+    type TableOperator,
+} from '../discovery';
 import {
     groupId,
     queryKey,
@@ -24,6 +35,7 @@ import {
     type CellSubmitResult,
     type Capabilities,
     type CountState,
+    type FilterNode,
     type GroupPath,
     type MetadataResponse,
     type Selection,
@@ -163,8 +175,9 @@ export class TableSession<Row, C extends Capabilities = Capabilities> {
             },
         };
     }
-    get columns() {
-        return this.options.columns ?? [];
+    private readonly defaultColumns: readonly DisplayColumn<Row>[];
+    get columns(): readonly DisplayColumn<Row>[] {
+        return this.options.columns ?? this.defaultColumns;
     }
     get renderEditor() {
         return this.options.editing?.renderEditor;
@@ -193,12 +206,14 @@ export class TableSession<Row, C extends Capabilities = Capabilities> {
             row !== undefined && this.draft?.rowId === rowId && this.draft.columnId === columnId
                 ? this.draft
                 : undefined;
-        const value =
-            row === undefined
-                ? undefined
-                : column.field
-                  ? (row as Record<string, unknown>)[column.field]
-                  : column.value?.(row);
+        const preview = row === undefined ? undefined : column.preview?.(row);
+        const value = preview
+            ? preview.value
+            : row === undefined
+              ? undefined
+              : column.field
+                ? (row as Record<string, unknown>)[column.field]
+                : column.value?.(row);
         const settings = this.options.editing;
         const editable = !!(
             this.allowed &&
@@ -217,6 +232,7 @@ export class TableSession<Row, C extends Capabilities = Capabilities> {
             row,
             column,
             value,
+            truncated: preview?.truncated ?? false,
             editable,
             active: draft !== undefined,
             draft: draft?.value,
@@ -425,6 +441,7 @@ export class TableSession<Row, C extends Capabilities = Capabilities> {
         options: TableOptions<C, Row> = {},
     ) {
         this.options = options;
+        this.defaultColumns = displayColumns(descriptor.capabilities);
         this.initialState = structuredClone({
             filter: null,
             sort: descriptor.capabilities.defaults.sort,
@@ -555,6 +572,41 @@ export class TableSession<Row, C extends Capabilities = Capabilities> {
         this.schedule();
     }
     setFilter = (filter: TableState<C>['filter']) => this.change({ filter });
+    filterFields = (path: readonly string[] = []) => filterFields(this.descriptor.capabilities, path);
+    buildFilter = (path: readonly string[], operator: TableOperator, operand?: unknown) =>
+        buildFilter(this.descriptor.capabilities, path, operator, operand);
+    filterGroup = filterGroup;
+    private editRule(at: readonly number[], change: (old: FilterNode | null) => FilterNode | null) {
+        // setFilter validates the edited tree against this exact descriptor before publishing it.
+        this.setFilter(editFilter(this.state.filter, at, change) as TableState<C>['filter']);
+    }
+    addFilter = (rule: FilterNode, join: 'and' | 'or' = 'and', at: readonly number[] = []) =>
+        this.editRule(at, (old) =>
+            !old ? rule : filterGroup(join, old.kind === join ? [...old.children, rule] : [old, rule]),
+        );
+    replaceFilter = (at: readonly number[], rule: FilterNode) => this.editRule(at, () => rule);
+    removeFilter = (at: readonly number[]) => this.editRule(at, () => null);
+    get sorting() {
+        const cap = this.descriptor.capabilities;
+        return orderingChoices<C['sorts'][number]>(
+            cap,
+            cap.sorts,
+            this.state.sort,
+            cap.defaults.sort,
+            cap.sorts.length,
+        );
+    }
+    get grouping() {
+        const cap = this.descriptor.capabilities;
+        const fields = Object.keys(cap.groups) as (keyof C['groups'] & string)[];
+        return orderingChoices(
+            cap,
+            fields,
+            this.state.groupBy,
+            cap.defaults.groupBy,
+            Math.min(fields.length, cap.maxGroupDepth),
+        );
+    }
     setSort = (sort: TableState<C>['sort']) => this.change({ sort });
     setGroupBy = (groupBy: TableState<C>['groupBy']) =>
         this.change({

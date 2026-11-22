@@ -24,6 +24,7 @@ use ZeroForLaravel\Permissions\VisibleToCurrentUser;
 use ZeroForLaravel\Support\Input;
 use ZeroForLaravel\Tables\AllowedFilter;
 use ZeroForLaravel\Tables\AllowedGroup;
+use ZeroForLaravel\Tables\AllowedRelation;
 use ZeroForLaravel\Tables\Predicate;
 use ZeroForLaravel\Tables\Table;
 use ZeroForLaravel\Tables\TableDefinition;
@@ -80,20 +81,40 @@ final class TableCompiler
             }
 
             $dependencies = [];
-            foreach (array_unique([$table->base->model->name, ...array_filter(array_column($table->groups, 'model'))]) as $modelName) {
+            $edges = [];
+            $this->collectEdges($table, $edges);
+            foreach (array_unique([$table->base->model->name, ...array_filter(array_column($table->groups, 'model')), ...array_keys($edges)]) as $modelName) {
                 $model = $this->models->get($modelName);
                 $schema = $model->toArray();
                 // Unrelated relationships are discovered lazily by other compilers.
                 unset($schema['relations'], $schema['relationConstraints']);
+                if (isset($edges[$modelName])) {
+                    $schema['tableRelations'] = $edges[$modelName];
+                }
+
                 $dependencies[$modelName] = [$schema, $model->policyVisibility ? (new PolicyCompiler)->compile($model->class, onScopedRows: true)->fingerprint : null];
             }
 
             ksort($dependencies);
-            $fingerprint = hash('sha256', serialize([2, $name, hash_file('sha256', $file), $dependencies, $table->groups, ContextDefinition::configured()->contract(), config()->string('zero.route_prefix')]));
+            $fingerprint = hash('sha256', serialize([$table->version(), $name, hash_file('sha256', $file), $dependencies, $table->groups, ContextDefinition::configured()->contract(), config()->string('zero.route_prefix')]));
 
             return new TableDefinition($name, $table, $expression, $fingerprint, $visible);
         } catch (Throwable $throwable) {
             throw new LogicException($file.':'.$node->getStartLine().': table '.$name.': '.$throwable->getMessage(), previous: $throwable);
+        }
+    }
+
+    /** Fingerprint only the paths the definition actually admits, including junction keys and constraints.
+     * @param  array<string, array<string, mixed>>  $edges
+     */
+    private function collectEdges(Table $table, array &$edges): void
+    {
+        $model = $table->base->model;
+        foreach ($table->relations as $name => $relation) {
+            $edges[$model->name][$name] = [$model->relations[$name], $model->relationConstraints[$name] ?? null];
+            $target = $relation['target'];
+            $edges[$target->base->model->name] ??= [];
+            $this->collectEdges($target, $edges);
         }
     }
 
@@ -166,7 +187,7 @@ final class TableCompiler
                 return Table::for($model->class);
             }
 
-            if (($class === AllowedFilter::class && in_array($method, ['exact', 'text', 'partial', 'number', 'date'], true)) || ($class === AllowedGroup::class && in_array($method, ['field', 'belongsTo'], true))) {
+            if (($class === AllowedFilter::class && in_array($method, ['exact', 'text', 'partial', 'number', 'date'], true)) || ($class === AllowedGroup::class && in_array($method, ['field', 'belongsTo'], true)) || ($class === AllowedRelation::class && $method === 'named')) {
                 return $class::$method(...$args);
             }
         }
@@ -189,9 +210,10 @@ final class TableCompiler
             }
 
             $allowed = match (true) {
-                $target instanceof Table => ['allowedFilters', 'allowedSorts', 'allowedGroups', 'defaultSort', 'defaultGroupBy', 'pageSize', 'maxGroupDepth', 'where'],
+                $target instanceof Table => ['allowedFilters', 'allowedRelations', 'displayColumns', 'allowedSorts', 'allowedGroups', 'defaultSort', 'defaultGroupBy', 'pageSize', 'maxGroupDepth', 'where'],
                 $target instanceof AllowedFilter => ['operators', 'nullable'],
                 $target instanceof AllowedGroup => ['label'],
+                $target instanceof AllowedRelation => ['allowedFilters', 'allowedRelations', 'operators', 'choices', 'label', 'lookup'],
                 default => [],
             };
             if (! in_array($method, $allowed, true)) {

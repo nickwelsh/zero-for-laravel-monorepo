@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace ZeroForLaravel\Generation;
 
+use LogicException;
 use ZeroForLaravel\Context\ContextDefinition;
 use ZeroForLaravel\Metadata\ModelMetadata;
 use ZeroForLaravel\Metadata\ModelRegistry;
@@ -87,17 +88,26 @@ final class TypeScriptGenerator
             $lines[] = '} ).primaryKey('.implode(', ', array_map($this->json(...), $table['key'])).');';
         }
 
-        $relations = [];
+        $schemaEdges = [];
         foreach ($models as $model) {
-            if ($model->relations === []) {
-                continue;
-            }
+            $schemaEdges[$model->table] = $model->relations;
+            foreach ($model->junctionLookups as $lookup) {
+                if (isset($model->columns[$lookup->pivots]) || isset($tables[$lookup->pivotHop['table']]['columns'][$lookup->target])) {
+                    throw new LogicException('A generated junction lookup relationship conflicts with a column.');
+                }
 
-            $variable = $names[$model->table].'Relations';
+                $schemaEdges[$model->table][$lookup->pivots] = ['cardinality' => 'many', 'path' => [$lookup->pivotHop]];
+                $schemaEdges[$lookup->pivotHop['table']][$lookup->target] = ['cardinality' => 'one', 'path' => [$lookup->targetHop]];
+            }
+        }
+
+        $relations = [];
+        foreach (array_filter($schemaEdges) as $table => $edges) {
+            $variable = $names[$table].'Relations';
             $relations[] = $variable;
-            $helpers = array_intersect(['one', 'many'], array_column($model->relations, 'cardinality'));
-            $lines[] = 'const '.$variable.' = relationships('.$names[$model->table].', ({'.implode(', ', $helpers).'}) => ({';
-            foreach ($model->relations as $name => $relation) {
+            $helpers = array_intersect(['one', 'many'], array_column($edges, 'cardinality'));
+            $lines[] = 'const '.$variable.' = relationships('.$names[$table].', ({'.implode(', ', $helpers).'}) => ({';
+            foreach ($edges as $name => $relation) {
                 $connections = [];
                 foreach ($relation['path'] as $hop) {
                     $connections[] = '{sourceField: '.$this->json($hop['source']).', destField: '.$this->json($hop['dest']).', destSchema: '.$names[$hop['table']].'}';

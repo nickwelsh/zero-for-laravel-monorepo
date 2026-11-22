@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace ZeroForLaravel\Generation;
 
-use Carbon\CarbonImmutable;
 use Illuminate\Validation\ValidationException;
 use InvalidArgumentException;
 use PhpParser\Node;
@@ -321,13 +320,11 @@ trait CompilesEloquentPredicates
         }
 
         if ($column['date'] && $operand->kind === 'literal' && is_string($operand->value)) {
-            $parts = date_parse($operand->value);
-            if ($parts['year'] === false || $parts['month'] === false || $parts['day'] === false || isset($parts['relative']) || $parts['error_count'] || $parts['warning_count']) {
-                $this->unsupported($node, 'Date literals must be valid absolute dates.');
+            try {
+                $operand = ScopeCompiler::dateValue($operand->value, $column['dateFormat'] ?? null);
+            } catch (InvalidArgumentException $e) {
+                $this->unsupported($node, $e->getMessage());
             }
-
-            $date = CarbonImmutable::parse($operand->value, 'UTC')->utc();
-            $operand = ScopeCompiler::value(isset($column['dateFormat']) ? $date->format($column['dateFormat']) : $date->getTimestampMs());
         } elseif ($column['date'] && $operand->type === 'string' && $operand->kind !== 'context') {
             $this->unsupported($node, 'Date string arguments require a validated date or date_format contract.');
         }

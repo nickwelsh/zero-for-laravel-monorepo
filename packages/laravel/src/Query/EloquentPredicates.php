@@ -158,9 +158,17 @@ trait EloquentPredicates
             $not = $outerNot;
         }
 
+        return $this->addCondition($this->relationCondition($relation, $callback, $not), $boolean);
+    }
+
+    /** @internal A single native existence predicate for compilers composing checked boolean trees.
+     * @param  (Closure(self): (self|void))|null  $callback
+     */
+    public function relationCondition(string $relation, ?Closure $callback, bool $not = false): Condition
+    {
         [$related] = $this->relationship($relation, $callback, true);
 
-        return $this->addCondition(new Condition('correlatedSubquery', ['related' => $related, 'op' => $not ? 'NOT EXISTS' : 'EXISTS']), $boolean);
+        return new Condition('correlatedSubquery', ['related' => $related, 'op' => $not ? 'NOT EXISTS' : 'EXISTS']);
     }
 
     public function orHas(string $relation, string $operator = '>=', int $count = 1): self
