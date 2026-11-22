@@ -2,8 +2,8 @@
 
 declare(strict_types=1);
 
-use App\Enums\ZeroContext;
-use App\Zero\ResolveZeroContext;
+use ZeroForLaravel\Context\ResolveZeroContext;
+use ZeroForLaravel\Context\ZeroContext;
 use ZeroForLaravel\Generation\AutoDetectFrontendDriver;
 use ZeroForLaravel\Generation\Mutations\ZodMutationSchemaDriver;
 
@@ -182,6 +182,8 @@ return [
     |
     | The context enum declares values available to Zero queries and mutations.
     | The resolver supplies one attributed method per case using the request.
+    | To customize them, vendor:publish --tag=zero-context and point both
+    | settings below to the published application classes.
     | Generation reads their types without running the resolver methods.
     |
     */

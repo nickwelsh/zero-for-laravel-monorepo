@@ -28,10 +28,9 @@ contains installation commands, migrations, authentication, sharing, and the loc
 Composer/pnpm wiring. Its application requires PHP 8.4.1+.
 
 Configure Laravel's PostgreSQL connection and migrate the application's tables.
-Define the application's string-backed `App\Enums\ZeroContext` enum and attributed
-resolver, then set both `context` and `context_resolver` in `config/zero.php`.
-Follow the [typed context setup](./configuration.mdx#typed-context-and-resolver);
-generation reflects signatures rather than executing resolver methods.
+Zero supplies `user_id` from Laravel's authenticated request; no context classes
+need to be created or published. To add fields, see
+[typed context and resolver](./configuration.mdx#typed-context-and-resolver).
 
 Opt models in with `HasZeroQueries`; their Composer namespaces are discovered automatically.
 Define column allowlists and supported Eloquent relationships. Protect private

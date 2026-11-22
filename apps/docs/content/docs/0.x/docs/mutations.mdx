@@ -435,8 +435,8 @@ Use `withAttributes` on the Eloquent creation builder or in a shared Eloquent sc
 defaults. By default it also adds equality conditions to reads:
 
 ```php
-use App\Enums\ZeroContext;
 use ZeroForLaravel\Context\ContextReference;
+use ZeroForLaravel\Context\ZeroContext;
 
 $query->withAttributes(['user_id' => ContextReference::current(ZeroContext::USER_ID)]);
 // Read condition: user_id equals the resolved context value.

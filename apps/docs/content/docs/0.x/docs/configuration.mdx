@@ -14,27 +14,27 @@ The source defaults live in
 
 ## Laravel settings
 
-| Key                           | Default                              | Purpose                                                                                           |
-| ----------------------------- | ------------------------------------ | ------------------------------------------------------------------------------------------------- |
-| `discovery`                   | `'auto'`                             | Discover application models and tables, or select an explicit list of classes and globs.          |
-| `generation.output`           | `resources/js/zero/generated.ts`     | Generated schema, metadata, and row types; query/mutation modules are written alongside it.       |
-| `generation.queries`          | `bootstrap/zero-queries.php`         | Authoritative controller query registrations.                                                     |
-| `generation.mutations`        | `bootstrap/zero-mutations.php`       | Authoritative controller mutation registrations.                                                  |
-| `generation.schema`           | `ZodMutationSchemaDriver::class`     | Container-resolved validator driver for both queries and mutations.                               |
-| `frontend.driver`             | `AutoDetectFrontendDriver::class`    | Detect React from package.json, or resolve a custom `FrontendDriver` class.                       |
-| `wayfinder.module`            | `@/zero`                             | TypeScript import root for generated controller modules used by Wayfinder's Inertia page helpers. |
-| `formbraid.enabled`           | `false`                              | Include React form generation in `zero:generate`, `--check`, and `zero:dev` startup.              |
-| `formbraid.output`            | `resources/js/formbraid/zero`        | Project-relative output directory for `zero:formbraid`.                                           |
-| `formbraid.runtime`           | `null`                               | Project-relative module exporting application-owned `controllerRuntime` bindings.                 |
-| `sync_publication_on_migrate` | `false`                              | Synchronize the dedicated publication after successful PostgreSQL `up` migration batches.         |
-| `publication`                 | `ZERO_PUBLICATION` or `laravel_zero` | Dedicated PostgreSQL publication managed by the package.                                          |
-| `app_id`                      | `ZERO_APP_ID` or `zero`              | Application identity shared with Zero cache.                                                      |
-| `upstream_schema`             | `ZERO_UPSTREAM_SCHEMA` or `zero_0`   | Zero-owned bookkeeping schema; match the cache's `<app-id>_0`.                                    |
-| `api_key`                     | `ZERO_API_KEY`                       | Private cache API key; never include it in browser code.                                          |
-| `route_prefix`                | `zero`                               | Prefix for query and mutation endpoints.                                                          |
-| `middleware`                  | `['api', 'auth']`                    | Authenticate the end user independently of cache authentication.                                  |
-| `context`                     | `App\Enums\ZeroContext::class`       | Application-owned string-backed enum declaring context fields.                                    |
-| `context_resolver`            | `App\Zero\ResolveZeroContext::class` | One public attributed resolver method per enum case.                                              |
+| Key                           | Default                                            | Purpose                                                                                           |
+| ----------------------------- | -------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| `discovery`                   | `'auto'`                                           | Discover application models and tables, or select an explicit list of classes and globs.          |
+| `generation.output`           | `resources/js/zero/generated.ts`                   | Generated schema, metadata, and row types; query/mutation modules are written alongside it.       |
+| `generation.queries`          | `bootstrap/zero-queries.php`                       | Authoritative controller query registrations.                                                     |
+| `generation.mutations`        | `bootstrap/zero-mutations.php`                     | Authoritative controller mutation registrations.                                                  |
+| `generation.schema`           | `ZodMutationSchemaDriver::class`                   | Container-resolved validator driver for both queries and mutations.                               |
+| `frontend.driver`             | `AutoDetectFrontendDriver::class`                  | Detect React from package.json, or resolve a custom `FrontendDriver` class.                       |
+| `wayfinder.module`            | `@/zero`                                           | TypeScript import root for generated controller modules used by Wayfinder's Inertia page helpers. |
+| `formbraid.enabled`           | `false`                                            | Include React form generation in `zero:generate`, `--check`, and `zero:dev` startup.              |
+| `formbraid.output`            | `resources/js/formbraid/zero`                      | Project-relative output directory for `zero:formbraid`.                                           |
+| `formbraid.runtime`           | `null`                                             | Project-relative module exporting application-owned `controllerRuntime` bindings.                 |
+| `sync_publication_on_migrate` | `false`                                            | Synchronize the dedicated publication after successful PostgreSQL `up` migration batches.         |
+| `publication`                 | `ZERO_PUBLICATION` or `laravel_zero`               | Dedicated PostgreSQL publication managed by the package.                                          |
+| `app_id`                      | `ZERO_APP_ID` or `zero`                            | Application identity shared with Zero cache.                                                      |
+| `upstream_schema`             | `ZERO_UPSTREAM_SCHEMA` or `zero_0`                 | Zero-owned bookkeeping schema; match the cache's `<app-id>_0`.                                    |
+| `api_key`                     | `ZERO_API_KEY`                                     | Private cache API key; never include it in browser code.                                          |
+| `route_prefix`                | `zero`                                             | Prefix for query and mutation endpoints.                                                          |
+| `middleware`                  | `['api', 'auth']`                                  | Authenticate the end user independently of cache authentication.                                  |
+| `context`                     | `ZeroForLaravel\Context\ZeroContext::class`        | String-backed enum declaring context fields.                                                      |
+| `context_resolver`            | `ZeroForLaravel\Context\ResolveZeroContext::class` | One public attributed resolver method per enum case.                                              |
 
 Add `HasZeroQueries` to relationship targets even if they expose no top-level queries or writes.
 Choose the middleware and guard appropriate to your application. Session
@@ -43,8 +43,13 @@ configuration needs the cookie-forwarding and CSRF setup in
 
 ## Typed context and resolver
 
-Define an application-owned enum and an attributed resolver; generation reflects
-their signatures without executing request-specific methods:
+The built-in `ZeroContext::USER_ID` field (`user_id`) is the request user's
+authentication identifier as a string, or `null` for guests. To add fields,
+run `php artisan vendor:publish --tag=zero-context` to create the editable
+classes below. Publish `--tag=zero-config` if needed, then set `context` to
+`App\Enums\ZeroContext::class` and `context_resolver` to
+`App\Zero\ResolveZeroContext::class` in `config/zero.php`. Use that enum in
+your queries too. Publishing alone does not switch the active context.
 
 ```php
 // app/Enums/ZeroContext.php
@@ -63,15 +68,14 @@ namespace App\Zero;
 use App\Enums\ZeroContext;
 use Illuminate\Http\Request;
 use ZeroForLaravel\Attributes\ResolvesContext;
+use ZeroForLaravel\ResolvedContext;
 
 final class ResolveZeroContext
 {
     #[ResolvesContext(ZeroContext::USER_ID)]
     public function userId(Request $request): ?string
     {
-        $id = $request->user()?->getAuthIdentifier();
-
-        return $id === null ? null : (string) $id;
+        return ResolvedContext::authenticatedId($request);
     }
 }
 ```

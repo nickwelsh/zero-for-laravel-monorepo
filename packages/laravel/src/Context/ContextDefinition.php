@@ -86,12 +86,8 @@ final readonly class ContextDefinition
         }
 
         $this->validate($values);
-        $id = $request->user()?->getAuthIdentifier();
-        if ($id !== null && ! is_string($id) && ! is_int($id)) {
-            throw new LogicException('Authenticated Zero identity must be a string or integer.');
-        }
 
-        return new ResolvedContext($values, $id === null ? null : (string) $id);
+        return new ResolvedContext($values, ResolvedContext::authenticatedId($request));
     }
 
     /** @param array<string, mixed> $values */

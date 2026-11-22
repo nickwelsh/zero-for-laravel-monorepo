@@ -121,6 +121,10 @@ final class ZeroServiceProvider extends ServiceProvider
         if ($this->app->runningInConsole()) {
             $this->loadMigrationsFrom(__DIR__.'/../database/core-migrations');
             $this->publishes([__DIR__.'/../config/zero.php' => config_path('zero.php')], 'zero-config');
+            $this->publishes([
+                __DIR__.'/../stubs/ZeroContext.php.stub' => app_path('Enums/ZeroContext.php'),
+                __DIR__.'/../stubs/ResolveZeroContext.php.stub' => app_path('Zero/ResolveZeroContext.php'),
+            ], 'zero-context');
             $this->commands([GenerateCommand::class, FormbraidCommand::class, SyncPublicationCommand::class, DevCommand::class, DoctorCommand::class, ResetCommand::class, ExposureCommand::class]);
             Event::listen(MigrationsEnded::class, function (MigrationsEnded $event): void {
                 if ($event->method !== 'up' || ($event->options['pretend'] ?? false) || ! config()->boolean('zero.sync_publication_on_migrate')) {
