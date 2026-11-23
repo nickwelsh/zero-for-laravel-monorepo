@@ -56,19 +56,29 @@ Ordinary scalar Gates work without these projections or a running Zero-cache.
 
 Managed Casbin operations, source mass updates and direct SQL subject/resource
 writes maintain authority facts in the same transaction. Rule writes must use the
-managed API; raw rule DML and source truncation are rejected. Transactions acquire
-one advisory lock before model-row locks and source changes; managed writes and
-rebuilds retry detected concurrency conflicts up to three times. An enclosing
+managed API; raw rule DML and source truncation are rejected. A managed rule write
+takes a shared rebuild lock and an exclusive lock for its model and declared
+domain before changing rules. Rebuilds and subject/resource writes still take the
+exclusive rebuild lock. Managed writes and rebuilds retry detected concurrency
+conflicts up to three times. An enclosing
 application transaction should use Laravel's retry argument too. Rollback restores
 business rows, grants, projections and durable invalidations together.
 
-The initial projector recomputes effective grants on policy/role/subject changes,
-bounded at 100,000 effective grants. It does not expand global grants per resource.
-Effective-grant and resource projections upsert only changed facts and remove
-obsolete keys; unchanged grants are not deleted and reinserted. Computing the
-effective-grant diff can still span the full graph. This favors simple
-transactional correctness over large-graph throughput; applications must
-measure their own write/fan-out costs. Role inheritance is acyclic and limited to
+Policy edits reconcile grants by source rule ID. Role assignments and inheritance
+edits reconcile the declared domain (the whole model for global roles). Expansion
+walks from policies down to members. A policy without a subject applies to all
+subjects; a monitored subject change still refreshes all models. Resource changes
+refresh their resource facts, not the grant index. Neither global nor scoped
+grants expand per resource. Unchanged grants are not deleted and reinserted.
+
+`permissions.max_index_rows` defaults to 100,000 for the database, not per tenant.
+Statement triggers count inserted/deleted rows into a transaction-local delta.
+At commit, deferred triggers apply the net change to one counter, check its cap,
+and advance model revisions and record events. Transactions therefore coordinate
+at commit, not during domain expansion. Rebuild counts the repaired table and
+installs the configured maximum; lowering it below the repaired count fails.
+
+Role inheritance is acyclic and limited to
 eight edges. All authority tables and source models must use one connection and
 unprefixed public-schema tables. Each source table has one binding; custom table
 aliases and using the same table for subjects and resources are currently rejected.

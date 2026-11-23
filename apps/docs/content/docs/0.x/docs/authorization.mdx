@@ -156,10 +156,21 @@ Before serving portable queries, run `php artisan permissions:rebuild` on Postgr
 projections plus monitored-column database triggers. Direct business SQL and mass
 updates therefore maintain authority facts too. Source rows, rules and projections
 must share one configured connection. Managed writes participate in the caller's
-transaction. Take `ProjectionManager::lock()` before model-row locks when combining
-permission and business changes; retry a failed transaction, not partial writes.
+transaction. For a permission-only change with a known domain, take
+`$projections->lock($modelName, $domain)` before locking business rows used to
+authorize the change. Use `$projections->lock()` for transactions that also write
+subject/resource rows or need a consistent view across domains. Retry a failed
+transaction, not partial writes.
 Do not write raw `permission_rules`, private projections, or an independently cached
 Casbin enforcer around the managed integration.
+
+When upgrading from the full-model rule triggers, pause traffic and drain old workers.
+Deploy the new code, refresh Laravel's config cache if used, then run
+`php artisan permissions:rebuild`. Resume traffic with new workers only after it
+succeeds. Rebuild replaces the triggers, installs lookup indexes, repairs grants
+from source and initializes the database-wide grant count in one transaction.
+The Todos example runs this rebuild in its migration. Other applications can run
+the command directly; no republish of existing config is required.
 
 Rebuild after changing model files, bindings or authority schemas; regenerate
 contracts and synchronize the dedicated publication. Missing/stale projections and

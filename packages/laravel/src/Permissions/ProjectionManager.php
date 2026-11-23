@@ -40,11 +40,21 @@ final class ProjectionManager
     }
 
     /** Acquire before model-row locks and source writes. Nested managed writes reuse the transaction lock. */
-    public function lock(): void
+    public function lock(?string $model = null, ?string $domain = null): void
     {
-        if ($this->connection()->getDriverName() === 'pgsql') {
-            $this->connection()->select('SELECT pg_advisory_xact_lock(?)', [self::LOCK]);
+        $db = $this->connection();
+        if ($db->getDriverName() !== 'pgsql') {
+            return;
         }
+
+        if ($model === null) {
+            $db->select('SELECT pg_advisory_xact_lock(?)', [self::LOCK]);
+
+            return;
+        }
+
+        $db->select('SELECT pg_advisory_xact_lock_shared(?)', [self::LOCK]);
+        $db->select('SELECT pg_advisory_xact_lock(hashtext(?), hashtext(?))', [$model, $domain ?? '__global__']);
     }
 
     public function rebuild(): void
@@ -57,6 +67,12 @@ final class ProjectionManager
 
         $db->transaction(function () use ($db): void {
             $this->lock();
+            // A migration can write rules and then rebuild in the same transaction.
+            // PostgreSQL refuses DDL on permission_rules while its revision events are pending.
+            if ($db->transactionLevel() > 1 && $db->scalar("SELECT EXISTS (SELECT FROM pg_trigger WHERE tgrelid = 'permission_rules'::regclass AND tgname = 'zero_permissions_revision')")) {
+                $db->statement('SET CONSTRAINTS zero_permissions_revision IMMEDIATE');
+            }
+
             $subjectClass = config()->string('permissions.subject.class');
             if (! is_subclass_of($subjectClass, Model::class)) {
                 throw new LogicException('permissions.subject.class must be an Eloquent model.');
@@ -118,27 +134,45 @@ final class ProjectionManager
             }
 
             $indexBody = '';
+            $changedBody = '';
             foreach ($models as $name => $portable) {
                 $manager = resolve(PermissionManager::class)->model($name);
-                new RoleGraph($manager->rules());
-                foreach ($manager->rules() as $rule) {
+                $rules = $manager->rules();
+                new RoleGraph($rules);
+                foreach ($rules as $rule) {
                     $this->validateRule($portable, $rule['ptype'], $rule['fields']);
                 }
 
                 $db->table('permission_models')->updateOrInsert(['id' => $name], ['fingerprint' => hash('sha256', $manager->source())]);
-                $indexBody .= $this->indexSql($name, $portable, array_keys($subjectValues));
+                $function = 'zero_permissions_grants_'.substr(hash('sha256', $name), 0, 16);
+                $this->function($function, 'target_domain text, target_rule text', 'void', $this->indexSql($name, $portable, array_keys($subjectValues)));
+                // A generic plan for the nullable filters can scan every tenant even for a single rule.
+                $db->statement("ALTER FUNCTION {$function}(text,text) SET plan_cache_mode = force_custom_plan");
+                $indexBody .= "PERFORM {$function}(NULL, NULL);";
+                $domain = $portable->scoped ? 'changed.v2' : 'NULL'; // g = child, parent[, domain]
+                $changedBody .= 'IF changed.model = '.$this->literal($name)." THEN IF changed.ptype = 'p' THEN PERFORM {$function}(NULL, changed.id); ELSE PERFORM {$function}({$domain}, NULL); END IF; END IF;";
+                if ($portable->scoped) {
+                    $column = 'v'.array_search('dom', $portable->policyFields, true);
+                    foreach (['permission_rules', 'permission_index'] as $table) {
+                        $db->statement("CREATE INDEX IF NOT EXISTS {$table}_domain_{$column} ON {$table} (model, {$column})");
+                    }
+                }
             }
 
+            $db->statement("CREATE INDEX IF NOT EXISTS permission_role_members ON permission_rules (model, v2, v1) WHERE ptype = 'g'");
             $indexBody .= 'DELETE FROM permission_index'.($models === [] ? '' : ' WHERE model NOT IN ('.implode(', ', array_map($this->literal(...), array_keys($models))).')').';';
-            $indexBody .= "IF (SELECT count(*) FROM permission_index) > 100000 THEN RAISE EXCEPTION 'Permission projection exceeds 100000 grants; reduce role fan-out'; END IF;";
             $this->function('zero_permissions_index', '', 'void', $indexBody);
             $this->function('zero_permissions_touch', '', 'void', 'WITH changed AS (UPDATE permission_models SET revision = revision + 1 RETURNING id, revision) INSERT INTO permission_events (model, revision) SELECT id, revision FROM changed;');
             $this->sourceTriggers($subject, 'zero_permissions_subjects', [$subject->getKeyName(), ...array_column($attributes, 'column')], true);
-            $this->function('zero_permissions_rule_guard', '', 'trigger', 'PERFORM pg_advisory_xact_lock('.self::LOCK."); IF current_setting('zero.permissions_write', true) IS DISTINCT FROM 'on' THEN RAISE EXCEPTION 'Use managed Casbin writes, not direct permission rule writes'; END IF; RETURN NULL;");
+            $this->function('zero_permissions_rule_guard', '', 'trigger', "IF TG_OP NOT IN ('INSERT', 'DELETE') OR current_setting('zero.permissions_write', true) IS DISTINCT FROM 'on' THEN RAISE EXCEPTION 'Use managed Casbin writes, not direct permission rule writes'; END IF; RETURN NULL;");
             $db->unprepared('DROP TRIGGER IF EXISTS zero_permissions_guard ON permission_rules; CREATE TRIGGER zero_permissions_guard BEFORE INSERT OR UPDATE OR DELETE OR TRUNCATE ON permission_rules FOR EACH STATEMENT EXECUTE FUNCTION zero_permissions_rule_guard()');
-            $this->function('zero_permissions_rules_changed', '', 'trigger', 'PERFORM zero_permissions_index(); RETURN NULL;');
-            $db->unprepared('DROP TRIGGER IF EXISTS zero_permissions_changed ON permission_rules; CREATE TRIGGER zero_permissions_changed AFTER INSERT OR UPDATE OR DELETE ON permission_rules FOR EACH STATEMENT EXECUTE FUNCTION zero_permissions_rules_changed()');
+            $this->function('zero_permissions_rules_changed', '', 'trigger', 'DECLARE changed permission_rules := COALESCE(NEW, OLD); BEGIN '.$changedBody.' RETURN NULL; END;');
+            $db->unprepared('CREATE OR REPLACE TRIGGER zero_permissions_changed AFTER INSERT OR DELETE ON permission_rules FOR EACH ROW EXECUTE FUNCTION zero_permissions_rules_changed()');
+            // Keep the model revision and its event, but do not hold a model-row lock during the caller's transaction.
+            $this->function('zero_permissions_rule_revision', '', 'trigger', 'PERFORM FROM permission_index_count FOR UPDATE; WITH changed AS (UPDATE permission_models SET revision = revision + 1 WHERE id = COALESCE(NEW.model, OLD.model) RETURNING id, revision) INSERT INTO permission_events (model, revision) SELECT id, revision FROM changed; RETURN NULL;');
+            $db->unprepared('DROP TRIGGER IF EXISTS zero_permissions_revision ON permission_rules; CREATE CONSTRAINT TRIGGER zero_permissions_revision AFTER INSERT OR DELETE ON permission_rules DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION zero_permissions_rule_revision()');
             $db->getPdo()->exec('DO $rebuild$ BEGIN '.$refresh.' PERFORM zero_permissions_index(); PERFORM zero_permissions_touch(); END $rebuild$');
+            PermissionIndexLimit::install($db);
             $db->table('permission_installation')->updateOrInsert(['id' => true], ['fingerprint' => $this->fingerprint()]);
         }, 3);
     }
@@ -184,7 +218,7 @@ final class ProjectionManager
             }
         }
 
-        return hash('sha256', json_encode(['targeted-access-v1', config()->get('permissions.subject'), config()->get('permissions.resources'), $sources], JSON_THROW_ON_ERROR));
+        return hash('sha256', json_encode(['scoped-index-v2', config()->get('permissions.subject'), config()->get('permissions.resources'), $sources], JSON_THROW_ON_ERROR));
     }
 
     /** @param array<string, string> $columns */
@@ -292,16 +326,29 @@ final class ProjectionManager
         $field = fn (string $name): string => 'p.v'.array_search($name, $model->policyFields, true);
         $subject = in_array('sub', $model->policyFields, true) ? $field('sub') : null;
         $domain = $model->scoped ? $field('dom') : "'__global__'";
-        $reachable = 'true';
-        if ($subject !== null) {
-            $reachable = $model->roleArity === 0 ? $subject.' = s.id' : 'EXISTS (SELECT 1 FROM reach WHERE reach.subject_key = s.id AND reach.principal = '.$subject.' AND reach.domain_key = '.$domain.')';
+        $currentDomain = str_replace('p.', 'current.', $domain);
+        $reach = '';
+        $members = $subject === null ? 'CROSS JOIN permission_subjects s' : "JOIN permission_subjects s ON s.id = {$subject}";
+        if ($model->roleArity > 0) {
+            // Walk from selected policies to members, not every subject × every domain.
+            $roleDomain = $model->scoped ? 'AND g.v2 = reach.domain_key' : '';
+            $reach = <<<SQL
+                reach(rule_id, principal, domain_key, depth) AS (
+                    SELECT p.id, {$subject}, {$domain}, 0 FROM policies p
+                    UNION
+                    SELECT reach.rule_id, g.v0, reach.domain_key, reach.depth + 1
+                    FROM reach JOIN permission_rules g ON g.model = {$literal} AND g.ptype = 'g'
+                        AND g.v1 = reach.principal {$roleDomain}
+                    WHERE reach.depth < 8 AND starts_with(reach.principal, 'role:')
+                ),
+                SQL;
+            $members = 'JOIN (SELECT DISTINCT rule_id, principal FROM reach) members ON members.rule_id = p.id JOIN permission_subjects s ON s.id = members.principal';
         }
 
         $effect = in_array('eft', $model->policyFields, true) ? $field('eft') : "'allow'";
         $columns = implode(', ', array_map($this->quote(...), $attributes));
         $select = implode(', ', array_map(fn (string $column): string => 's.'.$this->quote($column), $attributes));
 
-        $roleDomain = $model->roleArity === 3 ? ' AND g.v2 = reach.domain_key' : '';
         $columns = $columns === '' ? '' : ', '.$columns;
         $select = $select === '' ? '' : ', '.$select;
         $updates = implode(', ', array_map(fn (string $column): string => $this->quote($column).' = EXCLUDED.'.$this->quote($column), [
@@ -309,26 +356,23 @@ final class ProjectionManager
         ]));
 
         return <<<SQL
-            WITH RECURSIVE domains AS (
-                SELECT DISTINCT {$domain} AS domain_key
+            WITH RECURSIVE policies AS (
+                SELECT p.*
                 FROM permission_rules p WHERE p.model = {$literal} AND p.ptype = 'p'
-            ), reach(subject_key, principal, domain_key, depth) AS (
-                SELECT s.id, s.id, d.domain_key, 0
-                FROM permission_subjects s CROSS JOIN domains d
-                UNION
-                SELECT reach.subject_key, g.v1, reach.domain_key, reach.depth + 1
-                FROM reach JOIN permission_rules g
-                    ON g.model = {$literal} AND g.ptype = 'g' AND g.v0 = reach.principal {$roleDomain}
-                WHERE reach.depth < 8
-            ), desired AS MATERIALIZED (
+                    AND (target_rule IS NULL OR p.id = target_rule)
+                    AND (target_domain IS NULL OR {$domain} = target_domain)
+            ), {$reach} desired AS MATERIALIZED (
                 SELECT encode(sha256(convert_to(s.id || ':' || p.id, 'UTF8')), 'hex') AS id,
                     {$literal} AS model, p.id AS rule_id, s.id AS subject_key, {$effect} AS effect,
                     'global' AS global_key, p.v0, p.v1, p.v2, p.v3, p.v4, p.v5 {$select}
-                FROM permission_subjects s CROSS JOIN permission_rules p
-                WHERE p.model = {$literal} AND p.ptype = 'p' AND {$reachable}
+                FROM policies p {$members}
             ), removed AS (
-                DELETE FROM permission_index current WHERE current.model = {$literal}
-                    AND NOT EXISTS (SELECT 1 FROM desired WHERE desired.id = current.id)
+                DELETE FROM permission_index WHERE id IN (
+                    SELECT current.id FROM permission_index current WHERE current.model = {$literal}
+                        AND (target_rule IS NULL OR current.rule_id = target_rule)
+                        AND (target_domain IS NULL OR {$currentDomain} = target_domain)
+                    EXCEPT SELECT id FROM desired
+                )
             )
             INSERT INTO permission_index (id, model, rule_id, subject_key, effect, global_key, v0, v1, v2, v3, v4, v5 {$columns})
                 SELECT * FROM desired

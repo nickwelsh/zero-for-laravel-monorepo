@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- PostgreSQL permission updates now maintain grants for the affected rule or domain.
+  Before upgrading an installation with maintained permissions, pause traffic and
+  drain old workers. Deploy the new code, refresh Laravel's config cache if used,
+  and run `php artisan permissions:rebuild` before resuming traffic with new workers.
+  Rebuild installs the database-wide `permissions.max_index_rows` (default 100,000).
 - React query results no longer expose `render()` or the `RenderHandlers` type.
   Switch on `query.status` and read `query.data` and `query.error` directly.
 

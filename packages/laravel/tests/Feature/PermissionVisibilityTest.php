@@ -17,6 +17,7 @@ use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Sleep;
 use LogicException;
+use PDOException;
 use PhpParser\ParserFactory;
 use RuntimeException;
 use stdClass;
@@ -285,10 +286,18 @@ test('alternate role paths survive removal without leaking across domains and re
     Casbin::addGroupingPolicy('user:42', 'role:second', 'list:7');
     Casbin::addGroupingPolicy('role:first', 'role:reader', 'list:7');
     Casbin::addGroupingPolicy('role:second', 'role:reader', 'list:7');
+    Casbin::addPolicy('user:42', 'list:7', 'todo-list', 'view', 'any', 'allow');
+    Casbin::addPolicy('user:42', 'list:8', 'todo-list', 'update', 'any', 'allow');
+    Casbin::removePolicy('user:42', 'list:7', 'todo-list', 'view', 'any', 'allow');
     expect(PermissionList::query()->visibleTo($alice)->pluck('id')->all())->toBe([7]);
-    Casbin::removeGroupingPolicy('role:first', 'role:reader', 'list:7');
-    expect(PermissionList::query()->visibleTo($alice)->pluck('id')->all())->toBe([7]);
-    (new ProjectionManager)->rebuild();
+    DB::transaction(function () use ($alice): void {
+        Casbin::removeGroupingPolicy('role:first', 'role:reader', 'list:7');
+        expect(PermissionList::query()->visibleTo($alice)->pluck('id')->all())->toBe([7]);
+        $incremental = DB::table('permission_index')->orderBy('id')->get()->toJson();
+        DB::table('permission_index')->delete();
+        (new ProjectionManager)->rebuild();
+        expect(DB::table('permission_index')->orderBy('id')->get()->toJson())->toBe($incremental);
+    });
     expect(PermissionList::query()->visibleTo($alice)->pluck('id')->all())->toBe([7]);
     DB::table('permission_test_lists')->where('id', 7)->update(['owner_id' => '84']);
     expect(PermissionList::query()->visibleTo($alice)->count())->toBe(0);
@@ -296,6 +305,70 @@ test('alternate role paths survive removal without leaking across domains and re
     expect(PermissionList::query()->visibleTo($alice)->count())->toBe(1);
     Casbin::removeGroupingPolicy('role:second', 'role:reader', 'list:7');
     expect(PermissionList::query()->visibleTo($alice)->count())->toBe(0);
+});
+
+test('the configured index cap includes all domains and a failed grant rolls back', function (): void {
+    config(['permissions.max_index_rows' => 2]);
+    (new ProjectionManager)->rebuild();
+    PermissionUser::create(['id' => 42, 'department_id' => 'engineering']);
+    $grant = fn (int $id): bool => Casbin::addPolicy('user:42', 'list:'.$id, 'todo-list', 'view', 'any', 'allow');
+    expect($grant(1))->toBeTrue();
+    expect($grant(2))->toBeTrue();
+
+    $events = DB::table('permission_events')->count();
+    expect(fn (): bool => $grant(3))->toThrow(PDOException::class, 'exceeds 2 grants');
+    expect(DB::table('permission_rules')->count())->toBe(2);
+    expect(DB::table('permission_index')->count())->toBe(2);
+    expect(DB::table('permission_events')->count())->toBe($events);
+    Casbin::removePolicy('user:42', 'list:1', 'todo-list', 'view', 'any', 'allow');
+    expect($grant(3))->toBeTrue();
+});
+
+test('independent domains commit while a competing role edit waits for its own domain', function (): void {
+    $alice = PermissionUser::create(['id' => 42, 'department_id' => 'engineering']);
+    foreach ([7, 8] as $id) {
+        PermissionList::create(['id' => $id, 'owner_id' => '42', 'department_id' => 'engineering', 'name' => 'List '.$id]);
+        Casbin::addPolicy('role:reader', 'list:'.$id, 'todo-list', 'view', 'any', 'allow');
+    }
+
+    config(['database.connections.other' => DB::connection()->getConfig()]);
+    DB::connection('other')->statement("SET lock_timeout = '300ms'");
+    $assign = fn (int $id): bool => Casbin::addGroupingPolicy('user:42', 'role:reader', 'list:'.$id);
+    DB::transaction(function () use ($assign): void {
+        expect($assign(7))->toBeTrue();
+        config(['permissions.connection' => 'other']);
+        try {
+            expect($assign(8))->toBeTrue();
+            expect(fn (): bool => Casbin::removePolicy('role:reader', 'list:7', 'todo-list', 'view', 'any', 'allow'))->toThrow(QueryException::class, 'lock timeout');
+        } finally {
+            config(['permissions.connection' => null]);
+        }
+    });
+    expect(PermissionList::query()->visibleTo($alice)->orderBy('id')->pluck('id')->all())->toBe([7, 8]);
+    config(['permissions.connection' => 'other']);
+    expect(Casbin::removePolicy('role:reader', 'list:7', 'todo-list', 'view', 'any', 'allow'))->toBeTrue();
+    config(['permissions.connection' => null]);
+    expect(PermissionList::query()->visibleTo($alice)->pluck('id')->all())->toBe([8]);
+});
+
+test('two domains cannot commit competing grants into the last slot', function (): void {
+    config(['permissions.max_index_rows' => 1, 'database.connections.other' => DB::connection()->getConfig()]);
+    (new ProjectionManager)->rebuild();
+    PermissionUser::create(['id' => 42, 'department_id' => 'engineering']);
+    DB::connection('other')->statement("SET lock_timeout = '1s'");
+    $events = DB::table('permission_events')->count();
+    expect(fn () => DB::transaction(function (): void {
+        Casbin::addPolicy('user:42', 'list:7', 'todo-list', 'view', 'any', 'allow');
+        config(['permissions.connection' => 'other']);
+        try {
+            expect(Casbin::addPolicy('user:42', 'list:8', 'todo-list', 'view', 'any', 'allow'))->toBeTrue();
+        } finally {
+            config(['permissions.connection' => null]);
+        }
+    }))->toThrow(PDOException::class, 'exceeds 1 grants');
+    expect(DB::table('permission_rules')->pluck('v1')->all())->toBe(['list:8']);
+    expect(DB::table('permission_index')->pluck('v1')->all())->toBe(['list:8']);
+    expect(DB::table('permission_events')->count())->toBe($events + 1);
 });
 
 test('a policy admin falls back to normal grants when its live override is removed', function (): void {
