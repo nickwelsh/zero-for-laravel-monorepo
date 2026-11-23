@@ -439,7 +439,6 @@ function loading(selection: Pick<ReadSelection, 'one'>): Data<unknown> {
         nextPage: noop,
         previousPage: noop,
         retry: noop,
-        render: (handlers) => handlers.onLoading(),
     };
 }
 

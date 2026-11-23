@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- React query results no longer expose `render()` or the `RenderHandlers` type.
+  Switch on `query.status` and read `query.data` and `query.error` directly.
+
 ## [0.15.0] - 2026-11-23
 
 - `php artisan zero:setup` checks PostgreSQL, guides Laravel session configuration,

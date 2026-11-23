@@ -17,14 +17,7 @@ export class QueryAccessError extends Error {
 }
 
 export type DataStatus = 'idle' | 'loading' | 'refreshing' | 'failure' | 'stale' | 'success';
-export type RenderHandlers<T, R> = {
-    onIdle: () => R;
-    onLoading: () => R;
-    onRefreshing: (data: T) => R;
-    onFailure: (error: Error) => R;
-    onStale: (value: readonly [T, Error]) => R;
-    onSuccess: (data: T) => R;
-};
+
 export interface InfiniteData {
     readonly hasMore: boolean | undefined;
     readonly limit: number;
@@ -57,7 +50,6 @@ export interface Data<T> {
     nextPage(this: void): void;
     previousPage(this: void): void;
     retry(this: void): void;
-    render<R>(handlers: RenderHandlers<T, R>): R;
 }
 
 export interface ReadSelection {
@@ -382,22 +374,6 @@ export function useSelectionData<Q extends ReadSelection>(
         },
         retry: () => {
             if (details.type === 'error') details.retry();
-        },
-        render: (handlers) => {
-            switch (status) {
-                case 'idle':
-                    return handlers.onIdle();
-                case 'loading':
-                    return handlers.onLoading();
-                case 'refreshing':
-                    return handlers.onRefreshing(data);
-                case 'failure':
-                    return handlers.onFailure(error!);
-                case 'stale':
-                    return handlers.onStale([data, error!]);
-                default:
-                    return handlers.onSuccess(data);
-            }
         },
     };
 }
