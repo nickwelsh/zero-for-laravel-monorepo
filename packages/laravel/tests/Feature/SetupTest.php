@@ -42,7 +42,12 @@ test('session setup writes both environment files without sharing the key or rep
             $command->expectsConfirmation('Configure Inertia live page props?', 'yes')
                 ->expectsConfirmation('Generate Zero page prop types with Wayfinder?', 'yes')
                 ->expectsConfirmation('Authenticate Zero with Laravel session cookies?', 'yes')
-                ->expectsQuestion('Which files would you like to publish?', []);
+                ->expectsChoice('Which files would you like to publish?', [], [
+                    '' => 'None',
+                    'context' => 'Context classes for fields beyond user_id',
+                    'permissions' => 'Managed permissions config and migrations',
+                    'config' => 'Editable config/zero.php for custom overrides',
+                ]);
             if ($resolver !== null) {
                 $command->expectsConfirmation('Add the live page resolver to resources/js/app.tsx?', $resolver ? 'yes' : 'no');
             }
