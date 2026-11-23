@@ -6,7 +6,9 @@ namespace ZeroForLaravel\Console;
 
 use Illuminate\Console\Command;
 use Illuminate\Filesystem\Filesystem;
+use Illuminate\Support\Facades\Process;
 use Illuminate\Support\Str;
+use Laravel\Prompts\Elements\Element;
 use Laravel\Wayfinder\Converters\InertiaData;
 use LogicException;
 use Symfony\Component\Process\ExecutableFinder;
@@ -18,9 +20,16 @@ use ZeroForLaravel\Generation\FrontendDriver;
 use ZeroForLaravel\Generation\GeneratedLayout;
 use ZeroForLaravel\Generation\ReactFrontendDriver;
 
+use function Laravel\Prompts\callout;
 use function Laravel\Prompts\confirm;
+use function Laravel\Prompts\error;
+use function Laravel\Prompts\info;
 use function Laravel\Prompts\multiselect;
+use function Laravel\Prompts\select;
+use function Laravel\Prompts\task;
 use function Laravel\Prompts\text;
+use function Laravel\Prompts\title;
+use function Laravel\Prompts\warning;
 
 final class SetupCommand extends Command
 {
@@ -42,19 +51,33 @@ final class SetupCommand extends Command
             }
 
             $frontend = $frontend instanceof AutoDetectFrontendDriver ? $frontend->detect() : $frontend;
-            $this->info($frontend instanceof ReactFrontendDriver ? 'Detected React.' : ($frontend instanceof FrontendDriver ? 'Using configured frontend driver.' : 'No frontend detected.'));
-            $inertia = class_exists(\Inertia\ServiceProvider::class) && confirm('Configure Inertia live page props?');
-            $wayfinder = class_exists(InertiaData::class) && confirm('Generate Zero page prop types with Wayfinder?');
-            $session = confirm('Authenticate Zero with Laravel session cookies?', default: $inertia);
+            $interactive = $this->input->isInteractive() && defined('STDIN') && stream_isatty(STDIN);
+            if ($interactive) {
+                title('Zero for Laravel · Setup');
+            }
+
+            info($frontend instanceof ReactFrontendDriver ? 'Detected React.' : ($frontend instanceof FrontendDriver ? 'Using configured frontend driver.' : 'No frontend detected.'));
+            $available = [];
+            if (class_exists(\Inertia\ServiceProvider::class)) {
+                $available['inertia'] = 'Inertia live page props';
+            }
+
+            if (class_exists(InertiaData::class)) {
+                $available['wayfinder'] = 'Wayfinder page prop types';
+            }
+
+            $features = $available === [] ? [] : multiselect('Which integrations would you like to enable?', $available, default: array_keys($available), hint: 'Installed integrations are selected. Press Space to toggle.');
+            $inertia = in_array('inertia', $features, true);
+            $wayfinder = in_array('wayfinder', $features, true);
+            $session = select('How would you like to authenticate?', [
+                'session' => 'Laravel session cookies',
+                'token' => 'Bearer token (your Laravel guard)',
+            ], default: $inertia ? 'session' : 'token') === 'session';
             $extras = multiselect('Which files would you like to publish?', [
                 'context' => 'Context classes for fields beyond user_id',
                 'permissions' => 'Managed permissions config and migrations',
                 'config' => 'Editable config/zero.php for custom overrides',
             ], hint: 'Leave empty to use package defaults.');
-            $context = in_array('context', $extras, true);
-            $permissions = in_array('permissions', $extras, true);
-            $publish = $context || in_array('config', $extras, true);
-
             $layout = new GeneratedLayout(config()->string('zero.generation.output'));
             $directory = $layout->editableRoot();
             $entry = resource_path('js/app.tsx');
@@ -81,104 +104,127 @@ final class SetupCommand extends Command
                     'ZERO_QUERY_ALLOWED_CLIENT_HEADERS' => 'x-xsrf-token', 'ZERO_MUTATE_ALLOWED_CLIENT_HEADERS' => 'x-xsrf-token'];
             }
 
-            $this->line("Laravel: {$app}  |  Zero cache: {$cache}");
+            $summary = ['Laravel' => $app, 'Zero cache' => $cache, 'Authentication' => $session ? 'Session cookies' : 'Bearer token'];
             if ($session) {
-                $this->line('Session domain: '.$settings['SESSION_DOMAIN'].'; CSRF validation stays enabled.');
+                $summary['Session domain'] = $herd ? '.'.$host : 'Host only';
             }
 
+            callout('Local connection', [Element::keyValueList($summary)]);
             if (! $herd && $secure) {
-                $this->warn("Configure your HTTPS proxy to forward /sync/ WebSockets to http://127.0.0.1:{$port}.");
+                warning("Forward /sync/ WebSockets to http://127.0.0.1:{$port} in your HTTPS proxy.");
             }
 
             $private = new SetupEnvironmentFile($files, $path);
             $example = new SetupEnvironmentFile($files, base_path('.env.example'));
             $privateSettings = $settings;
-            if ($herd && $secure) {
+            if ($herd && $secure && ! config('zero.dev.ca')) {
                 $ca = getenv('HOME').'/Library/Application Support/Herd/config/valet/CA/LaravelValetCASelfSigned.pem';
-                if (! config('zero.dev.ca') && is_readable($ca)) {
+                if (is_readable($ca)) {
                     $privateSettings['ZERO_CA_CERT'] = '"'.addcslashes($ca, '\\"$').'"';
                 } else {
-                    $this->line('If Node cannot verify Herd TLS, set ZERO_CA_CERT in .env to the absolute path of the Herd CA.');
+                    warning('Herd CA not found. If Node rejects the local certificate, set ZERO_CA_CERT in .env.');
                 }
             }
 
             $private->stage($privateSettings, true);
             $example->stage($settings, false);
 
-            if (! confirm('Apply these local settings to the app and .env.example?', default: $this->input->isInteractive() && defined('STDIN') && stream_isatty(STDIN))) {
+            if (! confirm('Apply these settings and generate Zero contracts?', default: $interactive)) {
                 return self::SUCCESS;
             }
 
-            $private->save(true);
-            $example->save(false);
+            $next = task('Apply local settings', function () use ($private, $example, $extras, $layout, $files, $frontend, $inertia, $directory, $updatedEntry, $entry, $originalEntry): array {
+                $next = [];
+                $private->save(true);
+                $example->save(false);
 
-            if ($publish) {
-                $this->publish('zero-config');
-            }
-
-            if ($context) {
-                $this->publish('zero-context');
-                $config = config_path('zero.php');
-                $original = $files->get($config);
-                if ($original === $files->get(__DIR__.'/../../config/zero.php')) {
-                    $files->replace($config, strtr($original, [
-                        'use ZeroForLaravel\\Context\\ZeroContext;' => 'use App\\Enums\\ZeroContext;',
-                        'use ZeroForLaravel\\Context\\ResolveZeroContext;' => 'use App\\Zero\\ResolveZeroContext;',
-                    ]));
-                } else {
-                    $this->line('In config/zero.php, point context to App\\Enums\\ZeroContext::class and context_resolver to App\\Zero\\ResolveZeroContext::class.');
+                if (in_array('config', $extras, true) || in_array('context', $extras, true)) {
+                    $this->publish('zero-config');
                 }
-            }
 
-            if ($permissions) {
-                $this->publish('permissions-config');
-                // Published migration timestamps can differ. Match by migration name on reruns.
-                foreach ($files->files(__DIR__.'/../../database/migrations') as $migration) {
-                    $name = substr($migration->getFilename(), 18);
-                    if ($files->glob(database_path('migrations/*_'.$name)) === []) {
-                        $files->ensureDirectoryExists(database_path('migrations'));
-                        $files->copy($migration->getPathname(), database_path('migrations/'.$migration->getFilename()));
+                if (in_array('context', $extras, true)) {
+                    $this->publish('zero-context');
+                    $config = config_path('zero.php');
+                    $original = $files->get($config);
+                    if ($original === $files->get(__DIR__.'/../../config/zero.php')) {
+                        $files->replace($config, strtr($original, [
+                            'use ZeroForLaravel\\Context\\ZeroContext;' => 'use App\\Enums\\ZeroContext;',
+                            'use ZeroForLaravel\\Context\\ResolveZeroContext;' => 'use App\\Zero\\ResolveZeroContext;',
+                        ]));
+                    } else {
+                        $next[] = 'In config/zero.php, point context to App\\Enums\\ZeroContext::class and context_resolver to App\\Zero\\ResolveZeroContext::class.';
                     }
                 }
 
-                $this->line('Configure permission bindings in config/permissions.php before migrating.');
-            }
+                if (in_array('permissions', $extras, true)) {
+                    $this->publish('permissions-config');
+                    // Published migration timestamps can differ. Match by migration name on reruns.
+                    foreach ($files->files(__DIR__.'/../../database/migrations') as $migration) {
+                        $name = substr($migration->getFilename(), 18);
+                        if ($files->glob(database_path('migrations/*_'.$name)) === []) {
+                            $files->ensureDirectoryExists(database_path('migrations'));
+                            $files->copy($migration->getPathname(), database_path('migrations/'.$migration->getFilename()));
+                        }
+                    }
 
-            $layout->writeIgnoreRules($files);
-            $configuration = $frontend?->configuration();
-            if ($configuration !== null) {
-                $this->create($files, $directory.'/zero.config.ts', $configuration);
-            }
+                    $next[] = 'Configure permission bindings in config/permissions.php before migrating.';
+                }
 
-            if ($frontend instanceof ReactFrontendDriver) {
-                $this->line('Install @nickwelsh/zero-for-laravel, @rocicorp/zero@1.11.4 and zod. Wrap your signed-in layout in the generated ZeroProvider.');
-                if ($inertia) {
-                    $this->create($files, $directory.'/inertia.ts', "import { createInertiaAdapter } from '@nickwelsh/zero-for-laravel/inertia';\nimport { bindings, navigation } from '{$layout->queryImport()}';\n\nexport const livePages = createInertiaAdapter(bindings, { navigation });\nexport const Link = livePages.Link;\n");
-                    if ($updatedEntry !== null && $files->get($entry) === $originalEntry) {
-                        $files->replace($entry, $updatedEntry);
-                        $this->info('Added the live page resolver to resources/js/app.tsx.');
-                    } elseif (! str_contains($originalEntry ?? '', 'livePages.wrap(')) {
-                        $this->line('In your Inertia resolver, return livePages.wrap(module.default, page) (@inertiajs/react ^3.8).');
+                $layout->writeIgnoreRules($files);
+                $configuration = $frontend?->configuration();
+                if ($configuration !== null) {
+                    $this->create($files, $directory.'/zero.config.ts', $configuration);
+                }
+
+                if ($frontend instanceof ReactFrontendDriver) {
+                    $next[] = 'Install @nickwelsh/zero-for-laravel, @rocicorp/zero@1.11.4 and zod. Wrap your signed-in layout in ZeroProvider.';
+                    if ($inertia) {
+                        $this->create($files, $directory.'/inertia.ts', "import { createInertiaAdapter } from '@nickwelsh/zero-for-laravel/inertia';\nimport { bindings, navigation } from '{$layout->queryImport()}';\n\nexport const livePages = createInertiaAdapter(bindings, { navigation });\nexport const Link = livePages.Link;\n");
+                        if ($updatedEntry !== null && $files->get($entry) === $originalEntry) {
+                            $files->replace($entry, $updatedEntry);
+                        } elseif (! str_contains($originalEntry ?? '', 'livePages.wrap(')) {
+                            $next[] = 'In your Inertia resolver, return livePages.wrap(module.default, page) (@inertiajs/react ^3.8).';
+                        }
                     }
                 }
+
+                return $next;
+            }, limit: 1, keepSummary: true);
+
+            // Boot Artisan again: the running app still has the old middleware and context configuration.
+            task('Generate Zero contracts', function () use ($privateSettings): void {
+                $command = [PHP_BINARY, 'artisan', 'zero:generate', '--no-interaction'];
+                if (is_string($env = $this->option('env'))) {
+                    $command[] = '--env='.$env;
+                }
+
+                $result = Process::path(base_path())->forever()->env(array_fill_keys([...array_keys($privateSettings), 'ZERO_API_KEY'], false))->run($command);
+                if ($result->failed()) {
+                    throw new LogicException('Settings saved, but generation failed. Run php artisan zero:generate to see the error and retry.');
+                }
+            }, limit: 1, keepSummary: true);
+
+            if (! $session) {
+                $next[] = 'Pass the user’s bearer token as auth to Zero and configure the matching Laravel guard for the callback routes.';
             }
 
             if ($herd) {
                 $site = substr($host, 0, -5);
-                $this->line('herd link '.$site);
+                $commands = ['herd link '.$site];
                 if ($secure) {
-                    $this->line('herd secure '.$site);
+                    $commands[] = 'herd secure '.$site;
                 }
 
-                $this->line("herd proxy zero.{$site} http://127.0.0.1:{$port}".($secure ? ' --secure' : ''));
+                $commands[] = "herd proxy zero.{$site} http://127.0.0.1:{$port}".($secure ? ' --secure' : '');
+                callout('Run in Herd', implode("\n", $commands));
             }
 
-            $this->info('After creating a Zero model and migrating PostgreSQL, run php artisan zero:dev. Restart Vite to load .env.');
-            $this->line('Deploy: run php artisan zero:generate against the migrated database before Wayfinder and the frontend build.');
+            $next[] = 'After migrating PostgreSQL and adding a Zero model, run php artisan zero:dev. Restart Vite to load .env.';
+            callout('Next steps', [Element::bulletedList($next)]);
 
             return self::SUCCESS;
         } catch (LogicException $logicException) {
-            $this->error($logicException->getMessage());
+            error($logicException->getMessage());
 
             return self::FAILURE;
         }
@@ -212,7 +258,7 @@ final class SetupCommand extends Command
 
     private function publish(string $tag): void
     {
-        if ($this->call('vendor:publish', ['--tag' => $tag]) !== self::SUCCESS) {
+        if ($this->callSilent('vendor:publish', ['--tag' => $tag]) !== self::SUCCESS) {
             throw new LogicException('Could not publish '.$tag.'.');
         }
     }
@@ -220,13 +266,10 @@ final class SetupCommand extends Command
     private function create(Filesystem $files, string $path, string $content): void
     {
         if ($files->exists($path)) {
-            $this->line('Kept '.$path);
-
             return;
         }
 
         $files->ensureDirectoryExists(dirname($path));
         $files->put($path, $content);
-        $this->line('Created '.$path);
     }
 }

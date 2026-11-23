@@ -180,8 +180,10 @@ These outputs are gitignored. During deployment, run `php artisan zero:generate`
 against the migrated database **before** Wayfinder or your frontend build. Ship
 the PHP registries with that build. Commit `zero.config.ts` and `inertia.ts`.
 
-Run `php artisan zero:setup` to enable Inertia live props (`ZERO_INERTIA=true`)
-and, with Wayfinder `dev-next`, live-query page types (`ZERO_WAYFINDER=true`).
+`php artisan zero:setup` preselects installed integrations: Inertia live props
+and, with Wayfinder `dev-next`, live-query page types. Choose session cookies or
+a bearer token validated by your app’s Laravel guard. Confirm to write the local
+settings and run `zero:generate`.
 Laravel discovers both providers. If upgrading from manual registration, set the
 flags for the integrations you use and remove their `bootstrap/providers.php` entries.
 Run `zero:generate` before `wayfinder:generate`.

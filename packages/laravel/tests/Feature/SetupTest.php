@@ -30,18 +30,27 @@ test('session setup writes both environment files without sharing the key or rep
     File::put($dir.'/.env', "APP_URL=http://localhost\nPRIVATE_SETTING=keep-private\nZERO_API_KEY=\n");
     File::put($dir.'/.env.example', "APP_URL=http://localhost\nZERO_API_KEY=remove-this\n");
     File::put($dir.'/package.json', '{"dependencies":{"react":"^19"}}');
+    File::put($dir.'/composer.json', json_encode(['autoload' => ['psr-4' => ['App\\' => 'app/']]], JSON_THROW_ON_ERROR));
+    File::ensureDirectoryExists($dir.'/app');
+    File::ensureDirectoryExists($dir.'/bootstrap/cache');
+    File::put($dir.'/artisan', '<?php require '.var_export(dirname(__DIR__, 2).'/vendor/autoload.php', true).';'.<<<'PHP'
+
+        $app = Illuminate\Foundation\Application::configure(basePath: __DIR__)
+            ->withProviders([ZeroForLaravel\ZeroServiceProvider::class])->create();
+        exit($app->handleCommand(new Symfony\Component\Console\Input\ArgvInput));
+        PHP);
     $path = getenv('PATH');
     // A Herd executable is enough for detection; the wizard must never run it.
     File::put($dir.'/herd', "#!/bin/sh\nexit 1\n");
     chmod($dir.'/herd', 0755);
     putenv('PATH='.$dir.PATH_SEPARATOR.$path);
     try {
-        $run = function (bool $apply, ?bool $resolver): void {
+        $run = function (bool $apply, ?bool $resolver, bool $session = true): void {
             $command = $this->artisan('zero:setup');
             $this->assertInstanceOf(PendingCommand::class, $command);
-            $command->expectsConfirmation('Configure Inertia live page props?', 'yes')
-                ->expectsConfirmation('Generate Zero page prop types with Wayfinder?', 'yes')
-                ->expectsConfirmation('Authenticate Zero with Laravel session cookies?', 'yes')
+            $command->expectsChoice('Which integrations would you like to enable?', $session ? ['inertia', 'wayfinder'] : [], [
+                '' => 'None', 'inertia' => 'Inertia live page props', 'wayfinder' => 'Wayfinder page prop types',
+            ])->expectsQuestion('How would you like to authenticate?', $session ? 'session' : 'token')
                 ->expectsChoice('Which files would you like to publish?', [], [
                     '' => 'None',
                     'context' => 'Context classes for fields beyond user_id',
@@ -54,13 +63,15 @@ test('session setup writes both environment files without sharing the key or rep
 
             $command->expectsConfirmation('Use Laravel Herd?', 'yes')->expectsConfirmation('Use HTTPS with Herd?', 'yes')
                 ->expectsQuestion('Laravel app URL', 'https://notes.test')
-                ->expectsConfirmation('Apply these local settings to the app and .env.example?', $apply ? 'yes' : 'no')
+                ->expectsConfirmation('Apply these settings and generate Zero contracts?', $apply ? 'yes' : 'no')
                 ->assertSuccessful()->run();
         };
         $run(false, true);
         expect(File::get($entry))->toBe($starter);
+        expect(File::exists($zero.'/generated/react.ts'))->toBeFalse();
         expect(File::get($dir.'/.env'))->toBe("APP_URL=http://localhost\nPRIVATE_SETTING=keep-private\nZERO_API_KEY=\n");
         $run(true, false);
+        expect(File::get($zero.'/generated/react.ts'))->toContain('laravelSession: true');
         expect(File::get($entry))->toBe($starter);
         $run(true, true);
         $installed = File::get($entry);
@@ -90,6 +101,10 @@ test('session setup writes both environment files without sharing the key or rep
         File::put($entry, $custom);
         $run(true, null);
         expect(File::get($entry))->toBe($custom);
+        $run(true, null, session: false);
+        $tokenEnv = Dotenv::parse(File::get($dir.'/.env'));
+        expect([$tokenEnv['ZERO_SESSION_AUTH'], $tokenEnv['ZERO_INERTIA'], $tokenEnv['ZERO_WAYFINDER']])->toBe(['false', 'false', 'false']);
+        expect(File::get($zero.'/generated/react.ts'))->not->toContain('laravelSession: true');
     } finally {
         putenv('PATH='.$path);
         app()->setBasePath($base);

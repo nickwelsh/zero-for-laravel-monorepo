@@ -3236,11 +3236,12 @@
             "dist": {
                 "type": "path",
                 "url": "../../packages/laravel",
-                "reference": "ad83679e6aa0625dc5bebf29be6215b8a2017f4e"
+                "reference": "1a76fb32750e7d7f725837cddefed944d8074e5f"
             },
             "require": {
                 "casbin/casbin": "^4.6",
                 "laravel/framework": "^12.0|^13.0",
+                "laravel/prompts": "^0.3.27",
                 "laravel/ranger": "^0.5.1",
                 "laravel/surveyor": "^0.3.0",
                 "php": "^8.3",
@@ -12438,5 +12439,5 @@
     "platform-overrides": {
         "php": "8.4.1"
     },
-    "plugin-api-version": "2.9.0"
+    "plugin-api-version": "2.11.0"
 }
