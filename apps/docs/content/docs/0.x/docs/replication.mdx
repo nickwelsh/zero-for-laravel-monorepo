@@ -101,10 +101,12 @@ do not migrate competing tables. Keep the cache API key out of browser code.
 It authenticates the cache, while the configured Laravel middleware separately
 authenticates the end user.
 
-For Laravel session authentication, set `zero.middleware` to `['web', 'auth']`,
-exclude only `zero/query` and `zero/mutate` from Laravel CSRF validation in
-`bootstrap/app.php`, and set both `ZERO_QUERY_FORWARD_COOKIES=true` and
-`ZERO_MUTATE_FORWARD_COOKIES=true` in the cache. Serve the app and cache through a
+For Laravel session authentication, set `zero.middleware` to `['web', 'auth']` and
+keep CSRF validation enabled. On connection the generated React provider sends
+Laravel’s `XSRF-TOKEN` cookie as `X-XSRF-TOKEN` for queries and mutations.
+Set `ZERO_QUERY_FORWARD_COOKIES=true` and `ZERO_MUTATE_FORWARD_COOKIES=true` on
+the cache, and include `x-xsrf-token` in `ZERO_QUERY_ALLOWED_CLIENT_HEADERS` and
+`ZERO_MUTATE_ALLOWED_CLIENT_HEADERS`. Serve the app and cache through a
 cookie-compatible origin/proxy. The endpoints still require the private cache
 API key and the authenticated session. For token authentication, configure your
 API guard and use Zero's `auth` token or allowed client authorization headers.

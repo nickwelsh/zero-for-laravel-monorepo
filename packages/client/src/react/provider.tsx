@@ -19,7 +19,7 @@ import type { ControllerMutationBinding, MutationDestination } from '../controll
 export type ProviderOptions<C extends ClientContext = ClientContext> = Omit<
     ZeroOptions<Schema, undefined, C>,
     'schema' | 'mutators' | 'userID' | 'context'
->;
+> & { laravelSession?: boolean };
 export type ProviderProps<C extends ClientContext = ClientContext> = {
     userID: string | null;
     context: C;
@@ -32,6 +32,26 @@ type Insert = { table: string; id: string };
 // Only identities of in-flight inserts. Row contents always belong to Zero.
 export const PendingInserts = createContext<readonly Insert[]>([]);
 
+function sessionHeaders(headers: Record<string, string> = {}): Record<string, string> {
+    if (Object.keys(headers).some((key) => ['x-csrf-token', 'x-xsrf-token'].includes(key.toLowerCase())))
+        return headers;
+
+    // Zero serializes these headers at each connection, not at each Laravel callback.
+    const result = Object.defineProperties({}, Object.getOwnPropertyDescriptors(headers));
+    return Object.defineProperty(result, 'X-XSRF-TOKEN', {
+        enumerable: true,
+        get() {
+            const value = globalThis.document?.cookie.match(/(?:^|;\s*)XSRF-TOKEN=([^;]+)/)?.[1];
+            if (!value) return undefined;
+            try {
+                return decodeURIComponent(value);
+            } catch {
+                return undefined;
+            }
+        },
+    });
+}
+
 /** Bind generated contracts once; native Zero retains ownership of its lifecycle. */
 export function createZeroProvider<C extends ClientContext = ClientContext>(
     schema: Schema,
@@ -41,6 +61,11 @@ export function createZeroProvider<C extends ClientContext = ClientContext>(
     controllers: ContextType<typeof ControllerMutations> = { actions: {}, preparation: {} },
     contextContract?: ContextContract,
 ) {
+    const { laravelSession, ...nativeOptions } = options;
+    if (laravelSession) {
+        nativeOptions.queryHeaders = sessionHeaders(options.queryHeaders);
+        nativeOptions.mutateHeaders = sessionHeaders(options.mutateHeaders);
+    }
     const clients = new Set<Zero<Schema, undefined, C>>();
     function Client({ children }: { children: ReactNode }) {
         const zero = useContext(ZeroContext) as Zero<Schema, undefined, C>;
@@ -91,7 +116,7 @@ export function createZeroProvider<C extends ClientContext = ClientContext>(
             <>
                 {inertiaShell && !ready && <StartingZero.Provider value={true}>{children}</StartingZero.Provider>}
                 <NativeProvider<Schema, undefined, C>
-                    {...options}
+                    {...nativeOptions}
                     {...(auth === undefined ? {} : { auth })}
                     init={initialized}
                     schema={schema}

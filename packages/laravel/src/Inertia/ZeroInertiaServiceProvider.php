@@ -14,6 +14,10 @@ final class ZeroInertiaServiceProvider extends ServiceProvider
 {
     public function register(): void
     {
+        if (! config('zero.inertia', false) || ! class_exists(\Inertia\ServiceProvider::class)) {
+            return;
+        }
+
         $this->app->register(\Inertia\ServiceProvider::class);
         if ($this->app->resolved(\Inertia\ResponseFactory::class)) {
             throw new LogicException('Register ZeroInertiaServiceProvider before resolving Inertia.');

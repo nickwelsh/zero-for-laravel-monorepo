@@ -27,9 +27,9 @@ Use `zero.run(search(input))`, native `useQuery`, or `useData(search.live(input)
 Standalone reads validate and authorize their own FormRequest through the existing
 Zero endpoint; they do not inherit page middleware or route model binding.
 
-Zero does not generate global page types. Optionally register
-`ZeroForLaravel\WayfinderServiceProvider` with Wayfinder `dev-next` to specialize
-its own generated live props; run Zero generation before Wayfinder generation.
+Run `php artisan zero:setup` to opt into Inertia live props and Wayfinder `dev-next`
+page types. Laravel discovers the providers; `ZERO_INERTIA` and `ZERO_WAYFINDER`
+enable them independently. Run Zero generation before Wayfinder generation.
 
 ```sh
 php artisan vendor:publish --tag=zero-config

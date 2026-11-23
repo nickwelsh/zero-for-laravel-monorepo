@@ -3236,7 +3236,7 @@
             "dist": {
                 "type": "path",
                 "url": "../../packages/laravel",
-                "reference": "aae1a243b82cfdebdf467267041f9884aed133e7"
+                "reference": "ad83679e6aa0625dc5bebf29be6215b8a2017f4e"
             },
             "require": {
                 "casbin/casbin": "^4.6",
@@ -3273,7 +3273,9 @@
             "extra": {
                 "laravel": {
                     "providers": [
-                        "ZeroForLaravel\\ZeroServiceProvider"
+                        "ZeroForLaravel\\ZeroServiceProvider",
+                        "ZeroForLaravel\\Inertia\\ZeroInertiaServiceProvider",
+                        "ZeroForLaravel\\WayfinderServiceProvider"
                     ]
                 }
             },

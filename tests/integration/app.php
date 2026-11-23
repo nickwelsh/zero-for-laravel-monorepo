@@ -182,6 +182,7 @@ $app->afterBootstrapping(LoadConfiguration::class, function ($app) use ($root) {
             'username' => getenv('ZERO_TEST_PG_USER') ?: 'postgres', 'password' => getenv('ZERO_TEST_PG_PASSWORD') ?: '',
             'charset' => 'utf8', 'prefix' => '', 'search_path' => 'public', 'sslmode' => 'prefer',
         ],
+        'zero.inertia' => true,
         'zero.context' => ZeroContext::class,
         'zero.context_resolver' => ContextResolver::class,
         'zero.middleware' => [FixtureIdentity::class], 'zero.api_key' => getenv('ZERO_API_KEY'),

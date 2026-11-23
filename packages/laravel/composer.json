@@ -42,7 +42,9 @@
     "extra": {
         "laravel": {
             "providers": [
-                "ZeroForLaravel\\ZeroServiceProvider"
+                "ZeroForLaravel\\ZeroServiceProvider",
+                "ZeroForLaravel\\Inertia\\ZeroInertiaServiceProvider",
+                "ZeroForLaravel\\WayfinderServiceProvider"
             ]
         }
     },

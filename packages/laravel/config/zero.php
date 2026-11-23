@@ -73,6 +73,8 @@ return [
         'driver' => AutoDetectFrontendDriver::class,
     ],
 
+    'inertia' => env('ZERO_INERTIA', false),
+
     /*
     |--------------------------------------------------------------------------
     | Wayfinder Imports
@@ -85,6 +87,7 @@ return [
     */
 
     'wayfinder' => [
+        'enabled' => env('ZERO_WAYFINDER', false),
         'module' => '@/zero',
     ],
 
@@ -156,7 +159,7 @@ return [
     */
 
     'route_prefix' => 'zero',
-    'middleware' => ['api', 'auth'],
+    'middleware' => [env('ZERO_SESSION_AUTH', false) ? 'web' : 'api', 'auth'],
 
     /*
     |--------------------------------------------------------------------------

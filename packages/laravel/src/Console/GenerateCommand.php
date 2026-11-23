@@ -8,6 +8,7 @@ use Illuminate\Console\Command;
 use Illuminate\Filesystem\Filesystem;
 use LogicException;
 use Throwable;
+use ZeroForLaravel\Generation\AutoDetectFrontendDriver;
 use ZeroForLaravel\Generation\ControllerDiscovery;
 use ZeroForLaravel\Generation\ControllerQueryGenerator;
 use ZeroForLaravel\Generation\FormbraidGenerator;
@@ -144,7 +145,10 @@ final class GenerateCommand extends Command
 
         if ($configuration !== null && ! $files->exists($config)) {
             $files->replace($config, $configuration);
-            $this->info("Created {$config}. Configure your public cache URL here; this file will not be overwritten.");
+            $this->info("Created {$config}. This file will not be overwritten.");
+            if ($frontend instanceof ReactFrontendDriver || $frontend instanceof AutoDetectFrontendDriver) {
+                $this->line('Set VITE_APP_URL="${APP_URL}" and VITE_ZERO_CACHE_URL in .env and .env.example. Keep ZERO_API_KEY server-side.');
+            }
         }
 
         return self::SUCCESS;

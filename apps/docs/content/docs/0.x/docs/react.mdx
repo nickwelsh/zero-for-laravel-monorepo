@@ -57,11 +57,10 @@ and infer live data from the exported queries. Ordinary props remain application
 
 ## Optional Wayfinder page types
 
-If you use `laravel/wayfinder` **`dev-next`** to generate `Inertia.Pages`, register
-`ZeroForLaravel\WayfinderServiceProvider::class` in `bootstrap/providers.php`.
-This is opt-in and requires Wayfinder's next-branch Inertia converter; the stable
-route-only Wayfinder release does not expose it. Zero does not install Wayfinder
-as a production dependency.
+Run `php artisan zero:setup` or set `ZERO_WAYFINDER=true` in `.env` to enable
+live-query types in `Inertia.Pages`. Laravel discovers the provider automatically.
+Setup offers this option with Wayfinder **`dev-next`**; the route-only release
+has no page-type converter.
 
 Generate Zero's contracts first, then let Wayfinder generate its own declarations:
 

@@ -8,7 +8,7 @@ import {options} from "./zero.config";
 export function useZero() { return useNativeZero<typeof schema, undefined, Context>(); }
 export function createZeroBindings(preparation: MutationPreparation = {}) {
   const {mutators, actions} = createControllerMutationBindings<typeof schema, Context>(schema, definitions);
-  const ZeroProvider = createZeroProvider<Context>(schema, mutators, options, true, {actions, preparation}, contextContract);
+  const ZeroProvider = createZeroProvider<Context>(schema, mutators, {laravelSession: true, ...options}, true, {actions, preparation}, contextContract);
   const controllerRuntime = () => ({client: ZeroProvider.getClient(), actions, preparation});
   return {mutators, actions, ZeroProvider, controllerRuntime};
 }

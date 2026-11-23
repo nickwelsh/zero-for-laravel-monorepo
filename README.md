@@ -179,9 +179,11 @@ The generated file manifest tracks obsolete controller modules for safe removal.
 Deploy these together. `zero:generate --check` detects drift. The editable
 `zero.config.ts` holds public connection options and is never overwritten.
 
-Applications using Wayfinder `dev-next` can opt into
-`ZeroForLaravel\WayfinderServiceProvider` to have **Wayfinder's own page generator**
-emit precise live-query prop types. Run `zero:generate` before `wayfinder:generate`.
+Run `php artisan zero:setup` to enable Inertia live props (`ZERO_INERTIA=true`)
+and, with Wayfinder `dev-next`, live-query page types (`ZERO_WAYFINDER=true`).
+Laravel discovers both providers. If upgrading from manual registration, set the
+flags for the integrations you use and remove their `bootstrap/providers.php` entries.
+Run `zero:generate` before `wayfinder:generate`.
 Only registered Zero props are customized; shared and ordinary props stay with
 Wayfinder, without duplicate declarations or global overrides. The controller
 module root is configurable with `zero.wayfinder.module` (default `@/zero`).
@@ -260,9 +262,9 @@ Laravel needs `ZERO_APP_ID`, matching `ZERO_UPSTREAM_SCHEMA` (normally `<app-id>
 publication, PostgreSQL connection URLs, `ZERO_QUERY_URL`, `ZERO_MUTATE_URL`, and
 matching query/mutate API keys. Never put the private cache key in browser code.
 
-For sessions, use `zero.middleware = ['web', 'auth']`, forward cookies on both cache
-callbacks, exclude only those callback paths from CSRF validation, and use compatible
-app/cache cookie origins. The private cache key and end-user session are both required.
+For sessions, use `zero.middleware = ['web', 'auth']` and compatible app/cache cookie
+origins. Forward cookies and allow `x-xsrf-token` on both cache callbacks. The generated
+React provider sends the header automatically; keep Laravel CSRF validation enabled.
 Controller route middleware/binding still runs for registered actions. See the example
 for concrete environment configuration and startup commands.
 

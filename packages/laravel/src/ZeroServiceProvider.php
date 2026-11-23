@@ -24,6 +24,7 @@ use ZeroForLaravel\Console\ExposureCommand;
 use ZeroForLaravel\Console\FormbraidCommand;
 use ZeroForLaravel\Console\GenerateCommand;
 use ZeroForLaravel\Console\ResetCommand;
+use ZeroForLaravel\Console\SetupCommand;
 use ZeroForLaravel\Console\SyncPublicationCommand;
 use ZeroForLaravel\Http\AuthenticateZeroCache;
 use ZeroForLaravel\Http\ZeroController;
@@ -125,7 +126,7 @@ final class ZeroServiceProvider extends ServiceProvider
                 __DIR__.'/../stubs/ZeroContext.php.stub' => app_path('Enums/ZeroContext.php'),
                 __DIR__.'/../stubs/ResolveZeroContext.php.stub' => app_path('Zero/ResolveZeroContext.php'),
             ], 'zero-context');
-            $this->commands([GenerateCommand::class, FormbraidCommand::class, SyncPublicationCommand::class, DevCommand::class, DoctorCommand::class, ResetCommand::class, ExposureCommand::class]);
+            $this->commands([SetupCommand::class, GenerateCommand::class, FormbraidCommand::class, SyncPublicationCommand::class, DevCommand::class, DoctorCommand::class, ResetCommand::class, ExposureCommand::class]);
             Event::listen(MigrationsEnded::class, function (MigrationsEnded $event): void {
                 if ($event->method !== 'up' || ($event->options['pretend'] ?? false) || ! config()->boolean('zero.sync_publication_on_migrate')) {
                     return;
