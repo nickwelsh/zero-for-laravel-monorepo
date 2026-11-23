@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.15.0] - 2026-11-23
+
+- `php artisan zero:setup` checks PostgreSQL, guides Laravel session configuration,
+  offers installed integrations, and generates contracts. Zero also registers
+  with Laravel's dev runner. Applications can use the built-in user context.
+- Generated support files live in `resources/js/zero/generated/`. Application
+  modules such as `App/`, `tables/`, and `formbraid/` remain at the Zero import root.
+- Tables can filter on related records and display related fields. Definitions
+  with relations or display columns use protocol 3; scalar-only definitions
+  without display columns keep protocol 2 and their saved views.
+- Upgrade the PHP, client, and optional table packages together to **0.15.0**.
+  Regenerate and deploy both sets of contracts together. Zero remains **1.11.4**.
+
 ## [0.14.0] - 2026-11-21
 
 ### Breaking live query migration
@@ -255,6 +268,7 @@ Deploy generated PHP and TypeScript contracts together. Supported targets are PH
 8.3+, Laravel 12/13, PostgreSQL 15+, and React 18/19. Automatic live pages require
 Inertia Laravel 3 and `@inertiajs/react` ^3.8.0.
 
+[0.15.0]: https://github.com/nickwelsh/zero-for-laravel-monorepo/releases/tag/v0.15.0
 [0.14.0]: https://github.com/nickwelsh/zero-for-laravel-monorepo/releases/tag/v0.14.0
 [0.13.0]: https://github.com/nickwelsh/zero-for-laravel-monorepo/releases/tag/v0.13.0
 [0.12.0]: https://github.com/nickwelsh/zero-for-laravel-monorepo/releases/tag/v0.12.0
