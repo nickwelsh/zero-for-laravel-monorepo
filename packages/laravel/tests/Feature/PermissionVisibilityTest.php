@@ -6,6 +6,7 @@ namespace ZeroForLaravel\Tests\Feature;
 
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Database\Eloquent\Attributes\ScopedBy;
+use Illuminate\Database\Eloquent\Concerns\HasUlids;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\QueryException;
 use Illuminate\Database\Schema\Blueprint;
@@ -20,11 +21,16 @@ use PhpParser\ParserFactory;
 use RuntimeException;
 use stdClass;
 use Symfony\Component\Process\Process;
+use ZeroForLaravel\Attributes\ZeroMutation;
 use ZeroForLaravel\Generation\ControllerQueryCompiler;
 use ZeroForLaravel\Generation\ControllerQueryGenerator;
+use ZeroForLaravel\Generation\Mutations\ControllerMutationCompiler;
 use ZeroForLaravel\Generation\TypeScriptGenerator;
 use ZeroForLaravel\Generation\ZodSchemaDriver;
+use ZeroForLaravel\Http\ControllerRouteDispatcher;
 use ZeroForLaravel\Metadata\ModelRegistry;
+use ZeroForLaravel\Mutation\ControllerMutationRegistry;
+use ZeroForLaravel\Permissions\Binding;
 use ZeroForLaravel\Permissions\Casbin;
 use ZeroForLaravel\Permissions\PermissionSchema;
 use ZeroForLaravel\Permissions\PermissionServiceProvider;
@@ -43,6 +49,24 @@ use ZeroForLaravel\Tests\Fixtures\PermissionUser;
 use ZeroForLaravel\Tests\PostgresTestCase;
 
 uses(PostgresTestCase::class);
+
+final class UlidPermissionList extends PermissionList
+{
+    use HasUlids;
+
+    protected $table = 'permission_ulid_lists';
+
+    protected $fillable = ['owner_id', 'department_id'];
+}
+
+final class UlidListController
+{
+    #[ZeroMutation]
+    public function store(): void
+    {
+        UlidPermissionList::create(['owner_id' => '01arz3ndektsv4rrffq69g5fav', 'department_id' => 'engineering']);
+    }
+}
 
 #[ScopedBy([VisibleToCurrentUser::class])]
 class AutomaticallyVisibleList extends PermissionList
@@ -121,6 +145,28 @@ test('private permission projections replicate without entering the browser sche
     expect($sql)->toContain('permission_subjects', 'permission_index');
     $browser = (new TypeScriptGenerator)->generate($registry);
     expect($browser)->not->toContain('permission_subjects', 'permission_index', 's_is_admin', 'a_owner_id');
+});
+
+test('permission projections preserve Laravel ULID resource and owner keys', function (): void {
+    Schema::create('permission_ulid_lists', function (Blueprint $table): void {
+        $table->ulid('id')->primary();
+        $table->foreignUlid('owner_id');
+        $table->char('department_id', 16);
+    });
+    config(['permissions.resources' => [UlidPermissionList::class => config('permissions.resources.'.PermissionList::class)]]);
+    (new ProjectionManager)->rebuild();
+
+    Route::post('/ulid-lists', [UlidListController::class, 'store']);
+    $models = new ModelRegistry([UlidPermissionList::class]);
+    $program = (new ControllerMutationCompiler((new ParserFactory)->createForHostVersion(), $models))->compile(UlidListController::class, 'store');
+    $registry = new ControllerMutationRegistry($models, new ControllerRouteDispatcher, [$program->name() => ['contract' => $program->contract(), 'guards' => []]]);
+    $id = (new UlidPermissionList)->newUniqueId();
+    $wire = ['version' => $program->fingerprint, 'input' => [], 'route' => [], 'prepared' => ['timestamp' => 1700000000000, 'ids' => ['s0' => $id]]];
+    DB::transaction(fn (): array => $registry->execute($program->name(), $wire, new ResolvedContext(['user_id' => null])));
+
+    $row = DB::table(Binding::resource(UlidPermissionList::class)->projectionTable())->where('resource_id', $id)->firstOrFail();
+    expect($row->object_id)->toBe($id)->and($row->a_owner_id)->toBe('01arz3ndektsv4rrffq69g5fav');
+    expect($row->a_department_id)->toBe(str_pad('engineering', 16));
 });
 
 test('portable Zero queries use trusted actors and captured Gates replay without executing the controller', function (): void {

@@ -15,6 +15,8 @@ final class ProjectionManager
 {
     private const int LOCK = 1730426117;
 
+    private const array ID_TYPES = ['int2', 'int4', 'int8', 'uuid', 'varchar', 'text', 'bpchar'];
+
     public function connection(): Connection
     {
         return resolve(PermissionManager::class)->connection();
@@ -68,7 +70,7 @@ final class ProjectionManager
 
             $attributes = Binding::attributes(config()->get('permissions.subject.attributes'));
             $subjectValues = $this->facts($subject, $attributes, 's_');
-            $subjectKey = $this->literal(config()->string('permissions.subject.prefix')).' || '.$this->quote($subject->getKeyName()).'::text';
+            $subjectKey = $this->literal(config()->string('permissions.subject.prefix')).' || '.$this->idText($subject->getKeyName(), $db->getSchemaBuilder()->getColumnType($subject->getTable(), $subject->getKeyName()));
             $this->table('permission_subjects', ['id' => 'text PRIMARY KEY', 'global_key' => "text NOT NULL DEFAULT 'global'", ...$this->types($attributes, 's_')]);
             $this->table('permission_index', ['id' => 'text PRIMARY KEY', 'model' => 'text NOT NULL', 'rule_id' => 'text NOT NULL',
                 'subject_key' => 'text NOT NULL', 'effect' => 'text NOT NULL', 'global_key' => "text NOT NULL DEFAULT 'global'",
@@ -95,18 +97,18 @@ final class ProjectionManager
 
                 $tables[] = $source->getTable();
                 $facts = $this->facts($source, $binding->attributes, 'a_');
-                $columns = $db->getSchemaBuilder()->getColumns($source->getTable());
-                $key = collect($columns)->firstWhere('name', $source->getKeyName());
-                if ($key === null || ! in_array($key['type_name'], ['int2', 'int4', 'int8', 'uuid', 'varchar', 'text'], true)) {
+                $columns = array_column($db->getSchemaBuilder()->getColumns($source->getTable()), null, 'name');
+                $key = $columns[$source->getKeyName()] ?? null;
+                if ($key === null || ! in_array($key['type_name'], self::ID_TYPES, true)) {
                     throw new LogicException('Permission resources require a native integer, UUID or text primary key.');
                 }
 
                 $this->table($binding->projectionTable(), ['resource_id' => $key['type'].' PRIMARY KEY', 'object_id' => 'text NOT NULL',
                     'domain_key' => 'text NOT NULL', 'global_key' => "text NOT NULL DEFAULT 'global'", ...$this->types($binding->attributes, 'a_')]);
-                $domain = $binding->domainColumn === null ? "'__global__'" : $this->literal($binding->domainPrefix).' || '.$this->quote($binding->domainColumn).'::text';
+                $domain = $binding->domainColumn === null ? "'__global__'" : $this->literal($binding->domainPrefix).' || '.$this->idText($binding->domainColumn, $columns[$binding->domainColumn]['type_name'] ?? throw new LogicException('Unknown permission domain column.'));
                 $function = 'zero_permissions_resource_'.substr(hash('sha256', $class), 0, 16);
                 $this->function($function, '', 'void', $this->replaceRows($binding->projectionTable(), [
-                    'resource_id' => $this->quote($source->getKeyName()), 'object_id' => $this->quote($source->getKeyName()).'::text',
+                    'resource_id' => $this->quote($source->getKeyName()), 'object_id' => $this->idText($source->getKeyName(), $key['type_name']),
                     'domain_key' => $domain, 'global_key' => "'global'", ...$facts,
                 ], $source));
                 $refresh .= 'PERFORM '.$function.'();';
@@ -229,14 +231,13 @@ final class ProjectionManager
         foreach ($attributes as $name => $attribute) {
             $column = collect($columns)->firstWhere('name', $attribute['column']);
             $allowed = match ($attribute['type']) {
-                'boolean' => ['bool'], 'integer' => ['int2', 'int4', 'int8'], 'id' => ['int2', 'int4', 'int8', 'uuid', 'varchar', 'text'], default => ['varchar', 'text']
+                'boolean' => ['bool'], 'integer' => ['int2', 'int4', 'int8'], 'id' => self::ID_TYPES, default => ['varchar', 'text', 'bpchar']
             };
             if ($column === null || $column['nullable'] || ! in_array($column['type_name'], $allowed, true)) {
                 throw new LogicException("Permission attribute {$name} requires a non-null database column with its declared scalar type.");
             }
 
-            $value = $this->quote($attribute['column']);
-            $facts[$prefix.$name] = in_array($attribute['type'], ['id', 'string'], true) ? $value.'::text' : $value;
+            $facts[$prefix.$name] = in_array($attribute['type'], ['id', 'string'], true) ? $this->idText($attribute['column'], $column['type_name']) : $this->quote($attribute['column']);
         }
 
         return $facts;
@@ -339,6 +340,14 @@ final class ProjectionManager
     private function function(string $name, string $arguments, string $returns, string $body): void
     {
         $this->connection()->getPdo()->exec('CREATE OR REPLACE FUNCTION '.$this->quote($name).'('.$arguments.') RETURNS '.$returns.' LANGUAGE plpgsql AS $permission_body$ BEGIN '.$body.' END; $permission_body$');
+    }
+
+    private function idText(string $column, string $type): string
+    {
+        $name = $this->quote($column);
+
+        // A bpchar::text cast strips padding; permission facts must match the bytes Eloquent reads.
+        return $type === 'bpchar' ? 'bpcharout('.$name.')::text' : $name.'::text';
     }
 
     private function quote(string $identifier): string
