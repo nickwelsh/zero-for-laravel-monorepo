@@ -3,7 +3,7 @@ import { Pencil, Trash2 } from 'lucide-react';
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { update as updateTodo, destroy as destroyTodo } from '@/zero/App/Http/Controllers/TodoController';
+import { update as updateTodo, destroy as destroyTodo } from '@/zero/generated/App/Http/Controllers/TodoController';
 import type { ListRow } from './list-panel';
 import { commitMutation } from './mutations';
 

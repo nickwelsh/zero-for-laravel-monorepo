@@ -5,10 +5,10 @@ import { editorFromForm, formbraidSubmit, RelationEditor } from '@nickwelsh/zero
 import { ZeroContext } from '@rocicorp/zero/react';
 import { useContext, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { update } from '@/formbraid/zero/App/Http/Controllers/TodoController';
-import { SaveTodoRequest } from '@/formbraid/zero/requests/App/Http/Requests/SaveTodoRequest';
+import { update } from '@/zero/generated/formbraid/App/Http/Controllers/TodoController';
+import { SaveTodoRequest } from '@/zero/generated/formbraid/requests/App/Http/Requests/SaveTodoRequest';
 import type { TodoRow } from '@/zero/generated';
-import todos from '@/zero/tables/todos';
+import todos from '@/zero/generated/tables/todos';
 
 const form = update({ todo: '' });
 const relation = SaveTodoRequest.fields.list_id.options;

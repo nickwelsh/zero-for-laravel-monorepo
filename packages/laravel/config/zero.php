@@ -48,7 +48,7 @@ return [
     */
 
     'generation' => [
-        'output' => resource_path('js/zero/generated.ts'),
+        'output' => resource_path('js/zero/generated/index.ts'),
         'queries' => base_path('bootstrap/zero-queries.php'),
         'mutations' => base_path('bootstrap/zero-mutations.php'),
         'schema' => ZodMutationSchemaDriver::class,
@@ -63,7 +63,7 @@ return [
     | React is currently supported. For another integration, supply a
     | FrontendDriver class; Laravel resolves its dependencies.
     |
-    | The React driver creates an editable zero.config.ts beside the schema.
+    | The React driver creates an editable zero.config.ts outside generated/.
     | Set the public cache URL there. Generation preserves your changes.
     | Private credentials such as the API key must never go in it.
     |
@@ -82,13 +82,13 @@ return [
     |
     | Zero's WayfinderServiceProvider uses this TypeScript import root when it
     | generates Inertia page types that refer to Zero's controller modules.
-    | Use an alias such as @/zero, not a directory on the server.
+    | Use a module alias, not a directory on the server.
     |
     */
 
     'wayfinder' => [
         'enabled' => env('ZERO_WAYFINDER', false),
-        'module' => '@/zero',
+        'module' => '@/zero/generated',
     ],
 
     /*
@@ -100,9 +100,9 @@ return [
     | zero:dev startup. The --check option checks forms without writing them.
     | The zero:formbraid command also works when this setting is disabled.
     |
-    | Output is relative to your project. Configure Formbraid's field components
-    | and metadata in config/formbraid.php, then let its Vite plugin produce
-    | the component metadata before running either generation command.
+    | Output defaults to generated/formbraid. Overrides are project-relative.
+    | Configure field components in config/formbraid.php, then let Formbraid's
+    | Vite plugin produce the metadata before running either generation command.
     |
     | Forms import controllerRuntime to submit through your Zero client. Leave
     | runtime null to use the generated React module. With custom optimistic
@@ -114,7 +114,7 @@ return [
 
     'formbraid' => [
         'enabled' => false,
-        'output' => 'resources/js/formbraid/zero',
+        'output' => null,
         'runtime' => null,
     ],
 

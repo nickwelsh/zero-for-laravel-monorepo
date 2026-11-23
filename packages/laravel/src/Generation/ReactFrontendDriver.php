@@ -8,9 +8,11 @@ final readonly class ReactFrontendDriver implements FrontendDriver
 {
     public function __construct(private TypeScriptGenerator $generator) {}
 
-    public function files(string $base, bool $custom): array
+    public function files(string|GeneratedLayout $base, bool $custom): array
     {
-        return [$base.'.react.ts' => $this->generator->generateReact('./'.$base, './zero.config', './'.$base.'.mutations', $custom)];
+        $layout = is_string($base) ? new GeneratedLayout($base.'.ts') : $base;
+
+        return [$layout->sibling('react').'.ts' => $this->generator->generateReact('./'.$layout->base, $layout->configImport(), './'.$layout->sibling('mutations'), $custom)];
     }
 
     public function configuration(): string

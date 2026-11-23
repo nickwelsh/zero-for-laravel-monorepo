@@ -60,7 +60,7 @@ Generated mutation actions expose native Effect schemas as `inputSchema` and
 
 ```ts
 import { Schema } from 'effect';
-import { store } from '@/zero/App/Http/Controllers/TodoController';
+import { store } from '@/zero/generated/App/Http/Controllers/TodoController';
 
 const input = store.inputSchema.parse({ title: 'New task' });
 const batch = Schema.Array(store.inputSchema);

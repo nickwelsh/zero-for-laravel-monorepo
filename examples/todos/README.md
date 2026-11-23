@@ -10,7 +10,7 @@ controller-declared live queries and controller mutations. It consumes the local
 - Every reader can add, edit, complete, and delete todos.
 - Create-list and add-todo forms use Formbraid 0.3. With `formbraid.enabled`,
   `zero:generate` and `zero:dev` startup generate request definitions and native
-  Zero controller descriptors under `resources/js/formbraid/zero`. Vite produces
+  Zero controller descriptors under `resources/js/zero/generated/formbraid`. Vite produces
   the component metadata and reruns generation after edits.
   Create-list renders `<Form form={store} />`; add-todo uses Formbraid's optional
   `useForm` instance API to clear accepted drafts without erasing newer edits.
@@ -95,7 +95,6 @@ herd link todos
 herd secure todos
 herd proxy zero.todos http://127.0.0.1:4858 --secure
 php artisan migrate
-php artisan zero:generate
 pnpm build
 composer dev
 ```
@@ -167,8 +166,12 @@ unchanged. See [the table README](../../packages/table/README.md) and
 This example uses Wayfinder `dev-next` with the published `config/wayfinder.php`.
 Inertia component metadata and enum-method generation are enabled. Routes and
 controller actions are imported from `@/wayfinder/routes` and `@/wayfinder/App/...`.
-The Vite plugin generates Zero contracts before Wayfinder; `pnpm zero:generate`
-does the same with a fresh Wayfinder analysis.
+After migrating PostgreSQL, `pnpm build` and `pnpm dev` inspect Formbraid metadata,
+generate Zero contracts, and then run a fresh Wayfinder analysis. For typechecking or
+PHP tests without a Vite build, run `pnpm zero:generate` first. The TypeScript contracts
+in `resources/js/zero/generated/` and the PHP registries in `bootstrap/zero-*.php`
+are build outputs, not source files. Keep `zero.config.ts` and `inertia.ts` in
+`resources/js/zero/` under version control.
 
 The generated dashboard live prop uses `QueryData<typeof index.lists>` from the
 Zero controller module. Its `inputs.values.status` and `inputs.options.status`
@@ -198,7 +201,7 @@ with Ctrl+C, then run from `examples/todos`:
 
 ```sh
 php artisan migrate:fresh --seed
-php artisan zero:generate
+pnpm zero:generate
 rm -f storage/app/zero/replica.db*
 composer dev
 ```

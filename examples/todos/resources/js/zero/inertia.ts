@@ -2,7 +2,7 @@ import { router } from '@inertiajs/react';
 import { createInertiaAdapter } from '@nickwelsh/zero-for-laravel/inertia';
 import { toast } from 'sonner';
 import { dashboard } from '@/wayfinder/routes';
-import { bindings, navigation } from './generated.queries';
+import { bindings, navigation } from './generated/queries';
 
 export const livePages = createInertiaAdapter(bindings, {
     navigation,

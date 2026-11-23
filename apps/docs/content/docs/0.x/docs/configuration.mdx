@@ -17,14 +17,14 @@ The source defaults live in
 | Key                           | Default                                            | Purpose                                                                                           |
 | ----------------------------- | -------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
 | `discovery`                   | `'auto'`                                           | Discover application models and tables, or select an explicit list of classes and globs.          |
-| `generation.output`           | `resources/js/zero/generated.ts`                   | Generated schema, metadata, and row types; query/mutation modules are written alongside it.       |
+| `generation.output`           | `resources/js/zero/generated/index.ts`             | Generated schema, metadata, and row types; query/mutation modules are written alongside it.       |
 | `generation.queries`          | `bootstrap/zero-queries.php`                       | Authoritative controller query registrations.                                                     |
 | `generation.mutations`        | `bootstrap/zero-mutations.php`                     | Authoritative controller mutation registrations.                                                  |
 | `generation.schema`           | `ZodMutationSchemaDriver::class`                   | Container-resolved validator driver for both queries and mutations.                               |
 | `frontend.driver`             | `AutoDetectFrontendDriver::class`                  | Detect React from package.json, or resolve a custom `FrontendDriver` class.                       |
-| `wayfinder.module`            | `@/zero`                                           | TypeScript import root for generated controller modules used by Wayfinder's Inertia page helpers. |
+| `wayfinder.module`            | `@/zero/generated`                                 | TypeScript import root for generated controller modules used by Wayfinder's Inertia page helpers. |
 | `formbraid.enabled`           | `false`                                            | Include React form generation in `zero:generate`, `--check`, and `zero:dev` startup.              |
-| `formbraid.output`            | `resources/js/formbraid/zero`                      | Project-relative output directory for `zero:formbraid`.                                           |
+| `formbraid.output`            | `null`                                             | Defaults to `generated/formbraid` beside the other generated modules.                             |
 | `formbraid.runtime`           | `null`                                             | Project-relative module exporting application-owned `controllerRuntime` bindings.                 |
 | `sync_publication_on_migrate` | `false`                                            | Synchronize the dedicated publication after successful PostgreSQL `up` migration batches.         |
 | `publication`                 | `ZERO_PUBLICATION` or `laravel_zero`               | Dedicated PostgreSQL publication managed by the package.                                          |
@@ -104,10 +104,18 @@ php artisan zero:sync-publication --dry-run
 php artisan zero:sync-publication
 ```
 
-Generation uses your migrated database. Exclude generated contracts from formatters
+On each clean checkout or deployment, run `php artisan zero:generate` against
+the migrated database before Wayfinder, typechecking, or Vite. Include the two
+generated PHP registries in the deployed app. Exclude generated contracts from formatters
 so `--check` can compare exact output. Publication synchronization atomically
 replaces the dedicated publication's table and column membership. Use a dedicated
 publication and review `--dry-run` before changing an existing deployment.
+
+**Upgrading from `zero/generated.ts`?** If you published `config/zero.php`, update
+`generation.output` and `wayfinder.module` to the defaults above to adopt the new layout.
+Regenerate, change `./generated.queries` in `zero/inertia.ts` to `./generated/queries`,
+and update your provider, controller, and table imports. Remove the old generated
+files after typechecking. Ignore rules do not untrack files already in Git.
 
 The opt-in migration hook skips rollbacks, pretend runs, and non-PostgreSQL
 connections. Publication failures fail the migration command. Ordinary migrations
@@ -117,7 +125,7 @@ do not require deleting the Zero replica.
 
 `zero:generate` detects React in either `dependencies` or `devDependencies` in the
 application's `package.json`. It generates the React provider and creates an editable
-`zero.config.ts` beside the contracts once. Set its public `cacheURL` and optional
+`resources/js/zero/zero.config.ts` outside `generated/`. Set its public `cacheURL` and optional
 query/mutation URLs. Regeneration preserves that configuration. The `--react` flag
 remains a one-off shortcut to select the React driver explicitly.
 

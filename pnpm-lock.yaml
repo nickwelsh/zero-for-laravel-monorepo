@@ -288,9 +288,6 @@ importers:
         specifier: ^4.6.7
         version: 4.6.7
     devDependencies:
-      '@laravel/vite-plugin-wayfinder':
-        specifier: ^0.1.11
-        version: 0.1.11
       '@rolldown/plugin-babel':
         specifier: ^0.2.3
         version: 0.2.4(@babel/core@7.29.7(supports-color@10.2.2))(@babel/runtime@7.29.10)(@voidzero-dev/vite-plus-core@1.6.0(@types/node@26.6.5)(@volar/typescript@2.4.28(typescript@7.0.2))(@vue/language-core@3.3.13)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(tsx@4.23.15)(typescript@7.0.2)(yaml@2.9.1))(rolldown@1.2.19)
@@ -1382,9 +1379,6 @@ packages:
         optional: true
       vue:
         optional: true
-
-  '@laravel/vite-plugin-wayfinder@0.1.11':
-    resolution: {integrity: sha512-KU7g7+2aVs3OzvdD9RtZaIwh2Bydk/bCzjFDz8G+G6QfloTJpmgF9jTJrrlyqGspi8DhgNYGzSReMwHQKY2OCg==}
 
   '@mdx-js/mdx@3.1.1':
     resolution: {integrity: sha512-f6ZO2ifpwAQIpzGWaBQT2TXxPv6z3RBzQKpVftEWN78Vl/YweF1uwussDx8ECAXVtr3Rs89fKyG9YlzUs9DyGQ==}
@@ -9164,8 +9158,6 @@ snapshots:
     optionalDependencies:
       react: 19.3.1
       svelte: 5.57.2
-
-  '@laravel/vite-plugin-wayfinder@0.1.11': {}
 
   '@mdx-js/mdx@3.1.1(supports-color@10.2.2)':
     dependencies:

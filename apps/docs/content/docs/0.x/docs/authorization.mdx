@@ -272,7 +272,7 @@ cover middleware dependencies that do not produce database invalidations. Databa
 revocation follows commit and normal replication/network delivery, not zero latency.
 
 ```tsx
-import { bindings, navigation } from '@/zero/generated.queries';
+import { bindings, navigation } from '@/zero/generated/queries';
 
 const livePages = createInertiaAdapter(bindings, {
     navigation,

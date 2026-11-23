@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Form } from '@/formbraid';
-import { store } from '@/formbraid/zero/App/Http/Controllers/TodoListController';
+import { store } from '@/zero/generated/formbraid/App/Http/Controllers/TodoListController';
 import type { Inertia } from '@/wayfinder/types';
 import { ListPanel } from './list-panel';
 

@@ -31,7 +31,7 @@ stop the cache, clear its SQLite replica files, and restart it, as described in
 [replication troubleshooting](https://zero.rocicorp.dev/docs/debug/replication).
 Do not delete replica files during every migration or while the cache is running.
 
-Generation writes `resources/js/zero/generated.ts`. Use `--output=/path/file.ts`
+Generation writes `resources/js/zero/generated/index.ts`. Use `--output=/path/file.ts`
 to override it, and `--check` in app CI to detect drift. Exclude the generated
 file from formatters so `--check` can compare its exact contents.
 

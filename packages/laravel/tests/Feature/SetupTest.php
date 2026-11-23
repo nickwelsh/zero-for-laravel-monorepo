@@ -7,6 +7,7 @@ namespace ZeroForLaravel\Tests\Feature;
 use Dotenv\Dotenv;
 use Illuminate\Support\Facades\File;
 use Illuminate\Testing\PendingCommand;
+use Laravel\Prompts\Prompt;
 use ZeroForLaravel\Tests\HttpTestCase;
 
 uses(HttpTestCase::class);
@@ -19,7 +20,13 @@ test('session setup writes both environment files without sharing the key or rep
     app()->setBasePath($dir);
     app()->useEnvironmentPath($dir)->loadEnvironmentFrom('.env');
     app()->instance('env', 'local');
-    config(['zero.generation.output' => $dir.'/generated.ts', 'zero.dev.port' => 4859]);
+    $zero = resource_path('js/zero');
+    config(['zero.generation.output' => $zero.'/generated/index.ts', 'zero.dev.port' => 4859]);
+    $entry = resource_path('js/app.tsx');
+    File::ensureDirectoryExists(resource_path('js/pages'));
+    $starter = "import { createInertiaApp } from '@inertiajs/react';\nvoid createInertiaApp({\n    strictMode: true,\n});\n";
+    File::put($entry, $starter);
+    Prompt::fallbackWhen(true);
     File::put($dir.'/.env', "APP_URL=http://localhost\nPRIVATE_SETTING=keep-private\nZERO_API_KEY=\n");
     File::put($dir.'/.env.example', "APP_URL=http://localhost\nZERO_API_KEY=remove-this\n");
     File::put($dir.'/package.json', '{"dependencies":{"react":"^19"}}');
@@ -29,23 +36,30 @@ test('session setup writes both environment files without sharing the key or rep
     chmod($dir.'/herd', 0755);
     putenv('PATH='.$dir.PATH_SEPARATOR.$path);
     try {
-        $run = function (bool $apply): void {
+        $run = function (bool $apply, ?bool $resolver): void {
             $command = $this->artisan('zero:setup');
             $this->assertInstanceOf(PendingCommand::class, $command);
             $command->expectsConfirmation('Configure Inertia live page props?', 'yes')
                 ->expectsConfirmation('Generate Zero page prop types with Wayfinder?', 'yes')
                 ->expectsConfirmation('Authenticate Zero with Laravel session cookies?', 'yes')
-                ->expectsConfirmation('Publish context classes for fields beyond user_id?', 'no')
-                ->expectsConfirmation('Publish managed permissions config and migrations?', 'no')
-                ->expectsConfirmation('Publish editable config/zero.php?', 'no')
-                ->expectsConfirmation('Use Laravel Herd?', 'yes')->expectsConfirmation('Use HTTPS with Herd?', 'yes')
+                ->expectsQuestion('Which files would you like to publish?', []);
+            if ($resolver !== null) {
+                $command->expectsConfirmation('Add the live page resolver to resources/js/app.tsx?', $resolver ? 'yes' : 'no');
+            }
+
+            $command->expectsConfirmation('Use Laravel Herd?', 'yes')->expectsConfirmation('Use HTTPS with Herd?', 'yes')
                 ->expectsQuestion('Laravel app URL', 'https://notes.test')
                 ->expectsConfirmation('Apply these local settings to the app and .env.example?', $apply ? 'yes' : 'no')
                 ->assertSuccessful()->run();
         };
-        $run(false);
+        $run(false, true);
+        expect(File::get($entry))->toBe($starter);
         expect(File::get($dir.'/.env'))->toBe("APP_URL=http://localhost\nPRIVATE_SETTING=keep-private\nZERO_API_KEY=\n");
-        $run(true);
+        $run(true, false);
+        expect(File::get($entry))->toBe($starter);
+        $run(true, true);
+        $installed = File::get($entry);
+        expect($installed)->toContain("from './zero/inertia'", 'livePages.wrap(module.default, page)', 'strictMode: true');
         $env = Dotenv::parse(File::get($dir.'/.env'));
         $example = Dotenv::parse(File::get($dir.'/.env.example'));
         expect($env['ZERO_API_KEY'])->toMatch('/^[0-9a-f]{64}$/');
@@ -60,12 +74,17 @@ test('session setup writes both environment files without sharing the key or rep
             expect($values['ZERO_MUTATE_ALLOWED_CLIENT_HEADERS'])->toBe('x-xsrf-token');
         }
 
-        expect(File::get($dir.'/zero.config.ts'))->not->toContain('queryHeaders', 'mutateHeaders');
-        expect(File::exists($dir.'/inertia.ts'))->toBeTrue();
-        File::put($dir.'/zero.config.ts', '// keep application options');
-        $run(true);
+        expect(File::get($zero.'/zero.config.ts'))->not->toContain('queryHeaders', 'mutateHeaders');
+        expect(File::get($zero.'/inertia.ts'))->toContain("from './generated/queries'");
+        File::put($zero.'/zero.config.ts', '// keep application options');
+        $run(true, null);
+        expect(File::get($entry))->toBe($installed);
         expect(Dotenv::parse(File::get($dir.'/.env')))->toBe($env);
-        expect(File::get($dir.'/zero.config.ts'))->toBe('// keep application options');
+        expect(File::get($zero.'/zero.config.ts'))->toBe('// keep application options');
+        $custom = str_replace('strictMode: true', 'resolve: myCustomResolver', $starter);
+        File::put($entry, $custom);
+        $run(true, null);
+        expect(File::get($entry))->toBe($custom);
     } finally {
         putenv('PATH='.$path);
         app()->setBasePath($base);

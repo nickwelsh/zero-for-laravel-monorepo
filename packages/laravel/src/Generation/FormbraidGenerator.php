@@ -27,7 +27,6 @@ final readonly class FormbraidGenerator
         }
 
         $config = config()->array('formbraid');
-        $output = GeneratedFiles::path(config('zero.formbraid.output'), 'zero output');
         $metadata = GeneratedFiles::path($config['metadata'] ?? null, 'metadata');
         $enumPath = GeneratedFiles::path($config['component_enum'] ?? null, 'component_enum');
         $components = ComponentMetadata::read(base_path($metadata));
@@ -41,12 +40,14 @@ final readonly class FormbraidGenerator
         }
 
         $zero = GeneratedFiles::path($zero, 'zero schema');
-        $root = dirname($zero);
+        $layout = new GeneratedLayout($zero);
+        $configured = config('zero.formbraid.output');
+        $output = GeneratedFiles::path($configured ?? $layout->formbraidDirectory(), 'zero output');
+        $root = $layout->directory;
         $root = $root === '.' ? '' : $root.'/';
 
-        $base = pathinfo($zero, PATHINFO_FILENAME);
         $runtime = config('zero.formbraid.runtime');
-        $runtime ??= $root.$base.'.react.ts';
+        $runtime ??= $root.$layout->sibling('react').'.ts';
         $runtime = GeneratedFiles::path($runtime, 'zero runtime');
         $files = [$enumPath => $enum->source];
         $modules = [];
@@ -95,7 +96,7 @@ final readonly class FormbraidGenerator
             if ($options !== []) {
                 $modules[$path]['optionsImport'] = "import {withOptionSources} from '@formbraid/react';";
                 $modules[$path]['adapterImport'] = "import {createZeroOptionSource} from '@nickwelsh/zero-for-laravel/react/formbraid';";
-                $modules[$path]['queriesImport'] = 'import {bindings as _optionBindings, inputs as _optionInputs} from '.$this->import($path, $root.$base.'.queries.ts').';';
+                $modules[$path]['queriesImport'] = 'import {bindings as _optionBindings, inputs as _optionInputs} from '.$this->import($path, $root.$layout->sibling('queries').'.ts').';';
                 $sources = [];
                 foreach ($options as $query) {
                     $sources[$query->options()['id']][$query->options()['operation']] = $query;

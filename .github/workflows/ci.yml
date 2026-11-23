@@ -11,19 +11,49 @@ permissions:
 jobs:
   example-imports:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: laravel_zero_todos
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 127.0.0.1:5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DB_CONNECTION: pgsql
+      DB_HOST: 127.0.0.1
+      DB_DATABASE: laravel_zero_todos
+      DB_USERNAME: postgres
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # v2
         with:
           php-version: '8.5'
-          extensions: pdo_sqlite, mbstring
+          extensions: pdo_pgsql, mbstring
           coverage: none
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: '24'
+          cache: pnpm
       - run: composer --working-dir=examples/todos install --no-dev --no-interaction --prefer-dist
-      - run: php examples/todos/artisan wayfinder:generate --fresh
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @nickwelsh/zero-for-laravel build && pnpm --filter @nickwelsh/zero-table build
+      - run: cp examples/todos/.env.example examples/todos/.env
+      - run: php examples/todos/artisan migrate --force --no-interaction
+      - run: pnpm --dir examples/todos zero:generate
+      - run: pnpm --dir examples/todos types:check
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: example-imports
-          path: examples/todos/resources/js/wayfinder
+          path: |
+            examples/todos/resources/js/wayfinder
+            examples/todos/resources/js/zero/generated
 
   verify:
     needs: example-imports
@@ -94,7 +124,7 @@ jobs:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: example-imports
-          path: examples/todos/resources/js/wayfinder
+          path: examples/todos/resources/js
       - run: pnpm --filter @nickwelsh/zero-for-laravel build
       - run: pnpm --filter @nickwelsh/zero-table build
       - run: pnpm check

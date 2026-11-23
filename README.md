@@ -170,14 +170,15 @@ php artisan zero:sync-publication --dry-run
 php artisan zero:sync-publication
 ```
 
-Generation writes the native schema/metadata, sibling `.queries.ts`, `.mutations.ts`,
-optional `.react.ts`, and matching `bootstrap/zero-{queries,mutations}.php` registries.
+Generation writes `index.ts`, `queries.ts`, `mutations.ts`, and optionally `react.ts`
+in `resources/js/zero/generated/`, plus `bootstrap/zero-{queries,mutations}.php`.
 It also writes one module per controller, with named mutations and native query
 factories grouped by method and prop. Types come from these exports, not a global
 page namespace; consumers own their page props and presentation types.
 The generated file manifest tracks obsolete controller modules for safe removal.
-Deploy these together. `zero:generate --check` detects drift. The editable
-`zero.config.ts` holds public connection options and is never overwritten.
+These outputs are gitignored. During deployment, run `php artisan zero:generate`
+against the migrated database **before** Wayfinder or your frontend build. Ship
+the PHP registries with that build. Commit `zero.config.ts` and `inertia.ts`.
 
 Run `php artisan zero:setup` to enable Inertia live props (`ZERO_INERTIA=true`)
 and, with Wayfinder `dev-next`, live-query page types (`ZERO_WAYFINDER=true`).
@@ -186,17 +187,18 @@ flags for the integrations you use and remove their `bootstrap/providers.php` en
 Run `zero:generate` before `wayfinder:generate`.
 Only registered Zero props are customized; shared and ordinary props stay with
 Wayfinder, without duplicate declarations or global overrides. The controller
-module root is configurable with `zero.wayfinder.module` (default `@/zero`).
+module root is configurable with `zero.wayfinder.module` (default `@/zero/generated`).
 
-Install `createInertiaAdapter(bindings, { navigation })` from the `/inertia` export in your
-`createInertiaApp` resolver and call `livePages.wrap(module.default, page)`.
+On the React starter, setup offers to add the live page resolver to `resources/js/app.tsx`.
+If you already have a resolver, import `livePages` from `@/zero/inertia` and return
+`livePages.wrap(module.default, page)` from it.
 Put the generated `ZeroProvider` in the authenticated persistent layout, outside
 the wrapped page. Pass `userID` and `context={{ user_id: user.id }}`. Changing identity
 replaces the client and clears identity-scoped results.
 
 ```tsx
-import { store } from '@/zero/App/Http/Controllers/TaskController';
-import type { index } from '@/zero/App/Http/Controllers/TaskController';
+import { store } from '@/zero/generated/App/Http/Controllers/TaskController';
+import type { index } from '@/zero/generated/App/Http/Controllers/TaskController';
 import { useControllerMutation, type QueryData } from '@nickwelsh/zero-for-laravel/react';
 
 export default function Tasks({ tasks }: { tasks: QueryData<typeof index.tasks> }) {
@@ -224,7 +226,7 @@ loads, and browser/Inertia history, see [URL state integration](docs/URL_STATE.m
 For native reads, call `zero.run(index.tasks(input))` or pass that same request to
 Zero's `useQuery`. For the optional decoded-data adapter, call
 `useData(index.tasks.live(input))`. Internal `bindings` consume wire arguments from
-page metadata. The generated `.react.ts` exports a schema-typed `useZero` hook.
+page metadata. The generated `react.ts` exports a schema-typed `useZero` hook.
 For writes, call `zero.mutate(actions[store.action].prepare(input, routeArguments))`
 using `actions` from that same generated provider, then observe `.client` and `.server`.
 Outside React, construct Zero with the `mutators` returned by
@@ -242,7 +244,7 @@ see the [two-import migration](apps/docs/content/docs/0.x/docs/mutations.mdx#mig
 or the [runnable Todo fixture](tests/integration/todo-migration/README.md).
 
 React 19 apps can also use Formbraid **0.3** with generated controller descriptors:
-import `store` from `@/formbraid/zero/App/Http/Controllers/TodoListController`
+import `store` from `@/zero/generated/formbraid/App/Http/Controllers/TodoListController`
 and render `<Form form={store} />`. `zero:formbraid` reuses Formbraid's component
 metadata and request generator, attaching native Zero submission callbacks.
 Formbraid owns draft state; success waits for authoritative acceptance. See the

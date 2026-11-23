@@ -11,7 +11,7 @@ Install the query bindings in Inertia's page resolver:
 
 ```tsx
 import { createInertiaAdapter } from '@nickwelsh/zero-for-laravel/inertia';
-import { bindings, navigation } from '@/zero/generated.queries';
+import { bindings, navigation } from '@/zero/generated/queries';
 
 const livePages = createInertiaAdapter(bindings, { navigation });
 // After loading the requested component in createInertiaApp.resolve:
@@ -43,7 +43,7 @@ and local storage; native Zero owns construction and cleanup.
 
 ```tsx
 import type { QueryData } from '@nickwelsh/zero-for-laravel/react';
-import type { index } from '@/zero/App/Http/Controllers/TaskController';
+import type { index } from '@/zero/generated/App/Http/Controllers/TaskController';
 
 export default function Tasks({ tasks }: { tasks: QueryData<typeof index.tasks> }) {
     if (tasks.status === 'loading') return <p role="status">Loading tasks…</p>;
@@ -77,7 +77,7 @@ For example, its dashboard prop becomes:
 
 ```typescript
 lists: import('@nickwelsh/zero-for-laravel/react').QueryData<
-    (typeof import('@/zero/App/Http/Controllers/DashboardController'))['index']['lists']
+    (typeof import('@/zero/generated/App/Http/Controllers/DashboardController'))['index']['lists']
 >;
 ```
 
@@ -87,7 +87,7 @@ and includes the live prop's loading, error, and pagination API. It describes pr
 **after the Inertia live adapter has injected them**, not raw server page JSON.
 Continue to install `createInertiaAdapter` in the resolver.
 
-`zero.wayfinder.module` defaults to `@/zero`. Set it to the TypeScript module root
+`zero.wayfinder.module` defaults to `@/zero/generated`. Set it to the TypeScript module root
 containing your generated controller modules if you use another alias or directory.
 Relative module roots resolve from Wayfinder's generated `types.d.ts`, not from
 your PHP configuration file. Regenerate Zero whenever declarations change, and use
@@ -101,7 +101,7 @@ controller FormRequest's validated fields, not route bindings or trusted context
 
 ```tsx
 import type { QueryData } from '@nickwelsh/zero-for-laravel/react';
-import type { index } from '@/zero/App/Http/Controllers/DashboardController';
+import type { index } from '@/zero/generated/App/Http/Controllers/DashboardController';
 
 export default function Dashboard({ lists }: { lists: QueryData<typeof index.lists> }) {
     return (
@@ -218,7 +218,7 @@ existing Zero provider/access boundary:
 ```tsx
 import { column } from '@nickwelsh/zero-table';
 import { DataTable, useDataTable } from '@nickwelsh/zero-table/inertia';
-import todos from '@/zero/tables/todos';
+import todos from '@/zero/generated/tables/todos';
 
 const columns = [column.text('title')];
 
@@ -289,9 +289,9 @@ produce native requests, usable by `run`, `preload`, `materialize`, or Zero's `u
 
 ```tsx
 import { useQuery } from '@rocicorp/zero/react';
-import { useZero, actions } from '@/zero/generated.react';
-import { index } from '@/zero/App/Http/Controllers/TaskController';
-import { store } from '@/zero/App/Http/Controllers/TaskController';
+import { useZero, actions } from '@/zero/generated/react';
+import { index } from '@/zero/generated/App/Http/Controllers/TaskController';
+import { store } from '@/zero/generated/App/Http/Controllers/TaskController';
 import type {
     InferQueryInput,
     InferQueryResult,
@@ -320,7 +320,7 @@ selection accepted by `useData`, whose dates are decoded to `Date`. Its row type
 Mutation requests must come from the bindings registered with that Zero instance.
 The generated provider exports its `actions` and native `mutators`; applications
 with custom projections obtain both from their `createZeroBindings(projections)`
-result. Outside React, use `createControllerMutationBindings` from `.mutations.ts`
+result. Outside React, use `createControllerMutationBindings` from `generated/mutations.ts`
 and pass its `mutators` to `new Zero`. No React lifecycle or global singleton is
 required by that factory. `useZero` follows native lifecycle semantics and must run
 under the initialized provider, not the pre-initialization Inertia shell.

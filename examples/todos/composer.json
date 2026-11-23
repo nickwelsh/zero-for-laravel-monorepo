@@ -52,7 +52,6 @@
             "@php artisan migrate",
             "pnpm --dir ../.. install --frozen-lockfile",
             "pnpm --dir ../.. build",
-            "@php artisan zero:generate",
             "pnpm build"
         ],
         "dev": [
