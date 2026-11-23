@@ -88,7 +88,7 @@ return [
 
     'wayfinder' => [
         'enabled' => env('ZERO_WAYFINDER', false),
-        'module' => '@/zero/generated',
+        'module' => '@/zero',
     ],
 
     /*
@@ -100,7 +100,7 @@ return [
     | zero:dev startup. The --check option checks forms without writing them.
     | The zero:formbraid command also works when this setting is disabled.
     |
-    | Output defaults to generated/formbraid. Overrides are project-relative.
+    | Output defaults to formbraid under the Zero root. Overrides are project-relative.
     | Configure field components in config/formbraid.php, then let Formbraid's
     | Vite plugin produce the metadata before running either generation command.
     |

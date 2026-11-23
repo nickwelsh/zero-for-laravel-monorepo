@@ -81,7 +81,7 @@ test('default generation separates disposable modules from editable files and de
     try {
         config(['zero.generation' => []]);
         (new ZeroServiceProvider(app()))->register();
-        expect(config('zero.wayfinder.module'))->toBe('@/zero/generated');
+        expect(config('zero.wayfinder.module'))->toBe('@/zero');
         $root = resource_path('js/zero');
         File::ensureDirectoryExists($directory);
         File::put($directory.'/.gitignore', "# Keep this\r\n/bootstrap/zero-queries.php");
@@ -92,14 +92,20 @@ test('default generation separates disposable modules from editable files and de
 
         expect(Artisan::call('zero:generate', ['--check' => true]))->toBe(1);
         expect(File::exists($root))->toBeFalse();
+        // Older versions tracked these same relative paths under generated/.
+        File::ensureDirectoryExists($root.'/generated/tables');
+        File::put($root.'/generated/files.json', '["tables/tasks.ts"]');
+        File::put($root.'/generated/tables/tasks.ts', '// Generated Zero public API. Do not edit.');
         expect(Artisan::call('zero:generate'))->toBe(0, Artisan::output());
-        expect(File::get($root.'/.gitignore'))->toBe("generated/\n");
+        expect(File::exists($root.'/generated/tables/tasks.ts'))->toBeFalse();
+        $ignores = File::get($root.'/.gitignore');
+        expect($ignores)->toContain("generated/\n", "/tables/tasks.ts\n", "/ZeroForLaravel/Tests/Fixtures/QueryController.ts\n");
         expect(File::get($root.'/generated/index.ts'))->toContain('export type TaskRow =');
         expect(File::get($root.'/generated/react.ts'))->toContain('"../zero.config"', '"./index"', '"./mutations"');
         expect(File::get($root.'/generated/queries.ts'))->toContain(json_encode('./index', JSON_THROW_ON_ERROR));
-        expect(File::get($root.'/generated/tables/tasks.ts'))->toContain('"../index"');
-        expect(File::get($root.'/generated/ZeroForLaravel/Tests/Fixtures/ControllerMutationController.ts'))->toContain('"../../../mutations"');
-        expect(File::get($root.'/generated/ZeroForLaravel/Tests/Fixtures/QueryController.ts'))->toContain('"../../../queries"');
+        expect(File::get($root.'/tables/tasks.ts'))->toContain('"../generated/index"');
+        expect(File::get($root.'/ZeroForLaravel/Tests/Fixtures/ControllerMutationController.ts'))->toContain('"../../../generated/mutations"');
+        expect(File::get($root.'/ZeroForLaravel/Tests/Fixtures/QueryController.ts'))->toContain('"../../../generated/queries"');
         expect(File::exists($root.'/zero.config.ts'))->toBeTrue();
         expect(File::exists($root.'/generated/zero.config.ts'))->toBeFalse();
         expect(File::exists(base_path('bootstrap/zero-queries.php')))->toBeTrue();
@@ -110,12 +116,16 @@ test('default generation separates disposable modules from editable files and de
         expect(Artisan::call('zero:generate'))->toBe(0, Artisan::output());
         expect(Artisan::call('zero:generate'))->toBe(0, Artisan::output());
         expect(File::get($root.'/zero.config.ts'))->toBe('// Application options');
-        expect(File::get($root.'/.gitignore'))->toBe("# Application rule\ngenerated/\n");
+        expect(File::get($root.'/.gitignore'))->toBe("# Application rule\n".$ignores);
         expect(File::get($directory.'/.gitignore'))->toBe("# Keep this\r\n/bootstrap/zero-queries.php\r\n/bootstrap/zero-mutations.php\r\n");
         expect(Artisan::call('zero:generate', ['--check' => true]))->toBe(0, Artisan::output());
         File::put($root.'/generated/mutations.ts', '// out of date');
         expect(Artisan::call('zero:generate', ['--check' => true]))->toBe(1);
         expect(File::get($root.'/generated/mutations.ts'))->toBe('// out of date');
+        $this->discover($this->models());
+        expect(Artisan::call('zero:generate'))->toBe(0, Artisan::output());
+        expect(File::get($root.'/.gitignore'))->not->toContain('/tables/tasks.ts');
+        expect(File::exists($root.'/tables/tasks.ts'))->toBeFalse();
     } finally {
         app()->setBasePath($original);
         File::deleteDirectory($directory);
@@ -242,7 +252,7 @@ test('Formbraid generation publishes direct descriptors and bound factories with
     Route::post('/options/{task}', [ControllerMutationController::class, 'options']);
     Route::get('/query/{title}', [QueryController::class, 'index']);
     try {
-        $forms = $root.($nested ? '/generated/formbraid' : '/forms');
+        $forms = $root.($nested ? '/formbraid' : '/forms');
         $path = $forms.'/ZeroForLaravel/Tests/Fixtures/ControllerMutationController.ts';
         expect(Artisan::call('zero:generate'))->toBe(0, Artisan::output());
         expect(File::exists($path))->toBeFalse();
@@ -255,8 +265,8 @@ test('Formbraid generation publishes direct descriptors and bound factories with
         expect(Artisan::call('zero:formbraid', ['--check' => true]))->toBe(0, Artisan::output());
         $source = File::get($path);
         expect($source)->toContain('const _form_store = createControllerForm(', 'parameters: {"task": string | number | boolean}', 'as store}', 'as complete}');
-        expect($source)->toContain($nested ? 'from "../../../../react"' : 'from "../../../../native/generated.react"');
-        expect($source)->toContain($nested ? 'from "../../../../queries"' : 'from "../../../../native/generated.queries"');
+        expect($source)->toContain($nested ? 'from "../../../../generated/react"' : 'from "../../../../native/generated.react"');
+        expect($source)->toContain($nested ? 'from "../../../../generated/queries"' : 'from "../../../../native/generated.queries"');
         expect($source)->not->toContain('useControllerForm', 'fetch(');
         expect($source)->toContain('createZeroOptionSource', 'withOptionSources(', '"task": parameters["task"]', 'resolve:', '"kind":"value"');
         preg_match_all('/_optionBindings\["(q_[a-f0-9]+)"\]/', $source, $bindings);
@@ -277,7 +287,7 @@ test('Formbraid generation publishes direct descriptors and bound factories with
         expect(File::get($path))->toBe($source);
         config(['zero.formbraid.runtime' => $directory.'/custom.ts']);
         expect(Artisan::call('zero:formbraid'))->toBe(0, Artisan::output());
-        expect(File::get($path))->toContain($nested ? 'from "../../../../../custom"' : 'from "../../../../custom"', 'as projected}');
+        expect(File::get($path))->toContain('from "../../../../custom"', 'as projected}');
         File::put($path, '// Application edit');
         expect(Artisan::call('zero:generate', ['--check' => true]))->toBe(1);
         expect(File::get($path))->toBe('// Application edit');

@@ -1,6 +1,6 @@
 import { toast } from 'sonner';
 import { Form, useForm } from '@/formbraid';
-import { store } from '@/zero/generated/formbraid/App/Http/Controllers/TodoController';
+import { store } from '@/zero/formbraid/App/Http/Controllers/TodoController';
 import type { ListRow } from './list-panel';
 import { TodoRow } from './todo-row';
 

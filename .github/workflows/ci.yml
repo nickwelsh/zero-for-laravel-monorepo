@@ -54,6 +54,9 @@ jobs:
           path: |
             examples/todos/resources/js/wayfinder
             examples/todos/resources/js/zero/generated
+            examples/todos/resources/js/zero/App
+            examples/todos/resources/js/zero/tables
+            examples/todos/resources/js/zero/formbraid
 
   verify:
     needs: example-imports

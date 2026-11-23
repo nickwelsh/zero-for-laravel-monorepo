@@ -6,5 +6,9 @@ export default {
     metadata: new URL('./_metadata.json', import.meta.url),
     command: ['pnpm', 'zero:contracts'],
     watch: ['app/**/*.php', 'routes/**/*.php', 'config/zero.php', 'config/formbraid.php', 'config/wayfinder.php'],
-    outputs: ['resources/js/zero/generated/**', 'resources/js/wayfinder/**', 'app/Formbraid/FormField.php'],
+    outputs: [
+        'resources/js/zero/{App,generated,formbraid,tables}/**',
+        'resources/js/wayfinder/**',
+        'app/Formbraid/FormField.php',
+    ],
 } satisfies Integration;

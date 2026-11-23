@@ -172,7 +172,7 @@ php artisan zero:sync-publication
 
 Generation writes `index.ts`, `queries.ts`, `mutations.ts`, and optionally `react.ts`
 in `resources/js/zero/generated/`, plus `bootstrap/zero-{queries,mutations}.php`.
-It also writes one module per controller, with named mutations and native query
+Controller modules mirror PHP namespaces directly under `resources/js/zero/`, with named mutations and native query
 factories grouped by method and prop. Types come from these exports, not a global
 page namespace; consumers own their page props and presentation types.
 The generated file manifest tracks obsolete controller modules for safe removal.
@@ -190,7 +190,7 @@ flags for the integrations you use and remove their `bootstrap/providers.php` en
 Run `zero:generate` before `wayfinder:generate`.
 Only registered Zero props are customized; shared and ordinary props stay with
 Wayfinder, without duplicate declarations or global overrides. The controller
-module root is configurable with `zero.wayfinder.module` (default `@/zero/generated`).
+module root is configurable with `zero.wayfinder.module` (default `@/zero`).
 
 On the React starter, setup offers to add the live page resolver to `resources/js/app.tsx`.
 If you already have a resolver, import `livePages` from `@/zero/inertia` and return
@@ -200,8 +200,8 @@ the wrapped page. Pass `userID` and `context={{ user_id: user.id }}`. Changing i
 replaces the client and clears identity-scoped results.
 
 ```tsx
-import { store } from '@/zero/generated/App/Http/Controllers/TaskController';
-import type { index } from '@/zero/generated/App/Http/Controllers/TaskController';
+import { store } from '@/zero/App/Http/Controllers/TaskController';
+import type { index } from '@/zero/App/Http/Controllers/TaskController';
 import { useControllerMutation, type QueryData } from '@nickwelsh/zero-for-laravel/react';
 
 export default function Tasks({ tasks }: { tasks: QueryData<typeof index.tasks> }) {
@@ -247,7 +247,7 @@ see the [two-import migration](apps/docs/content/docs/0.x/docs/mutations.mdx#mig
 or the [runnable Todo fixture](tests/integration/todo-migration/README.md).
 
 React 19 apps can also use Formbraid **0.3** with generated controller descriptors:
-import `store` from `@/zero/generated/formbraid/App/Http/Controllers/TodoListController`
+import `store` from `@/zero/formbraid/App/Http/Controllers/TodoListController`
 and render `<Form form={store} />`. `zero:formbraid` reuses Formbraid's component
 metadata and request generator, attaching native Zero submission callbacks.
 Formbraid owns draft state; success waits for authoritative acceptance. See the

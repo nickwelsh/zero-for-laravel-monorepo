@@ -19,7 +19,7 @@ final class PublicApiGenerator
     /**
      * @param  list<MutationProgram>  $mutations
      * @param  list<ControllerQuery>  $queries
-     * @return array<string, string> Paths relative to the generated schema directory.
+     * @return array<string, string> Paths relative to the public module root.
      */
     public function generate(array $mutations, array $queries, string|GeneratedLayout $base): array
     {
@@ -36,7 +36,7 @@ final class PublicApiGenerator
             }
 
             $path = implode('/', $segments).'.ts';
-            $import = (count($segments) === 1 ? './' : str_repeat('../', count($segments) - 1)).$layout->sibling('mutations');
+            $import = (count($segments) === 1 ? './' : str_repeat('../', count($segments) - 1)).$layout->contractPath($layout->sibling('mutations'));
             $controllers[$path] ??= [self::HEADER, "import type {ControllerMutationAction} from '@nickwelsh/zero-for-laravel';"];
             $controllers[$path][] = 'import {inputSchema'.$index.', serverResultSchema'.$index.'} from '.json_encode($import, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES).';';
             $controllers[$path][] = 'import type {Input'.$index.', ServerResult'.$index.'} from '.json_encode($import, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES).';';
@@ -71,7 +71,7 @@ final class PublicApiGenerator
             $path = implode('/', $segments).'.ts';
             if (! isset($queryActions[$path])) {
                 $queryActions[$path] = [];
-                $import = (count($segments) === 1 ? './' : str_repeat('../', count($segments) - 1)).$layout->sibling('queries');
+                $import = (count($segments) === 1 ? './' : str_repeat('../', count($segments) - 1)).$layout->contractPath($layout->sibling('queries'));
                 $controllers[$path] ??= [self::HEADER];
                 $controllers[$path][] = 'import {actions as liveQueries} from '.json_encode($import, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES).';';
             }

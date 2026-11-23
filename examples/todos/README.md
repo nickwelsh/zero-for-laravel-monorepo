@@ -10,7 +10,7 @@ controller-declared live queries and controller mutations. It consumes the local
 - Every reader can add, edit, complete, and delete todos.
 - Create-list and add-todo forms use Formbraid 0.3. With `formbraid.enabled`,
   `zero:generate` and `zero:dev` startup generate request definitions and native
-  Zero controller descriptors under `resources/js/zero/generated/formbraid`. Vite produces
+  Zero controller descriptors under `resources/js/zero/formbraid`. Vite produces
   the component metadata and reruns generation after edits.
   Create-list renders `<Form form={store} />`; add-todo uses Formbraid's optional
   `useForm` instance API to clear accepted drafts without erasing newer edits.

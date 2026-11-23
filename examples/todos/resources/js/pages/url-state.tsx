@@ -5,7 +5,7 @@ import { column, type TableState } from '@nickwelsh/zero-table';
 import { DataTable, tableStateCodec, useDataTable } from '@nickwelsh/zero-table/react';
 import { ZeroContext } from '@rocicorp/zero/react';
 import { useContext, useState } from 'react';
-import todos from '@/zero/generated/tables/todos';
+import todos from '@/zero/tables/todos';
 
 type State = TableState<typeof todos.capabilities>;
 type Sources = { active: State; completed: State };

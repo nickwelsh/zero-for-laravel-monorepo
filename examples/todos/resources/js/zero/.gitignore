@@ -1,1 +1,17 @@
 generated/
+# Zero: forms
+/formbraid/.formbraid-manifest.json
+/formbraid/App/Http/Controllers/ShareListController.ts
+/formbraid/App/Http/Controllers/TodoController.ts
+/formbraid/App/Http/Controllers/TodoListController.ts
+/formbraid/requests/App/Http/Requests/SaveTodoListRequest.ts
+/formbraid/requests/App/Http/Requests/SaveTodoRequest.ts
+/formbraid/requests/App/Http/Requests/ShareListRequest.ts
+# End Zero: forms
+# Zero: public modules
+/App/Http/Controllers/DashboardController.ts
+/App/Http/Controllers/ShareListController.ts
+/App/Http/Controllers/TodoController.ts
+/App/Http/Controllers/TodoListController.ts
+/tables/todos.ts
+# End Zero: public modules

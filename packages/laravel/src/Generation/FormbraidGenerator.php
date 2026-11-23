@@ -10,6 +10,7 @@ use Formbraid\Laravel\Configuration;
 use Formbraid\Laravel\FormEmitter;
 use Formbraid\Laravel\GeneratedFiles;
 use Formbraid\Laravel\RequestExtractor;
+use Illuminate\Filesystem\Filesystem;
 use Illuminate\Foundation\Http\FormRequest;
 use RuntimeException;
 
@@ -43,11 +44,11 @@ final readonly class FormbraidGenerator
         $layout = new GeneratedLayout($zero);
         $configured = config('zero.formbraid.output');
         $output = GeneratedFiles::path($configured ?? $layout->formbraidDirectory(), 'zero output');
-        $root = $layout->directory;
+        $root = $layout->editableRoot();
         $root = $root === '.' ? '' : $root.'/';
 
         $runtime = config('zero.formbraid.runtime');
-        $runtime ??= $root.$layout->sibling('react').'.ts';
+        $runtime ??= $root.$layout->contractPath($layout->sibling('react')).'.ts';
         $runtime = GeneratedFiles::path($runtime, 'zero runtime');
         $files = [$enumPath => $enum->source];
         $modules = [];
@@ -96,7 +97,7 @@ final readonly class FormbraidGenerator
             if ($options !== []) {
                 $modules[$path]['optionsImport'] = "import {withOptionSources} from '@formbraid/react';";
                 $modules[$path]['adapterImport'] = "import {createZeroOptionSource} from '@nickwelsh/zero-for-laravel/react/formbraid';";
-                $modules[$path]['queriesImport'] = 'import {bindings as _optionBindings, inputs as _optionInputs} from '.$this->import($path, $root.$layout->sibling('queries').'.ts').';';
+                $modules[$path]['queriesImport'] = 'import {bindings as _optionBindings, inputs as _optionInputs} from '.$this->import($path, $root.$layout->contractPath($layout->sibling('queries')).'.ts').';';
                 $sources = [];
                 foreach ($options as $query) {
                     $sources[$query->options()['id']][$query->options()['operation']] = $query;
@@ -150,7 +151,23 @@ final readonly class FormbraidGenerator
         if ($check) {
             $this->check($files, $output);
         } else {
+            $old = $layout->directory.'/formbraid';
+            if ($configured === null && $layout->directory !== $layout->editableRoot() && is_file(base_path($old.'/.formbraid-manifest.json'))) {
+                // Release the old manifest's files (including the shared enum) only if their hashes still match.
+                (new GeneratedFiles($old, $enumPath))->publish([]);
+                \Illuminate\Support\Facades\File::delete(base_path($old.'/.formbraid-manifest.json'));
+            }
+
             (new GeneratedFiles($output, $enumPath))->publish($files);
+            $prefix = $layout->editableRoot().'/';
+            $modulesToIgnore = [];
+            foreach ([...array_keys($files), $output.'/.formbraid-manifest.json'] as $file) {
+                if (str_starts_with($file, $prefix)) {
+                    $modulesToIgnore[] = substr($file, strlen($prefix));
+                }
+            }
+
+            (new GeneratedLayout(base_path($zero)))->syncModuleIgnores(resolve(Filesystem::class), 'forms', $modulesToIgnore);
         }
 
         return $diagnostics;

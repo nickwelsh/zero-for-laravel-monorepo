@@ -54,10 +54,18 @@ final class GenerateCommand extends Command
             config()->string('zero.generation.mutations') => $mutationGenerator->php($mutations),
         ];
         $public = (new PublicApiGenerator)->generate($mutations, $definitions, $layout)
-            + (new TableGenerator)->typescript($tables, '../'.$layout->base, $definitions);
+            + (new TableGenerator)->typescript($tables, '../'.$layout->contractPath($layout->base), $definitions);
+        $publicRoot = $layout->editableRoot();
         $manifest = $layout->directory.'/'.$layout->sibling('files.json');
         $previous = $files->exists($manifest) ? json_decode($files->get($manifest), true, flags: JSON_THROW_ON_ERROR) : [];
-        if (! is_array($previous)) {
+        // The original list tracked files relative to the schema, not the Zero root.
+        $previousRoot = $layout->directory;
+        if (is_array($previous) && isset($previous['public'])) {
+            $previousRoot = $publicRoot;
+            $previous = $previous['public'];
+        }
+
+        if (! is_array($previous) || ! array_is_list($previous)) {
             throw new LogicException('Invalid generated file manifest.');
         }
 
@@ -67,8 +75,8 @@ final class GenerateCommand extends Command
                 throw new LogicException('Invalid generated file path.');
             }
 
-            $old = $layout->directory.'/'.$relative;
-            if (! isset($public[$relative]) && $files->exists($old)) {
+            $old = $previousRoot.'/'.$relative;
+            if (($previousRoot !== $publicRoot || ! isset($public[$relative])) && $files->exists($old)) {
                 if (! str_starts_with($files->get($old), PublicApiGenerator::HEADER)) {
                     throw new LogicException('Refusing to remove a file not owned by Zero: '.$old);
                 }
@@ -78,10 +86,16 @@ final class GenerateCommand extends Command
         }
 
         foreach ($public as $relative => $content) {
-            $outputs[$layout->directory.'/'.$relative] = $content;
+            $target = $publicRoot.'/'.$relative;
+            if (! $this->option('check') && $publicRoot !== $layout->directory && $files->exists($target) && ! str_starts_with($files->get($target), PublicApiGenerator::HEADER)) {
+                throw new LogicException('Refusing to overwrite a file not owned by Zero: '.$target);
+            }
+
+            $outputs[$target] = $content;
         }
 
-        $outputs[$manifest] = json_encode(array_keys($public), JSON_THROW_ON_ERROR | JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES)."\n";
+        $paths = array_keys($public);
+        $outputs[$manifest] = json_encode($publicRoot === $layout->directory ? $paths : ['public' => $paths], JSON_THROW_ON_ERROR | JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES)."\n";
         $formbraid = $this->option('formbraid') || config()->boolean('zero.formbraid.enabled');
         $frontend = $this->option('react') || $formbraid ? resolve(ReactFrontendDriver::class) : resolve(FrontendDriver::class);
         $frontend = $frontend instanceof AutoDetectFrontendDriver ? $frontend->detect() : $frontend;
@@ -147,6 +161,7 @@ final class GenerateCommand extends Command
 
         $files->delete($stale);
         $layout->writeIgnoreRules($files);
+        $layout->syncModuleIgnores($files, 'public modules', $paths);
 
         if ($configuration !== null && ! $files->exists($config)) {
             $files->replace($config, $configuration);

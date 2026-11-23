@@ -22,9 +22,9 @@ The source defaults live in
 | `generation.mutations`        | `bootstrap/zero-mutations.php`                     | Authoritative controller mutation registrations.                                                  |
 | `generation.schema`           | `ZodMutationSchemaDriver::class`                   | Container-resolved validator driver for both queries and mutations.                               |
 | `frontend.driver`             | `AutoDetectFrontendDriver::class`                  | Detect React from package.json, or resolve a custom `FrontendDriver` class.                       |
-| `wayfinder.module`            | `@/zero/generated`                                 | TypeScript import root for generated controller modules used by Wayfinder's Inertia page helpers. |
+| `wayfinder.module`            | `@/zero`                                           | TypeScript import root for generated controller modules used by Wayfinder's Inertia page helpers. |
 | `formbraid.enabled`           | `false`                                            | Include React form generation in `zero:generate`, `--check`, and `zero:dev` startup.              |
-| `formbraid.output`            | `null`                                             | Defaults to `generated/formbraid` beside the other generated modules.                             |
+| `formbraid.output`            | `null`                                             | Defaults to `formbraid/` under the Zero root.                                                     |
 | `formbraid.runtime`           | `null`                                             | Project-relative module exporting application-owned `controllerRuntime` bindings.                 |
 | `sync_publication_on_migrate` | `false`                                            | Synchronize the dedicated publication after successful PostgreSQL `up` migration batches.         |
 | `publication`                 | `ZERO_PUBLICATION` or `laravel_zero`               | Dedicated PostgreSQL publication managed by the package.                                          |
@@ -114,8 +114,12 @@ publication and review `--dry-run` before changing an existing deployment.
 **Upgrading from `zero/generated.ts`?** If you published `config/zero.php`, update
 `generation.output` and `wayfinder.module` to the defaults above to adopt the new layout.
 Regenerate, change `./generated.queries` in `zero/inertia.ts` to `./generated/queries`,
-and update your provider, controller, and table imports. Remove the old generated
+and update your provider import to `@/zero/generated/react`. Remove the old generated
 files after typechecking. Ignore rules do not untrack files already in Git.
+
+If your imports already use `@/zero/generated/App`, regenerate and change that prefix
+to `@/zero/App`. Tables and forms likewise move to `@/zero/tables` and `@/zero/formbraid`.
+Set `wayfinder.module` to `@/zero` if your published config still points at `@/zero/generated`.
 
 The opt-in migration hook skips rollbacks, pretend runs, and non-PostgreSQL
 connections. Publication failures fail the migration command. Ordinary migrations

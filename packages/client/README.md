@@ -31,7 +31,7 @@ Rows are plain decoded data:
 
 ```tsx
 import type { QueryData } from '@nickwelsh/zero-for-laravel/react';
-import type { index } from '@/zero/generated/App/Http/Controllers/DashboardController';
+import type { index } from '@/zero/App/Http/Controllers/DashboardController';
 
 export default function Dashboard({ lists }: { lists: QueryData<typeof index.lists> }) {
     return lists.data.map((list) => <p key={list.id}>{list.name}</p>);
@@ -66,7 +66,7 @@ describe native calls; `InferLiveQueryResult` describes decoded rows. The genera
 
 ```tsx
 import { useControllerMutation } from '@nickwelsh/zero-for-laravel/react';
-import { store as create } from '@/zero/generated/App/Http/Controllers/TodoController';
+import { store as create } from '@/zero/App/Http/Controllers/TodoController';
 
 const createTodo = useControllerMutation(create);
 const saved = await createTodo({ list_id: list.id, title: 'A new task' });
@@ -116,7 +116,7 @@ controls and field errors at the original URL. See the [form migration guide](..
 React 19 apps using Formbraid **0.3** consume generated descriptors directly:
 
 ```tsx
-import { store } from '@/zero/generated/formbraid/App/Http/Controllers/TodoListController';
+import { store } from '@/zero/formbraid/App/Http/Controllers/TodoListController';
 import { Form } from '@/formbraid';
 
 return <Form form={store} />;

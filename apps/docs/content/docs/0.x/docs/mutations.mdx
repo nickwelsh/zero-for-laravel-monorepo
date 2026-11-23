@@ -57,7 +57,7 @@ the valid intent still reaches Laravel.
 
 ```tsx
 import { useControllerMutation } from '@nickwelsh/zero-for-laravel/react';
-import { store as create } from '@/zero/generated/App/Http/Controllers/TaskController';
+import { store as create } from '@/zero/App/Http/Controllers/TaskController';
 
 const createTask = useControllerMutation(create);
 const saved = await createTask({ title: 'A task' });
@@ -130,7 +130,7 @@ the form and controller imports. Keep the named inputs, submit button and render
 -import { Form } from '@inertiajs/react';
 -import TodoController from '@/wayfinder/App/Http/Controllers/TodoController';
 +import { Form } from '@nickwelsh/zero-for-laravel/react';
-+import TodoController from '@/zero/generated/App/Http/Controllers/TodoController';
++import TodoController from '@/zero/App/Http/Controllers/TodoController';
 ```
 
 ```tsx
@@ -240,7 +240,7 @@ write committed but the client could not apply the response, do not resubmit it.
 Use Formbraid's normal descriptor API in a React 19 app:
 
 ```tsx
-import { store, update } from '@/zero/generated/formbraid/App/Http/Controllers/TodoListController';
+import { store, update } from '@/zero/formbraid/App/Http/Controllers/TodoListController';
 import { Form } from '@/formbraid';
 
 <Form form={store} />;
@@ -267,7 +267,7 @@ export default {
     metadata: new URL('./_metadata.json', import.meta.url),
     command: ['php', 'artisan', 'zero:generate'],
     watch: ['app/**/*.php', 'routes/**/*.php', 'config/zero.php', 'config/formbraid.php'],
-    outputs: ['resources/js/zero/generated/**', 'app/Formbraid/FormField.php'],
+    outputs: ['resources/js/zero/{App,generated,formbraid,tables}/**', 'app/Formbraid/FormField.php'],
 } satisfies Integration;
 ```
 
@@ -283,7 +283,7 @@ Vite inspects the component registry and writes metadata before running Artisan.
 With `formbraid.enabled`, `zero:generate` reuses Formbraid's request extraction, field/group generation,
 component enum, and hash-owned publication. It refreshes native Zero contracts and
 the React provider, then emits definitions and callback-backed controller forms
-under `zero.formbraid.output` (default `resources/js/zero/generated/formbraid`). Only
+under `zero.formbraid.output` (default `resources/js/zero/formbraid`). Only
 `#[ZeroMutation]` actions with one FormRequest produce forms. Parameterless actions
 export descriptors; actions with model/scalar route arguments export factories.
 There is no Zero-specific form hook or replacement `Form` component.

@@ -6,7 +6,7 @@ namespace ZeroForLaravel\Generation;
 
 use Illuminate\Filesystem\Filesystem;
 
-/** The generated/index.ts convention keeps application-owned files outside the generated tree. */
+/** Shared contracts live in generated/; public modules follow the PHP namespace of each class. */
 final readonly class GeneratedLayout
 {
     public string $directory;
@@ -29,7 +29,12 @@ final readonly class GeneratedLayout
 
     public function queryImport(): string
     {
-        return ($this->nested ? './generated/' : './').$this->sibling('queries');
+        return './'.$this->contractPath($this->sibling('queries'));
+    }
+
+    public function contractPath(string $module): string
+    {
+        return ($this->nested ? 'generated/' : '').$module;
     }
 
     public function sibling(string $name): string
@@ -44,7 +49,30 @@ final readonly class GeneratedLayout
 
     public function formbraidDirectory(): string
     {
-        return $this->nested ? $this->directory.'/formbraid' : 'resources/js/formbraid/zero';
+        return $this->nested ? $this->editableRoot().'/formbraid' : 'resources/js/formbraid/zero';
+    }
+
+    /** @param list<string> $modules Paths relative to the Zero root. */
+    public function syncModuleIgnores(Filesystem $files, string $group, array $modules): void
+    {
+        if (! $this->nested) {
+            return;
+        }
+
+        $path = $this->editableRoot().'/.gitignore';
+        $existing = $files->exists($path) ? $files->get($path) : '';
+        $newline = str_contains($existing, "\r\n") ? "\r\n" : "\n";
+        $start = '# Zero: '.$group;
+        $end = '# End Zero: '.$group;
+        sort($modules);
+        $block = $modules === [] ? '' : $start.$newline.'/'.implode($newline.'/', $modules).$newline.$end.$newline;
+        $pattern = '/^'.preg_quote($start, '/').'\r?\n.*?^'.preg_quote($end, '/').'(?:\r?\n|$)/ms';
+        $updated = preg_match($pattern, $existing)
+            ? preg_replace_callback($pattern, static fn (): string => $block, $existing)
+            : $existing.($existing !== '' && ! str_ends_with($existing, "\n") ? $newline : '').$block;
+        if ($updated !== null && $existing !== $updated) {
+            $files->replace($path, $updated);
+        }
     }
 
     public function writeIgnoreRules(Filesystem $files): void
