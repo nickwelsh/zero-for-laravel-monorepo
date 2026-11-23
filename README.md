@@ -180,10 +180,11 @@ These outputs are gitignored. During deployment, run `php artisan zero:generate`
 against the migrated database **before** Wayfinder or your frontend build. Ship
 the PHP registries with that build. Commit `zero.config.ts` and `inertia.ts`.
 
-`php artisan zero:setup` preselects installed integrations: Inertia live props
-and, with Wayfinder `dev-next`, live-query page types. Choose session cookies or
-a bearer token validated by your app’s Laravel guard. Confirm to write the local
-settings and run `zero:generate`.
+`php artisan zero:setup` first connects to PostgreSQL 15+. It preselects installed
+Inertia and Wayfinder integrations and asks how your app authenticates. For React,
+it offers to install missing dependencies using `packageManager` from `package.json`
+or the project's lockfile. If you choose Herd, applying the settings links the
+site and creates the cache proxy, with TLS if selected. Setup then runs `zero:generate`.
 Laravel discovers both providers. If upgrading from manual registration, set the
 flags for the integrations you use and remove their `bootstrap/providers.php` entries.
 Run `zero:generate` before `wayfinder:generate`.

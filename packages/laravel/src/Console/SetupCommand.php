@@ -11,7 +11,9 @@ use Illuminate\Support\Str;
 use Laravel\Prompts\Elements\Element;
 use Laravel\Wayfinder\Converters\InertiaData;
 use LogicException;
+use PDOException;
 use Symfony\Component\Process\ExecutableFinder;
+use ZeroForLaravel\Development\FrontendDependencies;
 use ZeroForLaravel\Development\InertiaEntryPoint;
 use ZeroForLaravel\Development\LocalEnvironment;
 use ZeroForLaravel\Development\SetupEnvironmentFile;
@@ -35,7 +37,7 @@ final class SetupCommand extends Command
 {
     protected $signature = 'zero:setup';
 
-    protected $description = 'Configure Zero for this local application without starting services or migrating';
+    protected $description = 'Configure Zero, local development tools, and generated contracts';
 
     public function handle(Filesystem $files, LocalEnvironment $local, FrontendDriver $frontend): int
     {
@@ -48,6 +50,17 @@ final class SetupCommand extends Command
             $path = app()->environmentFilePath();
             if (! $files->isFile($path) || basename($path) === '.env.example') {
                 throw new LogicException('Create a local .env before setup (copy .env.example and run php artisan key:generate).');
+            }
+
+            try {
+                $connection = $local->connection();
+                $version = $connection->getDriverName() === 'pgsql' ? $connection->scalar('SHOW server_version_num', [], false) : null;
+            } catch (PDOException) {
+                throw new LogicException('Could not connect to PostgreSQL. Check the DB_* settings in .env and rerun zero:setup.');
+            }
+
+            if (! is_numeric($version) || (int) $version < 150000) {
+                throw new LogicException('Zero requires PostgreSQL 15 or later. Set DB_CONNECTION=pgsql and the connection details in .env before setup.');
             }
 
             $frontend = $frontend instanceof AutoDetectFrontendDriver ? $frontend->detect() : $frontend;
@@ -91,7 +104,9 @@ final class SetupCommand extends Command
                 }
             }
 
-            $herd = (new ExecutableFinder)->find('herd') !== null && confirm('Use Laravel Herd?');
+            $install = $frontend instanceof ReactFrontendDriver ? FrontendDependencies::installCommand($files) : [];
+            $installNow = $install !== null && $install !== [] && confirm('Install frontend dependencies with '.$install[0].'?', hint: implode(' ', $install));
+            $herd = (new ExecutableFinder)->find('herd') !== null && confirm('Configure the site and cache proxy with Laravel Herd?');
             [$app, $host, $secure] = $this->appOrigin($herd);
             $port = $local->port();
             $cache = $herd ? ($secure ? 'https://' : 'http://').'zero.'.$host : ($secure ? $app : 'http://'.$host.':'.$port);
@@ -109,6 +124,10 @@ final class SetupCommand extends Command
                 $summary['Session domain'] = $herd ? '.'.$host : 'Host only';
             }
 
+            if ($herd) {
+                $summary['Herd'] = $secure ? 'Link site, secure it, and create HTTPS proxy' : 'Link site and create HTTP proxy';
+            }
+
             callout('Local connection', [Element::keyValueList($summary)]);
             if (! $herd && $secure) {
                 warning("Forward /sync/ WebSockets to http://127.0.0.1:{$port} in your HTTPS proxy.");
@@ -116,25 +135,33 @@ final class SetupCommand extends Command
 
             $private = new SetupEnvironmentFile($files, $path);
             $example = new SetupEnvironmentFile($files, base_path('.env.example'));
-            $privateSettings = $settings;
-            if ($herd && $secure && ! config('zero.dev.ca')) {
-                $ca = getenv('HOME').'/Library/Application Support/Herd/config/valet/CA/LaravelValetCASelfSigned.pem';
-                if (is_readable($ca)) {
-                    $privateSettings['ZERO_CA_CERT'] = '"'.addcslashes($ca, '\\"$').'"';
-                } else {
-                    warning('Herd CA not found. If Node rejects the local certificate, set ZERO_CA_CERT in .env.');
-                }
-            }
-
-            $private->stage($privateSettings, true);
+            $private->stage($settings, true);
             $example->stage($settings, false);
 
             if (! confirm('Apply these settings and generate Zero contracts?', default: $interactive)) {
                 return self::SUCCESS;
             }
 
-            $next = task('Apply local settings', function () use ($private, $example, $extras, $layout, $files, $frontend, $inertia, $directory, $updatedEntry, $entry, $originalEntry): array {
+            $next = task('Apply local settings', function () use ($herd, $host, $secure, $port, $private, $example, $extras, $layout, $files, $frontend, $inertia, $directory, $updatedEntry, $entry, $originalEntry): array {
                 $next = [];
+                if ($herd) {
+                    $site = substr($host, 0, -5);
+                    $this->runLocal(['herd', 'link', $site]);
+                    if ($secure) {
+                        $this->runLocal(['herd', 'secure', $site]);
+                    }
+
+                    $this->runLocal(['herd', 'proxy', 'zero.'.$site, 'http://127.0.0.1:'.$port, ...($secure ? ['--secure'] : [])]);
+                    if ($secure && ! config('zero.dev.ca')) {
+                        $ca = getenv('HOME').'/Library/Application Support/Herd/config/valet/CA/LaravelValetCASelfSigned.pem';
+                        if (is_readable($ca)) {
+                            $private->stage(['ZERO_CA_CERT' => '"'.addcslashes($ca, '\\"$').'"'], true);
+                        } else {
+                            $next[] = 'If Node rejects the local certificate, set ZERO_CA_CERT in .env to the Herd CA path.';
+                        }
+                    }
+                }
+
                 $private->save(true);
                 $example->save(false);
 
@@ -177,7 +204,7 @@ final class SetupCommand extends Command
                 }
 
                 if ($frontend instanceof ReactFrontendDriver) {
-                    $next[] = 'Install @nickwelsh/zero-for-laravel, @rocicorp/zero@1.11.4 and zod. Wrap your signed-in layout in ZeroProvider.';
+                    $next[] = 'Wrap your signed-in layout in ZeroProvider.';
                     if ($inertia) {
                         $this->create($files, $directory.'/inertia.ts', "import { createInertiaAdapter } from '@nickwelsh/zero-for-laravel/inertia';\nimport { bindings, navigation } from '{$layout->queryImport()}';\n\nexport const livePages = createInertiaAdapter(bindings, { navigation });\nexport const Link = livePages.Link;\n");
                         if ($updatedEntry !== null && $files->get($entry) === $originalEntry) {
@@ -191,14 +218,22 @@ final class SetupCommand extends Command
                 return $next;
             }, limit: 1, keepSummary: true);
 
+            if ($installNow && $install !== null) {
+                task('Install frontend dependencies', function () use ($install): void {
+                    $this->runLocal($install);
+                }, limit: 1, keepSummary: true);
+            } elseif ($install !== []) {
+                array_unshift($next, $install === null ? 'Use your package manager to install @nickwelsh/zero-for-laravel, @rocicorp/zero@1.11.4 and zod.' : 'Run '.implode(' ', $install).'.');
+            }
+
             // Boot Artisan again: the running app still has the old middleware and context configuration.
-            task('Generate Zero contracts', function () use ($privateSettings): void {
+            task('Generate Zero contracts', function () use ($settings): void {
                 $command = [PHP_BINARY, 'artisan', 'zero:generate', '--no-interaction'];
                 if (is_string($env = $this->option('env'))) {
                     $command[] = '--env='.$env;
                 }
 
-                $result = Process::path(base_path())->forever()->env(array_fill_keys([...array_keys($privateSettings), 'ZERO_API_KEY'], false))->run($command);
+                $result = Process::path(base_path())->forever()->env(array_fill_keys([...array_keys($settings), 'ZERO_API_KEY'], false))->run($command);
                 if ($result->failed()) {
                     throw new LogicException('Settings saved, but generation failed. Run php artisan zero:generate to see the error and retry.');
                 }
@@ -206,17 +241,6 @@ final class SetupCommand extends Command
 
             if (! $session) {
                 $next[] = 'Pass the user’s bearer token as auth to Zero and configure the matching Laravel guard for the callback routes.';
-            }
-
-            if ($herd) {
-                $site = substr($host, 0, -5);
-                $commands = ['herd link '.$site];
-                if ($secure) {
-                    $commands[] = 'herd secure '.$site;
-                }
-
-                $commands[] = "herd proxy zero.{$site} http://127.0.0.1:{$port}".($secure ? ' --secure' : '');
-                callout('Run in Herd', implode("\n", $commands));
             }
 
             $next[] = 'After migrating PostgreSQL and adding a Zero model, run php artisan zero:dev. Restart Vite to load .env.';
@@ -249,11 +273,19 @@ final class SetupCommand extends Command
         }
 
         $host = $parts[1];
-        if ($herd && (! str_ends_with($host, '.test') || parse_url($app, PHP_URL_PORT) !== null)) {
+        if ($herd && (! preg_match('/^[a-zA-Z0-9][a-zA-Z0-9.-]*\.test$/D', $host) || parse_url($app, PHP_URL_PORT) !== null)) {
             throw new LogicException('For the Herd preset, use a .test site URL without a port.');
         }
 
         return [$app, $host, str_starts_with($app, 'https://')];
+    }
+
+    /** @param list<string> $command */
+    private function runLocal(array $command): void
+    {
+        if (Process::path(base_path())->forever()->run($command)->failed()) {
+            throw new LogicException('Setup stopped at `'.implode(' ', $command).'`. Run it in your project directory for details, then rerun zero:setup.');
+        }
     }
 
     private function publish(string $tag): void
