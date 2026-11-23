@@ -6,6 +6,7 @@ namespace ZeroForLaravel\Console;
 
 use Illuminate\Console\Command;
 use Illuminate\Filesystem\Filesystem;
+use Illuminate\Foundation\DevCommands;
 use Illuminate\Support\Facades\Process;
 use Illuminate\Support\Str;
 use Laravel\Prompts\Elements\Element;
@@ -243,7 +244,9 @@ final class SetupCommand extends Command
                 $next[] = 'Pass the user’s bearer token as auth to Zero and configure the matching Laravel guard for the callback routes.';
             }
 
-            $next[] = 'After migrating PostgreSQL and adding a Zero model, run php artisan zero:dev. Restart Vite to load .env.';
+            $next[] = class_exists(DevCommands::class)
+                ? 'After migrating PostgreSQL and adding a Zero model, start or restart php artisan dev. It starts Zero too.'
+                : 'After migrating PostgreSQL and adding a Zero model, run php artisan zero:dev in a separate terminal. Restart Vite to load .env.';
             callout('Next steps', [Element::bulletedList($next)]);
 
             return self::SUCCESS;

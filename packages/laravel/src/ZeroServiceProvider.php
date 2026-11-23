@@ -9,6 +9,7 @@ use Illuminate\Contracts\Http\Kernel;
 use Illuminate\Database\Events\MigrationsEnded;
 use Illuminate\Database\Migrations\Migrator;
 use Illuminate\Foundation\Application;
+use Illuminate\Foundation\DevCommands;
 use Illuminate\Routing\Events\RouteMatched;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Route;
@@ -127,6 +128,10 @@ final class ZeroServiceProvider extends ServiceProvider
                 __DIR__.'/../stubs/ResolveZeroContext.php.stub' => app_path('Zero/ResolveZeroContext.php'),
             ], 'zero-context');
             $this->commands([SetupCommand::class, GenerateCommand::class, FormbraidCommand::class, SyncPublicationCommand::class, DevCommand::class, DoctorCommand::class, ResetCommand::class, ExposureCommand::class]);
+            if (class_exists(DevCommands::class)) {
+                DevCommands::register('php artisan zero:dev', 'zero');
+            }
+
             Event::listen(MigrationsEnded::class, function (MigrationsEnded $event): void {
                 if ($event->method !== 'up' || ($event->options['pretend'] ?? false) || ! config()->boolean('zero.sync_publication_on_migrate')) {
                     return;

@@ -18,6 +18,11 @@ use `APP_ENV=local`:
 php artisan zero:dev
 ```
 
+If you use `php artisan dev` (directly or through `composer dev`), it starts Zero
+for you. `php artisan dev:list` shows the `zero` process. No `AppServiceProvider`
+edit is needed. If your starter runs its own process list instead, run
+`php artisan zero:dev` in a separate terminal.
+
 The command generates contracts, synchronizes the dedicated publication, and runs
 the application's installed Zero binary through Laravel's process API. It encodes
 PostgreSQL credentials in connection URLs, configures both callbacks from
