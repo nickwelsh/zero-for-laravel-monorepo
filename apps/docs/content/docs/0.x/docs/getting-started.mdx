@@ -33,25 +33,18 @@ need to be created or published. To add fields, see
 [typed context and resolver](./configuration.mdx#typed-context-and-resolver).
 
 Opt models in with `HasZeroQueries`; their Composer namespaces are discovered automatically.
-Define column allowlists and supported Eloquent relationships. Protect private
-models with ordinary Laravel policies, `HasPolicyVisibility`, and explicit
-`visibleTo($request->user())` on each protected query path. Public models must be
-marked deliberately with `#[ZeroForLaravel\Attributes\ZeroPublic]`. See
-[policy bindings and managed grants](./authorization.mdx#configure-bindings-and-managed-grants)
-for RBAC/ABAC setup and transactional sharing. Zero global scopes remain useful
-for business constraints and creation defaults; they do not replace visibility.
+Define column allowlists and supported Eloquent relationships. No permissions
+setup is required: each live query returns the rows its filters and scopes select.
+To require policy coverage on every read of a model, including through relationships,
+bind it in `permissions.resources`. Follow [policy bindings and managed grants](./authorization.mdx#configure-bindings-and-managed-grants)
+before generating contracts for those models.
 
-Publish permissions configuration and migrations, configure the subject/resource
-bindings, migrate, and backfill any existing ACLs into managed grants. Rebuild the
-private projections before generation. Declare queries and mutations on registered
-controller routes, then generate against that database:
+Declare queries and mutations on registered controller routes, then generate
+against your application's database:
 
 ```sh
 php artisan vendor:publish --tag=zero-config
-php artisan vendor:publish --tag=permissions-config
-php artisan vendor:publish --tag=permissions-migrations
 php artisan migrate
-php artisan permissions:rebuild
 php artisan zero:generate --react
 php artisan zero:sync-publication --dry-run
 ```

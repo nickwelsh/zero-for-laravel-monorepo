@@ -19,9 +19,9 @@ decision after removal. Global scoping also affects route binding (hidden rows
 produce 404 before Gates) and bulk writes; it is not separate write authorization.
 
 Schema publication uses `HasZeroQueries` discovery in the application's Composer
-namespaces. Public models require `#[ZeroPublic]` on the class; a missing permission
-binding never makes a model public. Creation defaults use `withAttributes()` with
-typed application context; explicit creation attributes win, and defaults never
+namespaces. Reads follow the declared query by default. A `permissions.resources`
+binding opts a model into mandatory policy coverage on every live read. Creation
+defaults use `withAttributes()` with typed application context; explicit creation attributes win, and defaults never
 stamp updates or authorize writes. Scout search uses `zeroSearch()` or explicit
 registration in an application provider. Column exposure rules remain unchanged.
 

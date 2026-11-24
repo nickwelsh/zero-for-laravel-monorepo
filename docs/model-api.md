@@ -9,14 +9,14 @@ See the [main guide](../README.md) and [working example](../examples/todos/READM
 Ordinary Laravel policies select managed Casbin actions. The explicit local scope
 `visibleTo($user)` compiles the policy's instance `view` method to Eloquent and native
 Zero predicates. Use `HasPolicyVisibility` for Eloquent and `HasZeroQueries` for Zero.
-Roots, related results and existence predicates require explicit coverage; a
+For protected models, roots, related results and existence predicates require coverage; a
 supported captured instance Gate can protect its bound resource and descendants.
 Related targets must be registered. Caller filters remain outside the admin OR.
 
 There is no `ZeroDefinition`, model `zero()` method, implicit visibility global scope,
 or PHP-only server-scope escape hatch. `HasZeroQueries` discovery selects publication;
-`#[ZeroPublic]` on the model explicitly selects public reads. Database bindings live in
-`permissions.resources`; normal Laravel discovery resolves policies. Unsupported
+declared queries select rows. A binding in `permissions.resources` opts the model
+into required policy coverage; normal Laravel discovery resolves policies. Unsupported
 hooks, scopes or matchers fail instead of weakening a query. See
 [the authorization guide](../apps/docs/content/docs/0.x/docs/authorization.mdx).
 

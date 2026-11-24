@@ -14,7 +14,6 @@ use Inertia\Response;
 use Laravel\Surveyor\SurveyorServiceProvider;
 use LogicException;
 use ReflectionMethod;
-use ZeroForLaravel\Attributes\ZeroPublic;
 use ZeroForLaravel\Generation\ControllerQueryCompiler;
 use ZeroForLaravel\Generation\ControllerQueryGenerator;
 use ZeroForLaravel\Generation\ZodSchemaDriver;
@@ -28,7 +27,6 @@ use ZeroForLaravel\Zero;
 
 uses(OwnerTestCase::class);
 
-#[ZeroPublic]
 final class RankedList extends TaskList
 {
     protected static function booted(): void

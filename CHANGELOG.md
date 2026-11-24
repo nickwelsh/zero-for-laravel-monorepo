@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Rename `ZeroExclude` to `ZeroExcludeColumns` in model attributes and imports
+  before regenerating contracts or syncing the publication. The old name no longer excludes columns.
+- Live queries no longer require `#[ZeroPublic]` or a permission binding. Remove
+  the attribute. Binding a model in `permissions.resources` still requires policy
+  coverage on every live read of that model, including through relationships.
+- Zero mutation inputs now honor Eloquent's `$guarded` rules as well as `$fillable`.
+  Model reads include relationships in `$with` and omit relationships in `$hidden`.
+  Review `zero:exposure` and regenerate contracts after changing these settings.
 - PostgreSQL permission updates now maintain grants for the affected rule or domain.
   Before upgrading an installation with maintained permissions, pause traffic and
   drain old workers. Deploy the new code, refresh Laravel's config cache if used,

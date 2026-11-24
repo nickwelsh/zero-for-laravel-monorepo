@@ -120,7 +120,7 @@ final class ControllerQueryCompiler
                             }
                         }
 
-                        $this->coverage($expression);
+                        $this->coverage(EagerLoadCompiler::expand($expression));
 
                         return $expression;
                     }
@@ -391,7 +391,7 @@ final class ControllerQueryCompiler
                     $this->unsupported($item, 'Finish the live read with get(), first(), find(), or a paginator.');
                 }
 
-                $this->coverage($expression);
+                $this->coverage(EagerLoadCompiler::expand($expression));
             }
 
             $props[$this->prop] = [$expression, $item->getStartLine()];
@@ -417,6 +417,12 @@ final class ControllerQueryCompiler
     /** @return list<array<string, mixed>> */
     public function dependencies(QueryExpression $expression): array
     {
+        return $this->expressionDependencies(EagerLoadCompiler::expand($expression));
+    }
+
+    /** @return list<array<string, mixed>> */
+    private function expressionDependencies(QueryExpression $expression): array
+    {
         $dependencies = [];
         if ($expression->model?->policyVisibility && in_array($expression->kind, ['query', 'local', 'bound'], true)) {
             $dependencies[] = ['policy' => (new PolicyCompiler)->compile($expression->model->class, onScopedRows: true)->fingerprint];
@@ -441,30 +447,31 @@ final class ControllerQueryCompiler
         }
 
         foreach ($expression->children as $child) {
-            array_push($dependencies, ...$this->dependencies($child));
+            array_push($dependencies, ...$this->expressionDependencies($child));
         }
 
         return $dependencies;
     }
 
     /** @param array<string, true> $expanding Globals active on the current relationship path. */
-    private function coverage(QueryExpression $expression, array $expanding = []): void
+    private function coverage(QueryExpression $expression, array $expanding = [], string $path = ''): void
     {
-        $classGuarded = $this->guards !== [] && $this->guards[0]['parameter'] === null;
-        if ($classGuarded && ! $expression->queryModel()->policyVisibility) {
-            throw new LogicException('Class-guarded live paths require a portable permission resource.');
+        $path = $path === '' ? $expression->queryModel()->name : $path;
+        if ($this->guards !== [] && ! $expression->queryModel()->policyVisibility) {
+            throw new LogicException($path.': a captured Gate requires a portable permission resource. Bind '.$expression->queryModel()->name.' in permissions.resources.');
         }
 
-        $this->relatedCoverage($expression, $expanding);
-        $this->rootCoverage($expression, $expanding, [], false);
+        $this->relatedCoverage($expression, $expanding, $path);
+        $this->rootCoverage($expression, $expanding, [], false, $path);
     }
 
     /** Same-row groups and scope bodies do not start a new query. A relationship does.
      * @param  array<string, true>  $expanding
      */
-    private function relatedCoverage(QueryExpression $node, array $expanding): void
+    private function relatedCoverage(QueryExpression $node, array $expanding, string $path): void
     {
         if ($node->kind === 'method' && in_array($node->value, ['with', 'whereHas', 'whereDoesntHave'], true)) {
+            $node = $node->firstRelationHop();
             $relation = $this->models->relation($node->queryModel(), $node->children[1]->stringValue());
             if ($this->guards !== [] && $this->guards[0]['parameter'] === null && count($relation['path']) !== 1) {
                 throw new LogicException('Class-guarded live paths cannot maintain authorization on intermediate tables.');
@@ -472,21 +479,21 @@ final class ControllerQueryCompiler
 
             $target = $this->models->get($relation['model']);
             $callback = $node->children[2] ?? null;
-            $this->coverage($callback?->kind === 'callback' ? $callback->children[0] : new QueryExpression('query', model: $target, type: 'query'), $expanding);
-            $this->relatedCoverage($node->children[0], $expanding);
+            $this->coverage($callback?->kind === 'callback' ? $callback->children[0] : new QueryExpression('query', model: $target, type: 'query'), $expanding, $path.'.'.$node->children[1]->stringValue());
+            $this->relatedCoverage($node->children[0], $expanding, $path);
 
             return;
         }
 
         foreach ($node->children as $child) {
-            $this->relatedCoverage($child, $expanding);
+            $this->relatedCoverage($child, $expanding, $path);
         }
     }
 
     /** @param array<string, true> $expanding
      * @param  list<string>|null  $outerRemoved
      */
-    private function rootCoverage(QueryExpression $expression, array $expanding, ?array $outerRemoved, bool $visible): void
+    private function rootCoverage(QueryExpression $expression, array $expanding, ?array $outerRemoved, bool $visible, string $path): void
     {
         $removed = ScopeCompiler::removals($expression);
         $removed = $removed === null || $outerRemoved === null ? null : [...$removed, ...$outerRemoved];
@@ -498,8 +505,8 @@ final class ControllerQueryCompiler
         }
 
         if ($node->kind === 'conditional') {
-            $this->rootCoverage($node->children[1], $expanding, $removed, $visible);
-            $this->rootCoverage($node->children[2], $expanding, $removed, $visible);
+            $this->rootCoverage($node->children[1], $expanding, $removed, $visible, $path);
+            $this->rootCoverage($node->children[2], $expanding, $removed, $visible, $path);
 
             return;
         }
@@ -516,7 +523,7 @@ final class ControllerQueryCompiler
             }
 
             $visible = $visible || $this->declaresVisibility($scope);
-            $this->relatedCoverage($scope, [...$expanding, $key => true]);
+            $this->relatedCoverage($scope, [...$expanding, $key => true], $path);
         }
 
         if ($model->policyVisibility && ! $visible) {
@@ -961,14 +968,6 @@ final class ControllerQueryCompiler
                 return $receiver;
             }
 
-            if ($receiver->type === 'query' && $method === 'with' && ($node->getArgs()[0]->value ?? null) instanceof Scalar\String_ && str_contains($node->getArgs()[0]->value->value, '.')) {
-                [$head, $tail] = explode('.', $node->getArgs()[0]->value->value, 2);
-                $args = [new Node\Arg(new Scalar\String_($tail)), ...array_slice($node->getArgs(), 1)];
-                $callback = new Expr\ArrowFunction(['params' => [new Node\Param(new Expr\Variable('__nested'))], 'expr' => new Expr\MethodCall(new Expr\Variable('__nested'), 'with', $args)]);
-
-                return $this->expression(new Expr\MethodCall(new Expr\Variable('__include'), 'with', [new Node\Arg(new Scalar\String_($head)), new Node\Arg($callback)]), [...$variables, '__include' => $receiver]);
-            }
-
             if ($receiver->kind === 'metadata' && $node->args === [] && in_array($method, ['getTable', 'getKeyName', 'getDeletedAtColumn'], true)) {
                 return new QueryExpression('literal', match ($method) {
                     'getTable' => $receiver->queryModel()->table, 'getKeyName' => $receiver->queryModel()->key, default => $receiver->queryModel()->deletedAt,
@@ -1012,6 +1011,7 @@ final class ControllerQueryCompiler
             }
 
             $arguments = [];
+            $includeTarget = $receiver->model;
             foreach ($node->getArgs() as $index => $argument) {
                 if ($this->scopeStack !== [] && $method === 'withAttributes' && $index === 1 && $argument->name === null) {
                     $this->unsupported($argument, 'Use the named asConditions argument for Eloquent scope defaults.');
@@ -1030,7 +1030,7 @@ final class ControllerQueryCompiler
                             $this->unsupported($argument, 'Relationship callback requires a registered relationship.');
                         }
 
-                        $model = $this->models->get($this->models->relation($model, $relation->value)['model']);
+                        $model = $method === 'with' ? $includeTarget : $this->models->get($this->models->relation($model, $relation->value)['model']);
                         $type = 'query';
                     } elseif ($index !== 0 || ! in_array($method, ['where', 'orWhere'], true)) {
                         $this->unsupported($argument, 'Callback is not supported in this argument position.');
@@ -1086,10 +1086,31 @@ final class ControllerQueryCompiler
                     continue;
                 }
 
-                $arguments[] = $this->expression($argument->value, $variables);
+                $operand = $this->expression($argument->value, $variables);
+                if ($index === 0 && $method === 'with') {
+                    if ($operand->kind !== 'literal' || ! is_string($operand->value)) {
+                        $this->unsupported($node, 'Includes require a literal relationship path.');
+                    }
+
+                    foreach (explode('.', $operand->value) as $i => $hop) {
+                        if (! $includeTarget->returnsRelation($hop)) {
+                            if ($i === 0) {
+                                return $receiver;
+                            }
+
+                            // Preserve the visible ancestors without running a hidden leaf's callback.
+                            $arguments[] = $operand;
+                            break 2;
+                        }
+
+                        $includeTarget = $this->models->get($this->models->relation($includeTarget, $hop)['model']);
+                    }
+                }
+
+                $arguments[] = $operand;
             }
 
-            if (in_array($method, ['where', 'orWhere', 'orderBy', 'with', 'whereHas', 'whereDoesntHave'], true) && (! in_array($method, ['where', 'orWhere'], true) || ($arguments[0]->kind ?? null) !== 'callback') && ($method !== 'with' || ($arguments[0]->kind ?? null) !== 'object')) {
+            if (in_array($method, ['where', 'orWhere', 'orderBy', 'whereHas', 'whereDoesntHave'], true) && (! in_array($method, ['where', 'orWhere'], true) || ($arguments[0]->kind ?? null) !== 'callback')) {
                 $field = $arguments[0] ?? null;
                 if (in_array($method, ['with', 'whereHas', 'whereDoesntHave'], true) && $field?->kind === 'literal' && is_string($field->value)) {
                     $this->models->relation($receiver->model, $field->value);

@@ -400,6 +400,10 @@ final class Table
             }
 
             if ($declaration->lookup !== null) {
+                if (! $model->returnsRelation($name)) {
+                    throw new InvalidArgumentException('Cannot publish a lookup for hidden relationship '.$name.'.');
+                }
+
                 $target->scalar($declaration->lookup['field']);
                 if ($depth !== 0) {
                     throw new InvalidArgumentException('Bounded table lookup columns require a direct relationship.');

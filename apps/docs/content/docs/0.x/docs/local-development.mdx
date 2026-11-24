@@ -51,10 +51,10 @@ php artisan zero:doctor
 ```
 
 Exposure uses the same metadata that generates contracts and restricts publication
-columns. It lists queries, mutations, ownership rules, server visibility scopes,
-relationships, server fills, and published fields. An empty set of owner rules
-with no server visibility scopes means explicitly public reads, not an implicit
-authorization check. Included models retain their own visibility rules.
+columns. It lists published fields, global scopes, creation defaults, relationships,
+and whether the model requires policy coverage. Without a resource binding, the
+declared query determines which rows its callers can read. Included models retain
+their own visibility rules.
 
 Doctor is read-only. It reports PostgreSQL version, WAL configuration, replication
 slots/senders, role privileges, exact publication membership, contract freshness,

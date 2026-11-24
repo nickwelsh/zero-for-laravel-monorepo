@@ -38,7 +38,7 @@ file from formatters so `--check` can compare its exact contents.
 The same column plan drives TypeScript and the dedicated PostgreSQL publication.
 Nonempty Eloquent `$visible` supplies the default allowlist, and `ZeroColumns`
 can explicitly replace it. See [columns and privacy](./models.mdx#columns-and-privacy)
-for precedence with `$hidden`, `ZeroExclude`, and `ZeroIncludeColumns`, including
+for precedence with `$hidden`, `ZeroExcludeColumns`, and `ZeroIncludeColumns`, including
 required-column validation.
 Pivot tables publish only correlation and primary-key columns. Use a dedicated
 publication; synchronization replaces its table/column membership atomically.

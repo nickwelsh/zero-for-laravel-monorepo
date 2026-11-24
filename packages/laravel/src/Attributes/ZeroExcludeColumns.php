@@ -13,7 +13,7 @@ use Attribute;
  * can explicitly opt an excluded column back in.
  */
 #[Attribute(Attribute::TARGET_CLASS)]
-final readonly class ZeroExclude
+final readonly class ZeroExcludeColumns
 {
     /**
      * @param  list<string>  $columns

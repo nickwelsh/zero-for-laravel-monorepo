@@ -58,7 +58,7 @@ final readonly class LiveProps implements ProvidesInertiaProperties
                 foreach ($registry->all() as $model) {
                     if ($value::class === $model->class) {
                         $boundProps[$key] = $value;
-                        $props[$key] = (new ZeroQuery($model, $registry))->find($value->getKey());
+                        $props[$key] = ZeroQuery::forModel($model)->find($value->getKey());
                         break;
                     }
                 }

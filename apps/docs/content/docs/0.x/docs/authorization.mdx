@@ -4,7 +4,9 @@ description: Share Laravel policies across REST, Zero, and subscribed access err
 ---
 
 Laravel remains authoritative. Policies use normal discovery or `Gate::policy()`;
-there is no separate Zero policy map. Current-user global visibility is opt-in.
+there is no separate Zero policy map. Defining a policy does not make every read
+invoke it. Bind a model in `permissions.resources` to require policy coverage on
+every live query path that reads the model. Current-user global visibility is opt-in.
 The managed Casbin integration stores grants and role assignments in the database.
 Its model file defines the matcher, role layout and effect, not individual grants.
 
@@ -46,8 +48,8 @@ return Inertia::render('lists/index', [
 `visibleTo($user)` means the policy's instance `view` method, not `viewAny`.
 An empty collection succeeds. Supply the actor explicitly; registered Zero queries
 only accept the server-authenticated actor, not a browser-provided user ID.
-Related selections and user-authored existence filters require their own explicit
-visibility. Authorizing a root is not blanket permission for its related rows.
+Related selections and existence filters on protected models require their own
+coverage. Authorizing a root is not blanket permission for its related rows.
 
 ```php
 TodoList::zeroQuery()

@@ -54,7 +54,7 @@ final readonly class RegisteredTableQuery
             // Only input-free, unguarded standalone declarations qualify. Resolve the
             // same actor and application context for both sides of the intersection.
             $binding->assertCurrent();
-            $catalog = $compiler->compileDeclaration($binding->declaration([]), $context, serving: true);
+            $catalog = $compiler->compileDeclaration($binding->declaration([])->withoutEagerLoads(), $context, serving: true);
             if ($catalog['table'] !== $ast['table'] || array_diff(array_keys($catalog), ['table', 'where']) !== []) {
                 throw new LogicException('Invalid standalone table choice membership. Regenerate.');
             }

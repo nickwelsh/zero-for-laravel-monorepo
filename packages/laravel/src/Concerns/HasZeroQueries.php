@@ -15,7 +15,7 @@ trait HasZeroQueries
         $registry = resolve(ModelRegistry::class);
         foreach ($registry->all() as $model) {
             if ($model->class === static::class) {
-                return new ZeroQuery($model, $registry);
+                return ZeroQuery::forModel($model);
             }
         }
 

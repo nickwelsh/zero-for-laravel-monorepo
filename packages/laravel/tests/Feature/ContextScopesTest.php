@@ -16,7 +16,6 @@ use Inertia\Response;
 use LogicException;
 use PhpParser\ParserFactory;
 use ZeroForLaravel\Attributes\ZeroMutation;
-use ZeroForLaravel\Attributes\ZeroPublic;
 use ZeroForLaravel\Concerns\HasZeroQueries;
 use ZeroForLaravel\Context\ContextReference;
 use ZeroForLaravel\Generation\ControllerQueryCompiler;
@@ -170,7 +169,6 @@ class OwnershipScope implements GlobalScope
 }
 
 #[ScopedBy([OwnershipScope::class])]
-#[ZeroPublic]
 class ScopedTodo extends Model
 {
     use HasUuids, HasZeroQueries;
@@ -272,7 +270,6 @@ class ParentDefaultScope implements GlobalScope
 }
 
 #[ScopedBy([ChildDefaultScope::class])]
-#[ZeroPublic]
 class InheritedDefaultTodo extends ParentDefaultTodo {}
 
 /** @implements GlobalScope<Model> */

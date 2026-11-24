@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace ZeroForLaravel\Tests\Feature;
 
 use Closure;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Foundation\Auth\User;
 use Illuminate\Http\Request;
@@ -117,6 +118,32 @@ final class TaskCatalog
     {
         return Task::zeroQuery()->visibleTo($request->user())
             ->whereDoesntHave('comments', fn ($q) => $q->visibleTo($request->user()))->get();
+    }
+}
+
+final class ChoiceList extends TaskList
+{
+    protected $with = ['tasks'];
+
+    /** @return HasMany<self, $this> */
+    public function peers(): HasMany
+    {
+        return $this->hasMany(self::class, 'user_id', 'user_id');
+    }
+}
+
+final class ListChoiceTable
+{
+    public function definition(): Table
+    {
+        return Table::for(ChoiceList::class)->allowedRelations([
+            AllowedRelation::named('peers')->choices('id', 'name', 'ZeroForLaravel\\Tests\\Feature\\ListChoiceTable@eligible'),
+        ]);
+    }
+
+    public function eligible(Request $request): ZeroQuery
+    {
+        return ChoiceList::zeroQuery()->whereHas('tasks', fn ($q) => $q->visibleTo($request->user())->where('done', true))->get();
     }
 }
 
@@ -441,6 +468,49 @@ test('generation rejects relation absence in a picker override without forbiddin
     expect($generator->php($queries))->toContain($queries[0]->name());
     expect(fn (): string => $generator->php($queries, [$table]))->toThrow(LogicException::class, 'relation absence');
     expect(fn (): array => (new TableGenerator)->typescript([$table], '../generated', $queries))->toThrow(LogicException::class, 'relation absence');
+});
+
+test('picker membership preserves scoped existence filters but omits default returned rows', function (): void {
+    /** @var TableTransportTestCase $this */
+    Task::addGlobalScope(\ZeroForLaravel\Permissions\VisibleToCurrentUser::class);
+    $this->discover([ChoiceList::class, Task::class, ListChoiceTable::class]);
+    app()->instance(ModelRegistry::class, new ModelRegistry([ChoiceList::class, Task::class]));
+    $table = resolve(TableRegistry::class)->all()[0];
+    $queries = resolve(ControllerQueryCompiler::class)->compile(ListChoiceTable::class, 'eligible');
+    expect($queries[0]->typescript())->toContain('.related("tasks"', 'eb.exists("tasks"');
+    $source = (new TableGenerator)->typescript([$table], '../generated', $queries)['tables/list-choice.ts'];
+    expect($source)->toContain('eb.exists("tasks"', '"done"');
+    expect($source)->not->toContain('.related("tasks"');
+
+    $file = tempnam(sys_get_temp_dir(), 'zero-list-choice-');
+    if ($file === false) {
+        throw new LogicException('Cannot create table registration fixture.');
+    }
+
+    try {
+        File::put($file, (new ControllerQueryGenerator(new ZodSchemaDriver))->php($queries, [$table]));
+        $registry = RegisteredQueries::load($file);
+        app()->instance(RegisteredQueries::class, $registry);
+    } finally {
+        File::delete($file);
+    }
+
+    $actor = (new User)->setKeyType('string')->forceFill(['id' => 'alice']);
+    $this->actingAs($actor);
+    request()->setUserResolver(fn () => $actor);
+    $context = new ResolvedContext(['user_id' => 'alice'], 'alice');
+    $operations = [];
+    foreach ($registry->all() as $registration) {
+        if ($registration instanceof RegisteredTableQuery && $registration->operation !== null) {
+            $operations[] = $registration->operation;
+            $args = $registration->operation === 'list' ? ['search' => ''] : ['ids' => ['saved']];
+            $ast = $registration->invoke($args, $context, resolve(QueryCompiler::class));
+            expect($ast)->not->toHaveKey('related');
+            expect(json_encode($ast['where'], JSON_THROW_ON_ERROR))->toContain('EXISTS', '"done"', 'permission_index');
+        }
+    }
+
+    expect($operations)->toBe(['list', 'resolve']);
 });
 
 test('a relation-aware descriptor displays JSON columns only when explicitly selected', function (): void {

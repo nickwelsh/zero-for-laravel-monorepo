@@ -51,6 +51,11 @@ final class ZeroQuery implements JsonSerializable
     /** @var array<string, mixed> */
     private array $relationships = [];
 
+    /** @var array<string, array<string, (Closure(self): (self|void))|null>> Per relationship, keyed by remaining path (empty for its own refinement). */
+    private array $loads = [];
+
+    private ?int $includeDepth = null;
+
     /** @var array<string, mixed> */
     private array $attributes = [];
 
@@ -118,6 +123,25 @@ final class ZeroQuery implements JsonSerializable
             $this->condition = self::cloneCondition($this->condition);
             $this->ast['where'] = $this->condition->toArray();
         }
+    }
+
+    /** Start an application model read, including its Eloquent default relationships. */
+    public static function forModel(ModelMetadata $model): self
+    {
+        $query = new self($model, $model->registry);
+        $query->loadDefaults([], 0);
+
+        return $query;
+    }
+
+    /** @internal The picker accepts only checked membership declarations, so any includes here are model defaults. */
+    public function withoutEagerLoads(): self
+    {
+        $this->loads = [];
+        $this->relationships = [];
+        unset($this->ast['related']);
+
+        return $this;
     }
 
     public function visibleTo(?Authenticatable $user): self
@@ -218,14 +242,15 @@ final class ZeroQuery implements JsonSerializable
             return $this;
         }
 
-        if (str_contains($relationship, '.')) {
-            [$head, $tail] = explode('.', $relationship, 2);
-
-            return $this->with($head, fn (self $child): self => $child->with($tail, $refine));
+        [$relationship, $tail] = array_pad(explode('.', $relationship, 2), 2, '');
+        if (! $this->model->returnsRelation($relationship)) {
+            return $this;
         }
 
-        [$related, $child] = $this->relationship($relationship, $refine, false);
-        $this->ast['related'][] = $related;
+        $this->loads[$relationship][$tail] = $refine;
+        [$related, $child] = $this->relationship($relationship, $this->loads[$relationship][''] ?? null, false);
+        $index = array_search($relationship, array_keys($this->relationships), true);
+        $this->ast['related'][$index === false ? count($this->relationships) : $index] = $related;
         $this->relationships[$relationship] = $child->format();
 
         return $this;
@@ -507,6 +532,19 @@ final class ZeroQuery implements JsonSerializable
         return $values;
     }
 
+    /** @param array<string, (Closure(self): (self|void))|null> $nested */
+    private function loadDefaults(array $nested, int $depth): void
+    {
+        if ($depth > 8) {
+            throw new LogicException('Default eager loading exceeds eight levels at '.$this->model->name.'.');
+        }
+
+        $this->includeDepth = $depth;
+        foreach ([...$this->model->eagerLoads(), ...$nested] as $name => $refine) {
+            $this->with($name, $refine);
+        }
+    }
+
     /** @param string|array<array-key, mixed>|Closure(self): (self|void) $field */
     private function predicate(string $boolean, string|array|Closure $field, mixed $operator, mixed $value): self
     {
@@ -662,6 +700,18 @@ final class ZeroQuery implements JsonSerializable
 
         $alias = $predicate ? 'zsubq_'.($junction ? 'zhidden_' : '').$name : $name;
         $child->ast['alias'] = $alias;
+        if (! $predicate) {
+            $nested = $this->loads[$name];
+            unset($nested['']);
+            if ($this->includeDepth !== null) {
+                $child->loadDefaults($nested, $this->includeDepth + 1);
+            } else {
+                foreach ($nested as $pathName => $callback) {
+                    $child->with($pathName, $callback);
+                }
+            }
+        }
+
         $child->callScope(fn () => $this->model->applyRelationConstraints($name, $child));
         if ($refine instanceof Closure) {
             $child->callScope(function () use ($child, $refine): void {

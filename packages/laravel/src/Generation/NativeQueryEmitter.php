@@ -24,7 +24,7 @@ final class NativeQueryEmitter
         return $this->emit($base, $this->relationConditions($base, $parent->relationConstraints[$relation]['wheres'] ?? []));
     }
 
-    public function emit(QueryExpression $query, ?QueryExpression $relationFilter = null): string
+    public function emit(QueryExpression $query, ?QueryExpression $relationFilter = null, bool $modelRead = false): string
     {
         if (++$this->depth > 8) {
             throw new LogicException('Recursive Zero scope/relationship expansion exceeds eight levels at '.$query->model?->name.'.');
@@ -33,7 +33,7 @@ final class NativeQueryEmitter
         try {
             $query = $query->snapshot()->distribute();
             if ($query->kind === 'conditional') {
-                return '('.$query->children[0]->emit(true).' ? '.$this->emit($query->children[1], $relationFilter).' : '.$this->emit($query->children[2], $relationFilter).')';
+                return '('.$query->children[0]->emit(true).' ? '.$this->emit($query->children[1], $relationFilter, $modelRead).' : '.$this->emit($query->children[2], $relationFilter, $modelRead).')';
             }
 
             [$root, $steps] = $this->steps($query);
@@ -66,26 +66,27 @@ final class NativeQueryEmitter
                 $base .= '.where(eb => '.(count($conditions) === 1 ? $conditions[0] : 'eb.and('.implode(', ', $conditions).')').')';
             }
 
-            foreach ($scopes as $scope) {
-                [, $scopeSteps] = $this->steps($scope);
-                array_push($steps, ...$scopeSteps);
-            }
-
             $cursor = $query->kind === 'paginate' && $query->value === 'cursor';
             foreach ($steps as $step) {
                 $args = array_slice($step->children, 1);
                 if ($step->kind === 'scope') {
                     [, $body] = $this->steps($step->children[1]);
-                    $base = $this->structural($base, $body, $cursor);
+                    $base = $this->structural($base, $body, $cursor, $modelRead);
                 } elseif ($step->value === 'orderBy') {
                     $base .= $this->orderBy($step, $cursor);
                 } elseif ($step->value === 'with') {
-                    $base .= $this->include($step);
+                    $base .= $this->include($step, $modelRead);
                 } elseif ($step->value === 'first') {
                     $base .= '.one()';
                 } elseif (in_array($step->value, ['orderBy', 'limit', 'start', 'one'], true)) {
                     $base .= '.'.$step->value.'('.implode(', ', array_map(fn (QueryExpression $arg): string => $arg->emit(true), $args)).')';
                 }
+            }
+
+            foreach ($scopes as $scope) {
+                [, $body] = $this->steps($scope);
+                // Model reads already merged the global includes with the model's and caller's.
+                $base = $this->structural($base, $body, $cursor, false, ! $modelRead);
             }
 
             if ($query->kind === 'paginate') {
@@ -181,16 +182,16 @@ final class NativeQueryEmitter
     }
 
     /** @param list<QueryExpression> $steps */
-    private function structural(string $base, array $steps, bool $cursor): string
+    private function structural(string $base, array $steps, bool $cursor, bool $modelRead, bool $include = true): string
     {
         foreach ($steps as $step) {
             if ($step->kind === 'scope') {
                 [, $body] = $this->steps($step->children[1]);
-                $base = $this->structural($base, $body, $cursor);
+                $base = $this->structural($base, $body, $cursor, $modelRead, $include);
             } elseif ($step->value === 'orderBy') {
                 $base .= $this->orderBy($step, $cursor);
-            } elseif ($step->value === 'with') {
-                $base .= $this->include($step);
+            } elseif ($step->value === 'with' && $include) {
+                $base .= $this->include($step, $modelRead);
             } elseif (in_array($step->value, ['orderBy', 'limit', 'start', 'one'], true)) {
                 $base .= '.'.$step->value.'('.implode(', ', array_map(fn (QueryExpression $arg): string => $arg->emit(true), array_slice($step->children, 1))).')';
             }
@@ -212,12 +213,13 @@ final class NativeQueryEmitter
         return '.orderBy('.$step->children[1]->emit(true).', '.$direction.')';
     }
 
-    private function include(QueryExpression $step): string
+    private function include(QueryExpression $step, bool $modelRead): string
     {
+        $step = $step->firstRelationHop();
         $name = $step->children[1]->stringValue();
         [$symbol, $child, $filter] = $this->child($step, $name);
 
-        return '.related('.json_encode($name, JSON_THROW_ON_ERROR).', '.$symbol.' => '.$this->emit($child, $filter).')';
+        return '.related('.json_encode($name, JSON_THROW_ON_ERROR).', '.$symbol.' => '.$this->emit($child, $filter, $modelRead).')';
     }
 
     /** @return array{string, QueryExpression, QueryExpression|null} */

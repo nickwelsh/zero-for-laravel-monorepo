@@ -14,11 +14,8 @@ _Avoid_ “registered model” when describing the application's choice to opt i
 **Publication**\
 The set of tables and columns PostgreSQL makes available to zero-cache for replication. It bounds what the cache can receive across all users.
 
-**Public model**\
-A participating model explicitly open for reading without a per-record policy check. A query on a public model can still restrict which records it returns.
-
 **Protected model**\
-A participating model whose records require policy visibility or a qualifying access check wherever they are read, including through relationships.
+A participating model for which the application requires policy visibility or a qualifying access check on every live read, including through relationships. Other participating models follow the constraints of the declared query.
 
 **Zero identity**\
 The user identity to which a Zero client's local data belongs. Laravel authenticates the user when serving their operations.

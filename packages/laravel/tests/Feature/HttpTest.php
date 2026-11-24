@@ -386,11 +386,11 @@ test('Composer namespaces discover nested models and tables without configuratio
         'autoload' => ['psr-4' => [$namespace.'\\' => ['app', 'missing']]],
         'autoload-dev' => ['psr-4' => [$namespace.'\\Dev\\' => 'dev']],
     ], JSON_THROW_ON_ERROR));
-    File::put($directory.'/app/Domain/NestedTask.php', '<?php namespace '.$namespace.'\\Domain; #[\\ZeroForLaravel\\Attributes\\ZeroPublic] class NestedTask extends \\ZeroForLaravel\\Tests\\Fixtures\\VisibleTask {}');
+    File::put($directory.'/app/Domain/NestedTask.php', '<?php namespace '.$namespace.'\\Domain; class NestedTask extends \\ZeroForLaravel\\Tests\\Fixtures\\VisibleTask {}');
     File::put($directory.'/app/Domain/AbstractTask.php', '<?php namespace '.$namespace.'\\Domain; abstract class AbstractTask extends NestedTask {}');
     File::put($directory.'/app/Domain/Unpublished.php', '<?php namespace '.$namespace.'\\Domain; class Unpublished extends \\Illuminate\\Database\\Eloquent\\Model {}');
     File::put($directory.'/app/Domain/Deep/Utility.php', '<?php namespace '.$namespace.'\\Domain\\Deep; class Utility {}');
-    File::put($directory.'/app/Other/OtherTask.php', '<?php namespace '.$namespace.'\\Other; #[\\ZeroForLaravel\\Attributes\\ZeroPublic] class OtherTask extends \\ZeroForLaravel\\Tests\\Fixtures\\VisibleTask { protected $table = "lists"; protected $visible = ["id", "name"]; protected $fillable = ["name"]; }');
+    File::put($directory.'/app/Other/OtherTask.php', '<?php namespace '.$namespace.'\\Other; class OtherTask extends \\ZeroForLaravel\\Tests\\Fixtures\\VisibleTask { protected $table = "lists"; protected $visible = ["id", "name"]; protected $fillable = ["name"]; }');
     File::put($directory.'/dev/DevTask.php', '<?php namespace '.$namespace.'\\Dev; class DevTask extends \\ZeroForLaravel\\Tests\\Fixtures\\VisibleTask {}');
     File::put($directory.'/app/Domain/TasksTable.php', '<?php namespace '.$namespace.'\\Domain; use '.Table::class.'; class TasksTable { public function definition(): Table { return Table::for(NestedTask::class)->allowedSorts(["title"]); } }');
     File::put($directory.'/app/Domain/ReadTasks.php', '<?php namespace '.$namespace.'\\Domain; class ReadTasks { public function all(): \\ZeroForLaravel\\Query\\ZeroQuery { return NestedTask::zeroQuery()->orderBy("title", "asc")->limit(5)->get(); } }');

@@ -25,8 +25,9 @@ return [
     | Use ** in file paths to include nested directories; [] selects none.
     |
     | Discovery tells Zero which database tables to copy, not who may read them.
-    | Private models need a policy and a permissions.resources binding.
-    | Add #[ZeroPublic] only for rows that every user may read.
+    | By default, declared queries determine which rows their callers can read.
+    | Bind a model in permissions.resources to require policy coverage on every
+    | live query path that reads it, including through relationships.
     |
     */
 

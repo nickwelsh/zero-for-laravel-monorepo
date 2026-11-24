@@ -21,7 +21,7 @@ final class TableChoiceBindings
         foreach (array_unique($names) as $name) {
             foreach ($queries as $query) {
                 if ($query->standalone && ($query->action === $name || $query->name() === $name)) {
-                    if ($query->parameters !== [] || $query->guards !== [] || $query->expression->model?->name !== $path->target->name || $query->expression->singular || ! self::membership($query->expression)) {
+                    if ($query->parameters !== [] || $query->guards !== [] || $query->expression->model?->name !== $path->target->name || $query->expression->singular || ! self::membership(EagerLoadCompiler::expand($query->expression, defaults: false))) {
                         throw new LogicException($name.': table choices require a standalone, input-free eligibility query on '.$path->target->name.' without relation absence; the picker applies ordering and bounds.');
                     }
 

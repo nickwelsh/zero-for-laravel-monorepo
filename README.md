@@ -90,12 +90,13 @@ unsupported policies fail explicitly. A supported policy `before()` admin overri
 stays live and preserves caller filters.
 
 Models using `HasZeroQueries` are discovered in the application's Composer namespaces.
-Every protected root, related selection, and existence path needs policy coverage.
+By default, a live query returns the rows its filters and scopes select; defining
+a Laravel policy does not automatically apply it. Bind a model in `permissions.resources`
+to require policy coverage at the root, in related selections, and in existence checks.
 Use `visibleTo()` for an explicit actor or opt a model into the `VisibleToCurrentUser`
 global scope to apply the current actor's policy visibility by default. A supported
-captured instance Gate can also cover its bound resource. Declare `#[ZeroPublic]`
-on an intentionally public model. Creation
-defaults use `withAttributes()` and typed application context; explicit creation
+captured instance Gate can also cover its bound resource. Creation defaults use
+`withAttributes()` and typed application context; explicit creation
 attributes override defaults. Defaults are not write authorization or update stamps.
 Reuse portable Eloquent local and global scopes for live query constraints.
 Search uses `zeroSearch()` or explicit registration.
@@ -107,7 +108,7 @@ Disconnects block pending revalidation; empty collections remain successful.
 See [authorization](apps/docs/content/docs/0.x/docs/authorization.mdx)
 for setup, supported compiler boundaries and deployment requirements.
 
-Column privacy uses `$visible`, `$hidden`, `ZeroColumns`, `ZeroExclude`, and
+Column privacy uses `$visible`, `$hidden`, `ZeroColumns`, `ZeroExcludeColumns`, and
 `ZeroIncludeColumns`. Generation fails if required keys are excluded. Synchronize a
 dedicated PostgreSQL publication; do not let the cache create an unrestricted one.
 

@@ -6,10 +6,8 @@ namespace ZeroForLaravel\Tests\Fixtures;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
-use ZeroForLaravel\Attributes\ZeroPublic;
 use ZeroForLaravel\Concerns\HasZeroQueries;
 
-#[ZeroPublic]
 final class PredicateTask extends Model
 {
     use HasZeroQueries;

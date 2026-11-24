@@ -65,7 +65,7 @@ final readonly class ControllerQuery
 
     public function typescript(): string
     {
-        $body = $this->expression->emit(true);
+        $body = (new NativeQueryEmitter)->emit(EagerLoadCompiler::expand($this->expression), modelRead: true);
         // Every emitted string literal is JSON; its contents are not identifiers.
         $code = preg_replace('/"(?:[^"\\\\]|\\\\.)*"/s', '""', $body) ?? throw new LogicException('Cannot inspect generated query inputs.');
         $parameters = array_filter(['args', 'ctx'], static fn (string $name): bool => preg_match('/\b'.$name.'[.\[]/', $code) === 1);

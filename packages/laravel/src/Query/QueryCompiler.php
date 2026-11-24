@@ -125,7 +125,7 @@ final readonly class QueryCompiler
     {
         $conditions = [];
         if ($this->guards !== [] && ! $model->policyVisibility) {
-            throw new LogicException('Captured guards on public query paths cannot be maintained live. Bind a portable permission resource.');
+            throw new LogicException("{$model->name}: bind the model in permissions.resources to keep the captured guard live.");
         }
 
         if ($model->policyVisibility) {

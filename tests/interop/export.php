@@ -12,7 +12,6 @@ use Inertia\Inertia;
 use Inertia\Response;
 use Laravel\Surveyor\SurveyorServiceProvider;
 use PhpParser\ParserFactory;
-use ZeroForLaravel\Attributes\ZeroPublic;
 use ZeroForLaravel\Generation\ControllerQueryCompiler;
 use ZeroForLaravel\Generation\ControllerQueryGenerator;
 use ZeroForLaravel\Generation\EffectSchemaDriver;
@@ -38,7 +37,6 @@ use ZeroForLaravel\Tests\Fixtures\TaskReportTable;
 use ZeroForLaravel\Tests\OwnerTestCase as TestCase;
 use ZeroForLaravel\Zero;
 
-#[ZeroPublic]
 final class DatedInteropList extends TaskList
 {
     /** @return HasMany<Task, $this> */

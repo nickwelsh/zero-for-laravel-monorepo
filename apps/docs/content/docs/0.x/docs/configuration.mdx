@@ -184,12 +184,11 @@ kebab case: `ArchivedTasksTable` becomes `archived-tasks`. Duplicate names fail
 generation rather than choosing one definition. Definitions are inspected without
 invoking their application methods.
 
-Discovery selects replication metadata, not read permissions. Protected models
-require a `permissions.resources` binding and a policy. For intentionally public
-reads, add `#[ZeroForLaravel\Attributes\ZeroPublic]` directly to the model. This
-attribute is not inherited and cannot coexist with a permission binding. Column
-visibility and mutation authorization still apply. Use `zero:exposure` to inspect
-the resulting columns and permissions.
+Discovery selects replication metadata, not read permissions. By default, callers
+can read the rows selected by a declared query. Bind a model in `permissions.resources`
+to require policy coverage on every live read of it, including relationship reads.
+Column visibility and mutation authorization still apply. Use `zero:exposure` to
+inspect the resulting columns and policy requirements.
 
 ## Formbraid generation
 
@@ -252,8 +251,7 @@ Remove `models`, `tables`, and `public_models` from `config/zero.php`. Replace t
 previous `discovery` group with `'auto'`, or an explicit list of classes and globs.
 Add `HasZeroQueries` to each participating model, including relationship targets.
 Name table definitions after their intended descriptor, such as `TasksTable` for
-`tasks`. Add `#[ZeroPublic]` to each deliberately public model; a missing policy
-binding still does not grant public reads.
+`tasks`.
 
 Move `output`, `controller_output`, and `mutation_output` to `generation.output`,
 `generation.queries`, and `generation.mutations`. Replace the `schema_driver`

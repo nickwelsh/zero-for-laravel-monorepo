@@ -45,6 +45,27 @@ final class QueryExpression
         return is_string($this->value) ? $this->value : throw new LogicException('Expected a literal name or context field.');
     }
 
+    /** Walk a dotted include one relationship at a time when inspecting a scope outside a model read. */
+    public function firstRelationHop(): self
+    {
+        $path = $this->children[1]->stringValue();
+        if ($this->value !== 'with' || ! str_contains($path, '.')) {
+            return $this;
+        }
+
+        [$head, $tail] = explode('.', $path, 2);
+        $model = $this->queryModel();
+        $target = $model->registry->get($model->registry->relation($model, $head)['model']);
+        if (! $target->returnsRelation(explode('.', $tail, 2)[0])) {
+            return new self('method', 'with', [$this->children[0], ScopeCompiler::value($head)], $model, 'query', $this->singular);
+        }
+
+        $local = new self('local', 'zeroRelated', model: $target, type: 'query');
+        $body = new self('method', 'with', [$local, ScopeCompiler::value($tail), ...array_slice($this->children, 2)], $target, 'query');
+
+        return new self('method', 'with', [$this->children[0], ScopeCompiler::value($head), new self('callback', 'zeroRelated', [$body], type: 'callback')], $model, 'query', $this->singular);
+    }
+
     public function emit(bool $typescript): string
     {
         if ($this->kind === 'reference') {
