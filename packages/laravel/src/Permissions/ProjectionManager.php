@@ -169,10 +169,9 @@ final class ProjectionManager
             $this->function('zero_permissions_rules_changed', '', 'trigger', 'DECLARE changed permission_rules := COALESCE(NEW, OLD); BEGIN '.$changedBody.' RETURN NULL; END;');
             $db->unprepared('CREATE OR REPLACE TRIGGER zero_permissions_changed AFTER INSERT OR DELETE ON permission_rules FOR EACH ROW EXECUTE FUNCTION zero_permissions_rules_changed()');
             // Keep the model revision and its event, but do not hold a model-row lock during the caller's transaction.
-            $this->function('zero_permissions_rule_revision', '', 'trigger', 'PERFORM FROM permission_index_count FOR UPDATE; WITH changed AS (UPDATE permission_models SET revision = revision + 1 WHERE id = COALESCE(NEW.model, OLD.model) RETURNING id, revision) INSERT INTO permission_events (model, revision) SELECT id, revision FROM changed; RETURN NULL;');
+            $this->function('zero_permissions_rule_revision', '', 'trigger', 'WITH changed AS (UPDATE permission_models SET revision = revision + 1 WHERE id = COALESCE(NEW.model, OLD.model) RETURNING id, revision) INSERT INTO permission_events (model, revision) SELECT id, revision FROM changed; RETURN NULL;');
             $db->unprepared('DROP TRIGGER IF EXISTS zero_permissions_revision ON permission_rules; CREATE CONSTRAINT TRIGGER zero_permissions_revision AFTER INSERT OR DELETE ON permission_rules DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION zero_permissions_rule_revision()');
             $db->getPdo()->exec('DO $rebuild$ BEGIN '.$refresh.' PERFORM zero_permissions_index(); PERFORM zero_permissions_touch(); END $rebuild$');
-            PermissionIndexLimit::install($db);
             $db->table('permission_installation')->updateOrInsert(['id' => true], ['fingerprint' => $this->fingerprint()]);
         }, 3);
     }

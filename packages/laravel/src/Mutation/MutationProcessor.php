@@ -9,10 +9,8 @@ use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Database\QueryException;
 use Illuminate\Validation\ValidationException;
 use LogicException;
-use PDOException;
 use Throwable;
 use ZeroForLaravel\Metadata\ModelRegistry;
-use ZeroForLaravel\Permissions\PermissionIndexLimit;
 use ZeroForLaravel\ResolvedContext;
 use ZeroForLaravel\Support\Input;
 
@@ -129,13 +127,12 @@ final readonly class MutationProcessor
                 $failure = ['error' => 'app', 'message' => $error->getMessage(), 'details' => ['code' => $error->operationCode]];
             } catch (ModelNotFoundException) {
                 $failure = ['error' => 'app', 'message' => 'The record is unavailable.', 'details' => ['code' => 'not_found']];
-            } catch (PDOException $error) {
-                // Deferred triggers can fail at COMMIT, outside Laravel's query wrapper.
-                $failure = match (true) {
-                    $error->getCode() === PermissionIndexLimit::EXCEEDED_SQL_STATE => ['error' => 'app', 'message' => 'This change would exceed the permission index limit.', 'details' => ['code' => 'permission_index_full']],
-                    $error instanceof QueryException && str_starts_with((string) $error->getCode(), '23') => ['error' => 'app', 'message' => 'A database constraint rejected the mutation.', 'details' => ['code' => 'constraint']],
-                    default => throw $error,
-                };
+            } catch (QueryException $error) {
+                if (! str_starts_with((string) $error->getCode(), '23')) {
+                    throw $error;
+                }
+
+                $failure = ['error' => 'app', 'message' => 'A database constraint rejected the mutation.', 'details' => ['code' => 'constraint']];
             }
 
             // A failed application transaction is fully rolled back before its

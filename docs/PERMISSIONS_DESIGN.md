@@ -71,12 +71,8 @@ subjects; a monitored subject change still refreshes all models. Resource change
 refresh their resource facts, not the grant index. Neither global nor scoped
 grants expand per resource. Unchanged grants are not deleted and reinserted.
 
-`permissions.max_index_rows` defaults to 100,000 for the database, not per tenant.
-Statement triggers count inserted/deleted rows into a transaction-local delta.
-At commit, deferred triggers apply the net change to one counter, check its cap,
-and advance model revisions and record events. Transactions therefore coordinate
-at commit, not during domain expansion. Rebuild counts the repaired table and
-installs the configured maximum; lowering it below the repaired count fails.
+Rule changes advance model revisions and record events at commit. The library
+does not count or cap effective grants; applications own any grant quotas.
 
 Role inheritance is acyclic and limited to
 eight edges. All authority tables and source models must use one connection and

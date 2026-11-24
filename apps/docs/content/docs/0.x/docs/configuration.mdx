@@ -270,14 +270,8 @@ Publish `permissions-config` and `permissions-migrations`, migrate, configure
 `permissions:rebuild` on PostgreSQL before serving portable queries. Policies are
 resolved by Laravel, not a second configuration map.
 
-`permissions.max_index_rows` is the maximum committed row count of the entire
-`permission_index` table, across models and domains. Set `'max_index_rows' => 150_000`
-in `config/permissions.php` to raise the default of 100,000. Zero is valid.
-Refresh Laravel's config cache if used, then run `php artisan permissions:rebuild`.
-Only a successful rebuild changes the installed limit; rebuilding below the
-current effective grant count fails without replacing the previous installation.
-Exactly the limit is allowed. A transaction that would commit more grants rolls
-back, including its source writes, so handle the error at the outer transaction.
+The library does not limit the number of effective grants. If your application
+needs a quota, enforce it when granting access.
 
 `permissions.denied_status` defaults to 403; choose 404 for concealment. Policy
 responses can override it with `asNotFound()` or `asNotAuthorized()`.

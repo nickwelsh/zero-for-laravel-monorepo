@@ -17,7 +17,6 @@ use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Sleep;
 use LogicException;
-use PDOException;
 use PhpParser\ParserFactory;
 use RuntimeException;
 use stdClass;
@@ -307,23 +306,6 @@ test('alternate role paths survive removal without leaking across domains and re
     expect(PermissionList::query()->visibleTo($alice)->count())->toBe(0);
 });
 
-test('the configured index cap includes all domains and a failed grant rolls back', function (): void {
-    config(['permissions.max_index_rows' => 2]);
-    (new ProjectionManager)->rebuild();
-    PermissionUser::create(['id' => 42, 'department_id' => 'engineering']);
-    $grant = fn (int $id): bool => Casbin::addPolicy('user:42', 'list:'.$id, 'todo-list', 'view', 'any', 'allow');
-    expect($grant(1))->toBeTrue();
-    expect($grant(2))->toBeTrue();
-
-    $events = DB::table('permission_events')->count();
-    expect(fn (): bool => $grant(3))->toThrow(PDOException::class, 'exceeds 2 grants');
-    expect(DB::table('permission_rules')->count())->toBe(2);
-    expect(DB::table('permission_index')->count())->toBe(2);
-    expect(DB::table('permission_events')->count())->toBe($events);
-    Casbin::removePolicy('user:42', 'list:1', 'todo-list', 'view', 'any', 'allow');
-    expect($grant(3))->toBeTrue();
-});
-
 test('independent domains commit while a competing role edit waits for its own domain', function (): void {
     $alice = PermissionUser::create(['id' => 42, 'department_id' => 'engineering']);
     foreach ([7, 8] as $id) {
@@ -349,26 +331,6 @@ test('independent domains commit while a competing role edit waits for its own d
     expect(Casbin::removePolicy('role:reader', 'list:7', 'todo-list', 'view', 'any', 'allow'))->toBeTrue();
     config(['permissions.connection' => null]);
     expect(PermissionList::query()->visibleTo($alice)->pluck('id')->all())->toBe([8]);
-});
-
-test('two domains cannot commit competing grants into the last slot', function (): void {
-    config(['permissions.max_index_rows' => 1, 'database.connections.other' => DB::connection()->getConfig()]);
-    (new ProjectionManager)->rebuild();
-    PermissionUser::create(['id' => 42, 'department_id' => 'engineering']);
-    DB::connection('other')->statement("SET lock_timeout = '1s'");
-    $events = DB::table('permission_events')->count();
-    expect(fn () => DB::transaction(function (): void {
-        Casbin::addPolicy('user:42', 'list:7', 'todo-list', 'view', 'any', 'allow');
-        config(['permissions.connection' => 'other']);
-        try {
-            expect(Casbin::addPolicy('user:42', 'list:8', 'todo-list', 'view', 'any', 'allow'))->toBeTrue();
-        } finally {
-            config(['permissions.connection' => null]);
-        }
-    }))->toThrow(PDOException::class, 'exceeds 1 grants');
-    expect(DB::table('permission_rules')->pluck('v1')->all())->toBe(['list:8']);
-    expect(DB::table('permission_index')->pluck('v1')->all())->toBe(['list:8']);
-    expect(DB::table('permission_events')->count())->toBe($events + 1);
 });
 
 test('a policy admin falls back to normal grants when its live override is removed', function (): void {

@@ -6,8 +6,6 @@ use App\Models\User;
 return [
     'connection' => null,
     'denied_status' => 403,
-    // Database-wide effective grant count. Apply changes with permissions:rebuild.
-    'max_index_rows' => 100_000,
     // Native status checks never authorize business-table reads.
     'access' => [
         'max_bindings' => 32,
