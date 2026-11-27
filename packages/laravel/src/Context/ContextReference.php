@@ -5,12 +5,24 @@ declare(strict_types=1);
 namespace ZeroForLaravel\Context;
 
 use BackedEnum;
+use LogicException;
 use ZeroForLaravel\ResolvedContext;
 
 /** An application-owned enum case is a symbolic operand, never transport input. */
 final readonly class ContextReference
 {
     public function __construct(public string $field) {}
+
+    /** Ordinary Eloquent needs a scalar; Zero translates this read to a trusted context operand. */
+    public static function current(BackedEnum $field): string|int|float|bool|null
+    {
+        $definition = ContextDefinition::configured();
+        if (! $field instanceof ($definition->enum)) {
+            throw new LogicException('Expected a configured context field.');
+        }
+
+        return $definition->resolve(request())->get((string) $field->value);
+    }
 
     public static function normalize(mixed $value): mixed
     {

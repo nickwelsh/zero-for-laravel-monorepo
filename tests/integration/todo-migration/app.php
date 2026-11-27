@@ -18,6 +18,7 @@ use Symfony\Component\Console\Output\ConsoleOutput;
 use TodoMigration\TodoController;
 use ZeroForLaravel\Generation\ReactFrontendDriver;
 use ZeroForLaravel\Inertia\ZeroInertiaServiceProvider;
+use ZeroForLaravel\Mutation\MutationIdentitySchema;
 use ZeroForLaravel\Permissions\Casbin;
 use ZeroForLaravel\Permissions\PermissionSchema;
 use ZeroForLaravel\Permissions\PermissionServiceProvider;
@@ -67,9 +68,7 @@ class RejectReservedTitle
 
 $app = Application::configure(basePath: $root)
     ->withProviders([ZeroServiceProvider::class, PermissionServiceProvider::class, ZeroInertiaServiceProvider::class])
-    ->withMiddleware(function (Illuminate\Foundation\Configuration\Middleware $middleware): void {
-        $middleware->validateCsrfTokens(except: ['zero/query', 'zero/mutate']);
-    })->withExceptions()->create();
+    ->withMiddleware()->withExceptions()->create();
 $app->afterBootstrapping(LoadConfiguration::class, function ($app) use ($root, $database, $package): void {
     $app['config']->set('permissions', require $package.'/config/permissions.php');
     $app['config']->set('zero', require $package.'/config/zero.php');
@@ -82,6 +81,7 @@ $app->afterBootstrapping(LoadConfiguration::class, function ($app) use ($root, $
         'database.connections.pgsql.password' => getenv('PGPASSWORD'),
         'permissions.models.default' => $package.'/config/permissions/global-acl.conf',
         'permissions.resources' => [Todo::class => ['type' => 'todo']], 'permissions.subject.class' => OwnerUser::class,
+        'zero.inertia' => true,
         'zero.context' => ZeroContext::class, 'zero.context_resolver' => ContextResolver::class,
         'zero.middleware' => ['web', 'auth'], 'zero.api_key' => getenv('ZERO_API_KEY'),
         'zero.app_id' => getenv('ZERO_APP_ID'), 'zero.upstream_schema' => getenv('ZERO_APP_ID').'_0',
@@ -115,6 +115,7 @@ if (PHP_SAPI === 'cli') {
         $policy = ['user:alice', 'todo', $ability, 'any', 'allow'];
         exit(($operation === 'restore' ? Casbin::addPolicy(...$policy) : Casbin::removePolicy(...$policy)) ? 0 : 1);
     }
+    MutationIdentitySchema::create(DB::connection());
     PermissionSchema::create(DB::connection());
     Schema::create('todos', function (Blueprint $table): void {
         $table->uuid('id')->primary();

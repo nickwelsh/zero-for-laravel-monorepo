@@ -2,12 +2,12 @@
 
 Controller-first live queries and mutations for Rocicorp Zero **1.11.4**.
 
-Use **v0.13.0** with the matching npm packages. Generate and deploy PHP registrations
+Use **v0.15.0** with the matching npm packages. Generate and deploy PHP registrations
 and TypeScript contracts together. PHP 8.3+, Laravel 12/13, and PostgreSQL 15+ with logical replication are
 required targets. Automatic live page props require Inertia Laravel 3 and the
 optional JavaScript Inertia adapter.
 
-Controllers declare immutable `Model::zeroQuery()` live props and explicitly opt
+Controllers build `Model::zeroQuery()` live props with Eloquent methods and explicitly opt
 actions into `#[ZeroMutation]`. Ranger/Surveyor-backed generation emits coordinated
 PHP registrations, native ZQL/mutators, validation schemas, result codecs, and
 named controller modules. Laravel retains real binding, middleware, FormRequests, Gates, and Eloquent.
@@ -27,15 +27,21 @@ Use `zero.run(search(input))`, native `useQuery`, or `useData(search.live(input)
 Standalone reads validate and authorize their own FormRequest through the existing
 Zero endpoint; they do not inherit page middleware or route model binding.
 
-Zero does not generate global page types. Optionally register
-`ZeroForLaravel\WayfinderServiceProvider` with Wayfinder `dev-next` to specialize
-its own generated live props; run Zero generation before Wayfinder generation.
+Run `php artisan zero:setup` to opt into Inertia live props and Wayfinder `dev-next`
+page types. Laravel discovers the providers; `ZERO_INERTIA` and `ZERO_WAYFINDER`
+enable them independently. Run Zero generation before Wayfinder generation.
 
 ```sh
 php artisan vendor:publish --tag=zero-config
+php artisan migrate
 php artisan zero:generate --react
 php artisan zero:sync-publication --dry-run
 ```
+
+Migrations install the private binding between each mutation client group and its
+authenticated Zero identity. After upgrading, reset clients whose existing progress
+predates that binding so they reconnect with a new client group; the server refuses
+to guess ownership of legacy bookkeeping.
 
 Review and apply publication changes to the application's configured PostgreSQL
 database. Deploy generated PHP and TypeScript together; use `zero:generate --check`

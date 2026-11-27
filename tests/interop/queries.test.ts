@@ -4,6 +4,8 @@ import { runInNewContext } from 'node:vm';
 import { createBuilder, defineQueriesWithType, defineQueryWithType } from '@rocicorp/zero';
 import { asQueryInternals } from '@rocicorp/zero/bindings';
 import { z } from 'zod';
+import * as EffectSchema from 'effect/Schema';
+import * as EffectSchemaIssue from 'effect/SchemaIssue';
 import { transformSync } from 'esbuild';
 // Version-pinned compatibility oracle: 1.11 canonicalizes condition/relationship
 // order before returning an AST. PHP emits the equivalent unnormalized wire AST.
@@ -15,6 +17,7 @@ import {
 } from '../../node_modules/@rocicorp/zero/out/zero-protocol/src/ast.js';
 import { schema, definitions } from './generated';
 import { liveQuery, withQueryInputs } from '../../packages/client/src/live-query';
+import type { ReadSelection } from '../../packages/client/src/react/data';
 import { dated } from './controller-api/ZeroForLaravel/Tests/Fixtures/QueryController';
 import {
     search,
@@ -23,6 +26,93 @@ import {
     window as liveWindow,
     pages,
 } from './controller-api/ZeroForLaravel/Tests/Fixtures/Module/TaskQueries';
+
+function generatedModule(...args: string[]) {
+    const source = execFileSync('php', ['tests/interop/export.php', ...args], { encoding: 'utf8' });
+    const compiled = transformSync(source, { loader: 'ts', format: 'cjs', target: 'es2022' });
+    const modules: Record<string, unknown> = {
+        '@rocicorp/zero': { createBuilder, defineQueriesWithType, defineQueryWithType },
+        '@nickwelsh/zero-for-laravel': { liveQuery, withQueryInputs },
+        zod: { z },
+        'effect/Schema': EffectSchema,
+        'effect/SchemaIssue': EffectSchemaIssue,
+        './generated': { schema, definitions },
+    };
+    type Selection = Omit<ReadSelection, 'request'> & { request(): { args: unknown } };
+    type Bindings = Record<string, (args: unknown) => Selection>;
+    const module = { exports: { bindings: {} as Bindings, actions: {} as Bindings } };
+    runInNewContext(compiled.code, { require: (name: string) => modules[name], module });
+    return module.exports;
+}
+
+it.each(['zod', 'effect'])('%s pagination bindings use validated sizes, names and raw cursor fields', (driver) => {
+    const { actions } = generatedModule('pagination-module', driver);
+    const numbered = actions['PaginationInteropController@index.numbered']!;
+    const page = numbered({ input: { size: 7 } }).pagination!;
+    expect(page).toMatchObject({ mode: 'numbered', name: 'tasks', size: 7 });
+    expect(numbered({ input: {} }).pagination!.size).toBe(2);
+    expect(() => numbered({ input: { size: 8 } })).toThrow();
+    expect(() => page.range({ __page: 4 })).toThrow();
+    const ctx = { user_id: 'alice' };
+    const request = page.request(page.range({ __page: 3 }).wire) as ReturnType<typeof liveWindow>;
+    expect(asQueryInternals(request.query.fn({ args: request.args, ctx })).ast.limit).toBe(22);
+
+    const scroll = actions['PaginationInteropController@index.scroll']!({ input: { size: 7 } }).pagination!;
+    expect(scroll).toMatchObject({ mode: 'scroll', name: 'feed', size: 7 });
+    expect(scroll.range({ __page: 2, __window: 22 })).toMatchObject({ start: 7, end: 21 });
+
+    const cursor = actions['PaginationInteropController@index.cursor']!({ input: {} });
+    expect(cursor.pagination).toMatchObject({ mode: 'cursor', name: 'after', size: 2 });
+    const row = cursor.cursor!({ title: 'same', id: 'b', ignored: 1 });
+    expect(row).toEqual({ title: 'same', id: 'b' });
+    const previous = cursor.pagination!.request({ __cursor: row, __reverse: true }) as ReturnType<typeof pages>;
+    const ast = asQueryInternals(previous.query.fn({ args: previous.args, ctx })).ast;
+    expect(ast).toMatchObject({
+        orderBy: [
+            ['title', 'asc'],
+            ['id', 'desc'],
+        ],
+        start: { row, exclusive: true },
+        limit: 3,
+    });
+});
+
+it('matches direct PHP for conditional predicates, date membership, and constrained relation OR groups', () => {
+    const zql = createBuilder(schema);
+    const predicates: { typescript: string; cases: { args: { flag?: boolean }; ast: AST }[] }[] = JSON.parse(
+        execFileSync('php', ['tests/interop/export.php', 'predicates'], { encoding: 'utf8' }),
+    );
+    for (const definition of predicates) {
+        const run = runInNewContext(`(${definition.typescript})`, { zql }) as (input: {
+            args: { flag?: boolean };
+            ctx: { user_id: string };
+        }) => typeof zql.tasks;
+        for (const { args, ast } of definition.cases) {
+            expect(asQueryInternals(run({ args, ctx: { user_id: 'alice' } })).ast).toEqual(normalizeAST(ast));
+        }
+    }
+});
+
+it('uses PHP wire dates for scalar and list constraints on a declared table relation', () => {
+    const { typescript, ast }: { typescript: string; ast: AST } = JSON.parse(
+        execFileSync('php', ['tests/interop/export.php', 'table-relation-dates'], { encoding: 'utf8' }),
+    );
+    const zql = createBuilder(schema);
+    const native = asQueryInternals(runInNewContext(typescript, { zql }) as typeof zql.tasks).ast;
+    expect(native).toEqual(normalizeAST(ast));
+    expect(native.where).toMatchObject({
+        conditions: expect.arrayContaining([
+            expect.objectContaining({
+                left: { type: 'column', name: 'completed_at' },
+                right: { type: 'literal', value: 1767225600123 },
+            }),
+            expect.objectContaining({
+                left: { type: 'column', name: 'created_at' },
+                right: { type: 'literal', value: [1767225600000, 1767312000000] },
+            }),
+        ]),
+    });
+});
 
 it('executes standalone query exports with native ZQL, decoded selections and pagination', () => {
     const base = createBuilder(schema).tasks.where('deleted_at', 'IS', null);
@@ -55,6 +145,9 @@ it('executes standalone query exports with native ZQL, decoded selections and pa
     const page = pages.live({}).page(cursor).request() as ReturnType<typeof pages>;
     expect(asQueryInternals(page.query.fn({ args: page.args, ctx })).ast).toEqual(
         asQueryInternals(base.orderBy('title', 'desc').orderBy('id', 'asc').limit(3).start(cursor)).ast,
+    );
+    expect(asQueryInternals(page.query.fn({ args: { __cursor: cursor, __reverse: true }, ctx })).ast).toEqual(
+        asQueryInternals(base.orderBy('title', 'asc').orderBy('id', 'desc').limit(3).start(cursor)).ast,
     );
     expect(detail.live({ id: 'a' }).decode({ id: 'a', title: 'Detail' })).toEqual({ id: 'a', title: 'Detail' });
 });
@@ -109,13 +202,12 @@ it('executes both generated controller definitions with empty, zero-string, and 
     const expected = tasks
         .where('title', 'NOT IN', ['0', 'hidden'])
         .where((eb) => eb.not(eb.exists('comments', (q) => q.where('body', 'secret'))))
-        .whereExists('list', (q) => q.where('id', 'list-a'), { scalar: true })
-        .whereExists('comments', (q) => q, { flip: false })
+        .whereExists('list', (q) => q.where('id', 'list-a'))
+        .whereExists('comments')
         .related('comments', (q) => q.where('body', '!=', '0').orderBy('id', 'desc').limit(2))
         .related('list')
         .orderBy('title', 'desc')
-        .orderBy('id', 'asc')
-        .start({ title: '0', id: 'task-a' }, { inclusive: false });
+        .orderBy('id', 'asc');
     const related = runInNewContext(`(${generated.relationships.typescript})`, { zql }) as (input: {
         args: { title: string };
         ctx: { user_id: string };
@@ -124,30 +216,14 @@ it('executes both generated controller definitions with empty, zero-string, and 
     expect(native.ast).toEqual(asQueryInternals(expected).ast);
     expect(native.ast).toEqual(normalizeAST(generated.relationships.ast));
     expect(native.format).toEqual(generated.relationships.format);
-    const window = runInNewContext(`(${generated.window.typescript})`, { zql }) as (input: {
-        args: { __window?: number };
-        ctx: { user_id: string };
-    }) => typeof zql.tasks;
-    expect(asQueryInternals(window({ args: {}, ctx: generated.context })).ast).toEqual(
+    const exported = generatedModule('controller-module');
+    const window = exported.bindings[generated.window.name]!({}).request() as ReturnType<typeof liveWindow>;
+    expect(asQueryInternals(window.query.fn({ args: window.args, ctx: generated.context })).ast).toEqual(
         normalizeAST(generated.window.ast),
     );
-    expect(asQueryInternals(window({ args: { __window: 5 }, ctx: generated.context })).ast).toEqual(
+    expect(asQueryInternals(window.query.fn({ args: { __page: 2, __window: 5 }, ctx: generated.context })).ast).toEqual(
         asQueryInternals(tasks.orderBy('title', 'desc').orderBy('id', 'asc').limit(5)).ast,
     );
-    const source = execFileSync('php', ['tests/interop/export.php', 'controller-module'], { encoding: 'utf8' });
-    const compiled = transformSync(source, { loader: 'ts', format: 'cjs', target: 'es2022' });
-    const modules: Record<string, unknown> = {
-        '@rocicorp/zero': { createBuilder, defineQueriesWithType, defineQueryWithType },
-        '@nickwelsh/zero-for-laravel': { liveQuery, withQueryInputs },
-        zod: { z },
-        './generated': { schema, definitions },
-    };
-    const exported: {
-        bindings: Record<string, (args: unknown) => { request(): { args: unknown }; decode(raw: unknown): unknown }>;
-    } = { bindings: {} };
-    const module = { exports: exported };
-    runInNewContext(compiled.code, { require: (name: string) => modules[name], module });
-    Object.assign(exported, module.exports);
     const binding = exported.bindings[generated.name]!;
     expect(() => binding({ title: '0', user_id: 'other' })).toThrow();
     const selected = binding({ title: '0' });
@@ -230,21 +306,16 @@ it('matches independently cloned PHP declarations to the pinned native construct
         unbounded: q,
         zeroLimit: q.limit(0),
         one: q.where('id', 'task-a').one(),
-        cursor: q
-            .orderBy('title', 'desc')
-            .orderBy('id', 'asc')
-            .start({ title: '0', id: 'task-a' }, { inclusive: true })
-            .limit(7),
-        exclusive: q.orderBy('id', 'asc').start({ id: 'task-a' }),
+        cursor: q.orderBy('title', 'desc').orderBy('id', 'asc').start({ title: '0', id: 'task-a' }).limit(7),
         relationships: q
             .related('comments', (child) =>
                 child.where('body', 'NOT ILIKE', '%private%').orderBy('id', 'desc').limit(3),
             )
             .related('list'),
         junction: q.related('tags', (child) => child.where('name', 'IN', ['0', 'work'])),
-        exists: q.whereExists('comments', (child) => child.where('body', 'NOT LIKE', 'secret%'), { flip: false }),
-        scalar: q.whereExists('list', (child) => child.where('id', 'list-a'), { scalar: true }),
-        junctionExists: q.whereExists('tags', (child) => child.where('name', 'work'), { flip: true }),
+        exists: q.whereExists('comments', (child) => child.where('body', 'NOT LIKE', 'secret%')),
+        scalar: q.whereExists('list', (child) => child.where('id', 'list-a')),
+        junctionExists: q.whereExists('tags', (child) => child.where('name', 'work')),
         negation: q
             .where('done', '!=', false)
             .where((eb) => eb.not(eb.exists('comments', (child) => child.where('body', 'hidden')))),

@@ -27,7 +27,7 @@ final class ExposureCommand extends Command
             foreach ($registry->all() as $model) {
                 $this->info($model->name.' → '.$model->table);
                 $this->line('  Published: '.implode(', ', array_keys($model->columns)));
-                $this->line('  Visibility: '.($model->policyVisibility ? 'Laravel policy via visibleTo / captured Gate' : 'explicitly public'));
+                $this->line('  Visibility: '.($model->policyVisibility ? 'Laravel policy via visibleTo / captured Gate' : 'defined by the query; no model-wide policy required'));
                 $this->line('  Global Zero scopes: '.implode(', ', array_keys(ScopeRegistry::globals($model))));
                 $this->line('  Creation defaults: '.json_encode($model->toArray()['creationDefaults'], JSON_THROW_ON_ERROR));
                 $this->line('  Relationships: '.implode(', ', array_keys($model->relations)));

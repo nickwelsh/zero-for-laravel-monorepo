@@ -5,14 +5,19 @@ import { dashboard } from '@/wayfinder/routes';
 import type { TodoListRow } from '@/zero/generated';
 
 export default function ShowList({ list }: { list: Data<TodoListRow | undefined> }) {
-    return list.render({
-        onIdle: () => null,
-        onLoading: () => <output>Loading list…</output>,
-        onRefreshing: (row) => <ListDetails list={row} />,
-        onFailure: () => <p role="alert">This list is unavailable.</p>,
-        onStale: () => <output>Checking access…</output>,
-        onSuccess: (row) => <ListDetails list={row} />,
-    });
+    switch (list.status) {
+        case 'loading':
+            return <output>Loading list…</output>;
+        case 'failure':
+            return <p role="alert">This list is unavailable.</p>;
+        case 'stale':
+            return <output>Checking access…</output>;
+        case 'refreshing':
+        case 'success':
+            return <ListDetails list={list.data} />;
+        default:
+            return null;
+    }
 }
 
 function ListDetails({ list }: { list: TodoListRow | undefined }) {

@@ -2,8 +2,8 @@
 
 declare(strict_types=1);
 
-use App\Enums\ZeroContext;
-use App\Zero\ResolveZeroContext;
+use ZeroForLaravel\Context\ResolveZeroContext;
+use ZeroForLaravel\Context\ZeroContext;
 use ZeroForLaravel\Generation\AutoDetectFrontendDriver;
 use ZeroForLaravel\Generation\Mutations\ZodMutationSchemaDriver;
 
@@ -25,8 +25,9 @@ return [
     | Use ** in file paths to include nested directories; [] selects none.
     |
     | Discovery tells Zero which database tables to copy, not who may read them.
-    | Private models need a policy and a permissions.resources binding.
-    | Add #[ZeroPublic] only for rows that every user may read.
+    | By default, declared queries determine which rows their callers can read.
+    | Bind a model in permissions.resources to require policy coverage on every
+    | live query path that reads it, including through relationships.
     |
     */
 
@@ -48,7 +49,7 @@ return [
     */
 
     'generation' => [
-        'output' => resource_path('js/zero/generated.ts'),
+        'output' => resource_path('js/zero/generated/index.ts'),
         'queries' => base_path('bootstrap/zero-queries.php'),
         'mutations' => base_path('bootstrap/zero-mutations.php'),
         'schema' => ZodMutationSchemaDriver::class,
@@ -63,7 +64,7 @@ return [
     | React is currently supported. For another integration, supply a
     | FrontendDriver class; Laravel resolves its dependencies.
     |
-    | The React driver creates an editable zero.config.ts beside the schema.
+    | The React driver creates an editable zero.config.ts outside generated/.
     | Set the public cache URL there. Generation preserves your changes.
     | Private credentials such as the API key must never go in it.
     |
@@ -73,6 +74,8 @@ return [
         'driver' => AutoDetectFrontendDriver::class,
     ],
 
+    'inertia' => env('ZERO_INERTIA', false),
+
     /*
     |--------------------------------------------------------------------------
     | Wayfinder Imports
@@ -80,11 +83,12 @@ return [
     |
     | Zero's WayfinderServiceProvider uses this TypeScript import root when it
     | generates Inertia page types that refer to Zero's controller modules.
-    | Use an alias such as @/zero, not a directory on the server.
+    | Use a module alias, not a directory on the server.
     |
     */
 
     'wayfinder' => [
+        'enabled' => env('ZERO_WAYFINDER', false),
         'module' => '@/zero',
     ],
 
@@ -97,9 +101,9 @@ return [
     | zero:dev startup. The --check option checks forms without writing them.
     | The zero:formbraid command also works when this setting is disabled.
     |
-    | Output is relative to your project. Configure Formbraid's field components
-    | and metadata in config/formbraid.php, then let its Vite plugin produce
-    | the component metadata before running either generation command.
+    | Output defaults to formbraid under the Zero root. Overrides are project-relative.
+    | Configure field components in config/formbraid.php, then let Formbraid's
+    | Vite plugin produce the metadata before running either generation command.
     |
     | Forms import controllerRuntime to submit through your Zero client. Leave
     | runtime null to use the generated React module. With custom optimistic
@@ -111,7 +115,7 @@ return [
 
     'formbraid' => [
         'enabled' => false,
-        'output' => 'resources/js/formbraid/zero',
+        'output' => null,
         'runtime' => null,
     ],
 
@@ -156,7 +160,24 @@ return [
     */
 
     'route_prefix' => 'zero',
-    'middleware' => ['api', 'auth'],
+    'middleware' => [env('ZERO_SESSION_AUTH', false) ? 'web' : 'api', 'auth'],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Query Resource Limits
+    |--------------------------------------------------------------------------
+    |
+    | Bound retained-query work for each callback and authenticated identity.
+    | The live window limit is emitted into generated client contracts and must
+    | match every application instance serving the paired PHP registrations.
+    |
+    */
+
+    'limits' => [
+        'max_transform_queries' => (int) env('ZERO_MAX_TRANSFORM_QUERIES', 256),
+        'max_transform_queries_per_minute' => (int) env('ZERO_MAX_TRANSFORM_QUERIES_PER_MINUTE', 4096),
+        'max_live_window' => (int) env('ZERO_MAX_LIVE_WINDOW', 10000),
+    ],
 
     /*
     |--------------------------------------------------------------------------
@@ -165,6 +186,8 @@ return [
     |
     | The context enum declares values available to Zero queries and mutations.
     | The resolver supplies one attributed method per case using the request.
+    | To customize them, vendor:publish --tag=zero-context and point both
+    | settings below to the published application classes.
     | Generation reads their types without running the resolver methods.
     |
     */

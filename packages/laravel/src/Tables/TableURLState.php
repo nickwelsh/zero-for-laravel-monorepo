@@ -12,6 +12,18 @@ use ZeroForLaravel\Support\Input;
 /** Versioned URL inputs only; authorization and mandatory scopes remain on Table. */
 final class TableURLState
 {
+    /** Bind saved aliases to their model fields and join paths, independently of labels or the current actor. */
+    public static function contract(Table $table): string
+    {
+        $model = $table->base->model;
+        $relations = [];
+        foreach ($table->relations as $name => $relation) {
+            $relations[$name] = [$model->relations[$name], $model->relationConstraints[$name] ?? null, self::contract($relation['target'])];
+        }
+
+        return hash('sha256', serialize([$model->table, $table->filters, $table->sorts, $table->groups, $relations]));
+    }
+
     /** Read the raw query string: PHP's query parser changes dots in parameter names.
      * @param  array<string, mixed>  $defaults  Table then saved-view defaults, shallow merged by the caller.
      * @return array<string, mixed>
@@ -43,8 +55,12 @@ final class TableURLState
             }
 
             $envelope = Input::object($envelope, 'url');
-            Input::keys($envelope, ['version', 'state'], 'url');
-            if (! in_array($envelope['version'] ?? null, [2, 2.0], true)) {
+            Input::keys($envelope, $table->version() === 3 ? ['version', 'contract', 'state'] : ['version', 'state'], 'url');
+            if (! in_array($envelope['version'] ?? null, [$table->version(), (float) $table->version()], true)) {
+                return $fallback;
+            }
+
+            if ($table->version() === 3 && ($envelope['contract'] ?? null) !== self::contract($table)) {
                 return $fallback;
             }
 
@@ -61,7 +77,7 @@ final class TableURLState
     {
         Input::keys($overrides, ['filter', 'sort', 'groupBy', 'expanded'], 'state');
         $state = [...['filter' => null, 'sort' => $table->defaultOrdering, 'groupBy' => $table->defaultGrouping, 'expanded' => []], ...$overrides];
-        (new Predicate($table->base, $table->filters))->parse($state['filter']);
+        (new Predicate($table->base, $table->filters, $table->relations))->check($state['filter']);
         $state['sort'] = $table->ordering($state['sort']);
         $state['groupBy'] = $table->grouping($state['groupBy']);
         $expanded = $state['expanded'];
@@ -81,7 +97,7 @@ final class TableURLState
     /** @param array<string, mixed> $state */
     public static function encode(Table $table, array $state): string
     {
-        $encoded = json_encode(['version' => 2, 'state' => self::normalize($table, $state)], JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_LINE_TERMINATORS);
+        $encoded = json_encode(['version' => $table->version(), ...($table->version() === 3 ? ['contract' => self::contract($table)] : []), 'state' => self::normalize($table, $state)], JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_LINE_TERMINATORS);
         if (strlen($encoded) > 16384) {
             Input::fail('state', 'URL state exceeds 16384 bytes.');
         }

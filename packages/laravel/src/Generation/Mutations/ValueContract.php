@@ -217,6 +217,10 @@ final readonly class ValueContract
             return null;
         }
 
+        if ($this->kind === 'int' && is_string($value) && ($integer = filter_var($value, FILTER_VALIDATE_INT)) !== false) {
+            return $integer;
+        }
+
         if (in_array($this->kind, ['date', 'dateOnly'], true)) {
             if (! is_string($value) && ! $value instanceof DateTimeInterface) {
                 throw new LogicException('Expected a validated date value.');

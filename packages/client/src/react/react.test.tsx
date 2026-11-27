@@ -53,16 +53,6 @@ it('distinguishes incomplete empty, partial, complete, failed, stale, and disabl
     native.details = { type: 'complete' };
     rerender({ enabled: true });
     expect(result.current.status).toBe('success');
-    expect(
-        result.current.render({
-            onIdle: () => 'idle',
-            onLoading: () => 'loading',
-            onRefreshing: () => 'refreshing',
-            onFailure: () => 'failure',
-            onStale: () => 'stale',
-            onSuccess: () => 'success',
-        }),
-    ).toBe('success');
     rerender({ enabled: false });
     expect(result.current.status).toBe('idle');
 });

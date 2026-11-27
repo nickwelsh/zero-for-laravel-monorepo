@@ -316,10 +316,14 @@ export const definitions = {
             "done",
             "completed_at"
         ],
-        "scopeFingerprint": "fae932e1cd8b0385d7e7593e3e09afcba51d8494c277942e13f57de06da3d7fb",
+        "scopeFingerprint": "fd5c8e679c5107799431f8fe29305aecc10ea322311e406ddcd436a50cd72921",
         "creationDefaults": {
             "op": "merge",
             "values": [
+                {
+                    "op": "merge",
+                    "values": []
+                },
                 {
                     "op": "merge",
                     "values": [
@@ -336,10 +340,6 @@ export const definitions = {
                             ]
                         }
                     ]
-                },
-                {
-                    "op": "merge",
-                    "values": []
                 }
             ]
         },
@@ -410,7 +410,7 @@ import type {Schema} from '@rocicorp/zero';
 import {createControllerMutations, type ClientContext, type ModelContract} from '@nickwelsh/zero-for-laravel';
 import {z} from 'zod';
 export const controllerMutationContracts = {
-    "m_c128d377a8a04e5741182b75c1da35e0": {
+    "m_d3b9b2b871dbb14ad3a6fedd96fd0a6b": {
         "action": "ZeroForLaravel\\Tests\\Fixtures\\PreferenceMutationController@assign",
         "optimism": "generated",
         "conceal": false,
@@ -931,7 +931,7 @@ export const controllerMutationContracts = {
             "key:subscribe": "uuid",
             "key:unsubscribe": "uuid"
         },
-        "version": "c128d377a8a04e5741182b75c1da35e0edd551e70f0faf9076354c4a9790373f",
+        "version": "d3b9b2b871dbb14ad3a6fedd96fd0a6b8e2d65834080aeef7d0feb272c04fe7f",
         "returnType": "array"
     }
 } as const;
@@ -944,10 +944,10 @@ export const clientResultSchema0 = z.union([z.strictObject({"id": z.string()}), 
 const codec0 = {input: inputSchema0, encode: (input: Input0) => ({...(input["list_id"] === undefined ? {} : {"list_id": (input["list_id"] === null ? null : input["list_id"])})}), serverResult: serverResultSchema0, clientResult: clientResultSchema0};
 export function createControllerMutationBindings<S extends Schema, C extends ClientContext = ClientContext>(schema: S, models: Readonly<Record<string, ModelContract>>) {
   const codecs = {
-    "m_c128d377a8a04e5741182b75c1da35e0": {...codec0},
+    "m_d3b9b2b871dbb14ad3a6fedd96fd0a6b": {...codec0},
   };
   const runtime = createControllerMutations<S, C>(schema, models, controllerMutationContracts, codecs);
   return {...runtime, actions: {
-    "ZeroForLaravel\\Tests\\Fixtures\\PreferenceMutationController@assign": runtime.bind("m_c128d377a8a04e5741182b75c1da35e0", codecs["m_c128d377a8a04e5741182b75c1da35e0"]),
+    "ZeroForLaravel\\Tests\\Fixtures\\PreferenceMutationController@assign": runtime.bind("m_d3b9b2b871dbb14ad3a6fedd96fd0a6b", codecs["m_d3b9b2b871dbb14ad3a6fedd96fd0a6b"]),
   }};
 }

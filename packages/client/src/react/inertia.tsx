@@ -1,6 +1,16 @@
 import { router } from '@inertiajs/react';
 import { inertiaURLAdapter, inertiaURLVisit } from './inertia-url';
+import { paginatedArgs, writePagination } from './pagination-url';
+import { NamedScroll, ScrollWindow, type ScrollHistory } from './scroll-context';
+import { withoutPosition, type PagePosition } from '../pagination';
 export { inertiaURLAdapter } from './inertia-url';
+export { InfiniteScroll } from './infinite-scroll';
+export type {
+    InfiniteScrollProps,
+    InfiniteScrollRef,
+    InfiniteScrollSlotProps,
+    InfiniteScrollActionSlotProps,
+} from './infinite-scroll';
 import {
     createContext,
     createElement,
@@ -29,6 +39,7 @@ interface Metadata {
 interface TransportPage {
     component: string;
     props: Record<string, unknown>;
+    url?: string;
 }
 type BindingFactories = Record<string, (args: never) => ReadSelection>;
 export interface InertiaInputOptions {
@@ -48,6 +59,25 @@ export function useLiveProps<P extends object>(): P {
     const props = useContext(EffectiveProps);
     if (!props) throw new Error('useLiveProps requires a Zero-wrapped Inertia page.');
     return props as P;
+}
+
+function ordinal(value: unknown, min: number) {
+    if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < min)
+        throw new Error('Invalid scroll history.');
+    return value;
+}
+
+function scrollHistory(value: unknown): ScrollHistory {
+    const raw = object(value, 'scroll history');
+    const state = { viewed: ordinal(raw.viewed, 1), urlPage: ordinal(raw.urlPage, 1), count: ordinal(raw.count, 0) };
+    if (raw.anchor === undefined) return state;
+    const anchor = object(raw.anchor, 'scroll anchor');
+    if (typeof anchor.offset !== 'number' || !Number.isFinite(anchor.offset) || typeof anchor.reverse !== 'boolean')
+        throw new Error('Invalid scroll anchor.');
+    return {
+        ...state,
+        anchor: { ordinal: ordinal(anchor.ordinal, 0), offset: anchor.offset, reverse: anchor.reverse },
+    };
 }
 
 function metadata(input: unknown): Metadata {
@@ -87,6 +117,7 @@ function metadata(input: unknown): Metadata {
             bindings[prop] = {
                 query: binding.query,
                 args: object(binding.args, 'args'),
+                ...(binding.scroll === undefined ? {} : { scroll: scrollHistory(binding.scroll) }),
                 ...(access
                     ? {
                           access: {
@@ -171,6 +202,7 @@ function Subscription({
     pageGuard,
     replica,
     inserted,
+    onPosition,
     children,
 }: {
     selection: ReadSelection;
@@ -178,9 +210,10 @@ function Subscription({
     pageGuard: boolean;
     replica: boolean;
     inserted: string | undefined;
+    onPosition: (position: PagePosition, history: 'push' | 'replace') => void;
     children: (data: Data<unknown>) => ReactNode;
 }) {
-    const data = useSelectionData(selection, {}, inserted !== undefined);
+    const data = useSelectionData(selection, {}, inserted !== undefined, onPosition);
     // Preserve the mounted editor during the transition to the normal wire
     // query. Only this selection's own locally inserted primary key qualifies.
     const [created, setCreated] = useState<{ selection: string; id: string }>();
@@ -231,7 +264,13 @@ function InputSubscription({
     binding: Binding;
     factory: (args: unknown) => ReadSelection;
     starting: boolean;
-    synchronize: (args: Record<string, unknown>, values: object) => boolean;
+    synchronize: (
+        args: Record<string, unknown>,
+        next: ReadSelection,
+        history?: 'push' | 'replace',
+        scroll?: ScrollHistory,
+        writePage?: number,
+    ) => boolean;
     prop: string;
     access: AccessOptions;
     replica: boolean;
@@ -241,15 +280,24 @@ function InputSubscription({
     const [stored, setStored] = useState(() => ({
         source,
         args: binding.args,
+        scroll: binding.scroll,
+        revision: 0,
         initial: binding.args,
         pending: [] as string[],
     }));
     let state = stored;
     if (stored.source !== source) {
-        const acknowledgement = stored.pending.indexOf(selectionKey(binding.args));
+        const acknowledgement = stored.pending.indexOf(selectionKey([binding.args, binding.scroll]));
         state =
             acknowledgement === -1
-                ? { source, args: binding.args, initial: binding.args, pending: [] }
+                ? {
+                      source,
+                      args: binding.args,
+                      scroll: binding.scroll,
+                      revision: stored.revision + 1,
+                      initial: binding.args,
+                      pending: [],
+                  }
                 : { ...stored, source, pending: stored.pending.slice(acknowledgement + 1) };
         setStored(state);
     }
@@ -267,6 +315,20 @@ function InputSubscription({
         replica && binding.access && binding.access.scope !== 'page' && selection.one && routeIds.length === 1
             ? inserts.find((row) => row.table === selection.entity?.table && row.id === routeIds[0])?.id
             : undefined;
+    function commit(
+        before: typeof state,
+        args: Record<string, unknown>,
+        history?: 'push' | 'replace',
+        scroll?: ScrollHistory,
+        writePage?: number,
+    ) {
+        const key = selectionKey([args, scroll]);
+        if (key === selectionKey([before.args, before.scroll])) return false;
+        const synchronized = synchronize(args, factory(args), history, scroll, writePage);
+        latest.current = { ...before, args, scroll, pending: synchronized ? [...before.pending, key] : [] };
+        setStored(latest.current);
+        return true;
+    }
     function update(patch: object | ((values: Readonly<Record<string, unknown>>) => object), reset = false) {
         const before = latest.current;
         if (!before || before.source !== source) return;
@@ -276,16 +338,9 @@ function InputSubscription({
         const changes = object(typeof patch === 'function' ? patch(values) : patch, 'inputs');
         const merged = reset ? (factory(before.initial).input?.values ?? {}) : { ...values, ...changes };
         const nextValues = Object.fromEntries(Object.entries(merged).filter(([, value]) => value !== undefined));
+        if (!reset && selectionKey(nextValues) === selectionKey(values)) return;
         const args = object(current.input.apply(nextValues), 'args');
-        const next = factory(args);
-        if (selectionKey(args) === selectionKey(before.args)) return;
-        const synchronized = synchronize(args, next.input?.values ?? {});
-        latest.current = {
-            ...before,
-            args,
-            pending: synchronized ? [...before.pending, selectionKey(args)] : [],
-        };
-        setStored(latest.current);
+        commit(before, args);
     }
     const inputs: QueryInputs<Record<string, unknown>, object> = {
         values: object(selection.input?.values ?? {}, 'inputs'),
@@ -293,8 +348,17 @@ function InputSubscription({
         set: (patch) => update(patch),
         reset: () => update({}, true),
     };
-    // oxlint-disable-next-line react/refs -- Only input event handlers access the ref; rendering reads immutable values.
-    if (starting) return children({ ...loading(selection), inputs });
+    if (starting) {
+        // oxlint-disable-next-line react/refs -- Only input event handlers access the ref; rendering reads immutable values.
+        const body = children({ ...loading(selection), inputs });
+        return selection.pagination?.mode === 'scroll' ? (
+            <NamedScroll name={prop} handle={null}>
+                {body}
+            </NamedScroll>
+        ) : (
+            body
+        );
+    }
     const subscription = (
         <Subscription
             selection={selection}
@@ -302,13 +366,43 @@ function InputSubscription({
             pageGuard={binding.access?.scope === 'page'}
             replica={replica}
             inserted={inserted}
+            onPosition={(position, history) => {
+                if (latest.current !== state) return;
+                commit(state, { ...withoutPosition(state.args), ...position }, history);
+            }}
         >
-            {(data) => children({ ...data, inputs })}
+            {(data) => {
+                const body = children({ ...data, inputs });
+                if (selection.pagination?.mode !== 'scroll') return body;
+                return (
+                    <ScrollWindow
+                        name={prop}
+                        identity={selectionKey([binding.query, withoutPosition(state.args), state.revision])}
+                        pagination={selection.pagination}
+                        data={data}
+                        history={state.scroll}
+                        save={(position, scroll, writePage) => {
+                            return (
+                                latest.current === state &&
+                                commit(
+                                    state,
+                                    { ...withoutPosition(state.args), ...position },
+                                    'replace',
+                                    scroll,
+                                    writePage,
+                                )
+                            );
+                        }}
+                    >
+                        {body}
+                    </ScrollWindow>
+                );
+            }}
         </Subscription>
     );
     return binding.access && binding.access.scope !== 'page' ? (
         <AccessBoundary
-            binding={{ ...binding, args: state.args }}
+            binding={{ query: binding.query, access: binding.access, args: state.args }}
             prop={prop}
             options={access}
             replica={replica}
@@ -345,7 +439,6 @@ function loading(selection: Pick<ReadSelection, 'one'>): Data<unknown> {
         nextPage: noop,
         previousPage: noop,
         retry: noop,
-        render: (handlers) => handlers.onLoading(),
     };
 }
 
@@ -425,6 +518,9 @@ export function createInertiaAdapter(factories: BindingFactories, options: Inert
                 const contract = metadata(ordinary['__zero']);
                 const snapshot = object(ordinary['__zero'] ?? {}, '__zero');
                 const [mount] = useState(() => ({}));
+                const href =
+                    pages.get(snapshot)?.url ?? (typeof window !== 'undefined' ? window.location.href : undefined);
+                const pageURL = href === undefined ? undefined : new URL(href, 'https://zero.invalid');
                 // Resolving a lazy component is speculative: Inertia can discard
                 // it. Claim ownership only once React commits the page, before
                 // a nested boundary's passive revocation effect can run.
@@ -459,6 +555,35 @@ export function createInertiaAdapter(factories: BindingFactories, options: Inert
                 ) {
                     if (replica && starting) return options.access?.onPending?.() ?? null; // IndexedDB is opening.
                     return <output data-zero-access="unknown">Checking access…</output>;
+                }
+                const urlFields = options.url?.[(pages.get(snapshot) ?? current ?? page)?.component ?? ''];
+                const claimed = new Set(Object.values(urlFields ?? {}).flatMap((fields) => Object.values(fields)));
+                for (const [, binding] of entries) {
+                    if (binding.pending || !Object.hasOwn(factories, binding.query)) continue;
+                    const factory = factories[binding.query] as (args: unknown) => ReadSelection;
+                    const pagination = factory(binding.args).pagination;
+                    if (!pagination) continue;
+                    if (claimed.has(pagination.name))
+                        throw new Error(`Pagination URL parameter ${pagination.name} is already in use.`);
+                    claimed.add(pagination.name);
+                    if (pageURL) {
+                        const args = paginatedArgs(binding.args, pagination, pageURL, binding.scroll?.urlPage);
+                        if (args !== binding.args) delete binding.scroll;
+                        binding.args = args;
+                    }
+                    if (binding.scroll) {
+                        const first = pagination.initial.wire['__page'] ?? 1;
+                        const last = pagination.initial.page;
+                        if (
+                            pagination.mode !== 'scroll' ||
+                            binding.scroll.viewed < first ||
+                            binding.scroll.viewed > last ||
+                            binding.scroll.urlPage < first ||
+                            binding.scroll.urlPage > last ||
+                            binding.scroll.count > last - first
+                        )
+                            throw new Error('Scroll history is outside the live window.');
+                    }
                 }
                 function accessOptions(binding: Binding): AccessOptions {
                     return {
@@ -509,23 +634,38 @@ export function createInertiaAdapter(factories: BindingFactories, options: Inert
                     if (Object.hasOwn(effective, prop))
                         throw new Error(`Ordinary prop ${prop} collides with a live binding.`);
                     if (binding.pending) {
-                        return render(index + 1, {
-                            ...effective,
-                            [prop]: {
-                                ...loading({ one: binding.one ?? false }),
-                                inputs: { values: {}, options: binding.options ?? {}, set: noop, reset: noop },
-                            },
-                        });
+                        return (
+                            <NamedScroll name={prop} handle={null}>
+                                {render(index + 1, {
+                                    ...effective,
+                                    [prop]: {
+                                        ...loading({ one: binding.one ?? false }),
+                                        inputs: { values: {}, options: binding.options ?? {}, set: noop, reset: noop },
+                                    },
+                                })}
+                            </NamedScroll>
+                        );
                     }
                     if (!Object.hasOwn(factories, binding.query))
                         throw new Error('Unknown Zero query contract. Reload the application.');
                     const factory = factories[binding.query] as (args: unknown) => ReadSelection;
-                    const synchronize = (args: Record<string, unknown>, values: object) => {
-                        const fields = options.url?.[current?.component ?? page?.component ?? '']?.[prop];
-                        if (!fields) return false;
+                    const synchronize = (
+                        args: Record<string, unknown>,
+                        next: ReadSelection,
+                        history?: 'push' | 'replace',
+                        scroll?: ScrollHistory,
+                        writePage?: number,
+                    ) => {
+                        const fields = urlFields?.[prop];
+                        if (!fields && !next.pagination) return false;
                         const url = new URL(inertiaURLAdapter.getURL());
-                        const input = object(values, 'inputs');
-                        for (const [field, parameter] of Object.entries(fields)) {
+                        if (next.pagination && !scroll) writePagination(url.searchParams, next.pagination);
+                        if (next.pagination && writePage !== undefined) {
+                            if (writePage === 1) url.searchParams.delete(next.pagination.name);
+                            else url.searchParams.set(next.pagination.name, String(writePage));
+                        }
+                        const input = object(next.input?.values ?? {}, 'inputs');
+                        for (const [field, parameter] of Object.entries(history ? {} : (fields ?? {}))) {
                             const value = input[field];
                             if (value === undefined) url.searchParams.delete(parameter);
                             else if (value === null) url.searchParams.set(parameter, '');
@@ -553,13 +693,13 @@ export function createInertiaAdapter(factories: BindingFactories, options: Inert
                                         mode: 'replace',
                                         bindings: {
                                             ...previous.bindings,
-                                            [prop]: { ...binding, args },
+                                            [prop]: { ...binding, args, scroll },
                                         },
                                     },
                                 };
                             },
                         };
-                        inertiaURLVisit(visit, options.history ?? 'replace');
+                        inertiaURLVisit(visit, history ?? options.history ?? 'replace');
                         return true;
                     };
                     return (
@@ -581,7 +721,12 @@ export function createInertiaAdapter(factories: BindingFactories, options: Inert
                 if (!pageGuard) return body;
                 const [prop, binding] = pageGuard;
                 return (
-                    <AccessBoundary binding={binding} prop={prop} options={accessOptions(binding)} replica={replica}>
+                    <AccessBoundary
+                        binding={{ query: binding.query, access: binding.access!, args: binding.args }}
+                        prop={prop}
+                        options={accessOptions(binding)}
+                        replica={replica}
+                    >
                         {body}
                     </AccessBoundary>
                 );

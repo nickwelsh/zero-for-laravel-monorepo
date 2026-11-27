@@ -13,6 +13,19 @@ use ZeroForLaravel\Tests\TestCase;
 
 uses(TestCase::class);
 
+test('package context defaults resolve only the authenticated identifier', function (): void {
+    config(['zero' => require __DIR__.'/../../config/zero.php']);
+    $definition = ContextDefinition::configured();
+    $request = Request::create('/?user_id=other');
+
+    expect($definition->typescript())->toBe('{readonly "user_id": string | null;}');
+    expect($definition->resolve($request)->values)->toBe(['user_id' => null]);
+    foreach ([42, 'account-7'] as $id) {
+        $request->setUserResolver(fn (): GenericUser => new GenericUser(['id' => $id]));
+        expect($definition->resolve($request)->values)->toBe(['user_id' => (string) $id]);
+    }
+});
+
 test('context generation reflects required scalar keys without resolving runtime services', function (): void {
     $definition = new ContextDefinition(ApplicationContext::class, ApplicationContextResolver::class);
     expect($definition->typescript())->toBe('{readonly "actor": string; readonly "enabled": boolean; readonly "ratio": number | null; readonly "tenant": number;}');

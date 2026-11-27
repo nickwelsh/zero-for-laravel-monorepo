@@ -18,7 +18,7 @@ class ShareListController extends Controller
     public function store(ShareListRequest $request, TodoList $list): void
     {
         DB::transaction(function () use ($request, $list): void {
-            (new ProjectionManager)->lock();
+            (new ProjectionManager)->lock('default', 'list:'.$list->id);
             $list = TodoList::query()->lockForUpdate()->findOrFail($list->id);
             Gate::authorize('share', $list);
             Mutation::server(function () use ($request, $list): void {
@@ -32,7 +32,7 @@ class ShareListController extends Controller
     public function destroy(ShareListRequest $request, TodoList $list): void
     {
         DB::transaction(function () use ($request, $list): void {
-            (new ProjectionManager)->lock();
+            (new ProjectionManager)->lock('default', 'list:'.$list->id);
             $list = TodoList::query()->lockForUpdate()->findOrFail($list->id);
             Gate::authorize('share', $list);
             Mutation::server(function () use ($request, $list): void {

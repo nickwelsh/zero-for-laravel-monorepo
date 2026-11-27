@@ -31,14 +31,14 @@ stop the cache, clear its SQLite replica files, and restart it, as described in
 [replication troubleshooting](https://zero.rocicorp.dev/docs/debug/replication).
 Do not delete replica files during every migration or while the cache is running.
 
-Generation writes `resources/js/zero/generated.ts`. Use `--output=/path/file.ts`
+Generation writes `resources/js/zero/generated/index.ts`. Use `--output=/path/file.ts`
 to override it, and `--check` in app CI to detect drift. Exclude the generated
 file from formatters so `--check` can compare its exact contents.
 
 The same column plan drives TypeScript and the dedicated PostgreSQL publication.
 Nonempty Eloquent `$visible` supplies the default allowlist, and `ZeroColumns`
 can explicitly replace it. See [columns and privacy](./models.mdx#columns-and-privacy)
-for precedence with `$hidden`, `ZeroExclude`, and `ZeroIncludeColumns`, including
+for precedence with `$hidden`, `ZeroExcludeColumns`, and `ZeroIncludeColumns`, including
 required-column validation.
 Pivot tables publish only correlation and primary-key columns. Use a dedicated
 publication; synchronization replaces its table/column membership atomically.
@@ -101,10 +101,12 @@ do not migrate competing tables. Keep the cache API key out of browser code.
 It authenticates the cache, while the configured Laravel middleware separately
 authenticates the end user.
 
-For Laravel session authentication, set `zero.middleware` to `['web', 'auth']`,
-exclude only `zero/query` and `zero/mutate` from Laravel CSRF validation in
-`bootstrap/app.php`, and set both `ZERO_QUERY_FORWARD_COOKIES=true` and
-`ZERO_MUTATE_FORWARD_COOKIES=true` in the cache. Serve the app and cache through a
+For Laravel session authentication, set `zero.middleware` to `['web', 'auth']` and
+keep CSRF validation enabled. On connection the generated React provider sends
+Laravel’s `XSRF-TOKEN` cookie as `X-XSRF-TOKEN` for queries and mutations.
+Set `ZERO_QUERY_FORWARD_COOKIES=true` and `ZERO_MUTATE_FORWARD_COOKIES=true` on
+the cache, and include `x-xsrf-token` in `ZERO_QUERY_ALLOWED_CLIENT_HEADERS` and
+`ZERO_MUTATE_ALLOWED_CLIENT_HEADERS`. Serve the app and cache through a
 cookie-compatible origin/proxy. The endpoints still require the private cache
 API key and the authenticated session. For token authentication, configure your
 API guard and use Zero's `auth` token or allowed client authorization headers.

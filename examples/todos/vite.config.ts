@@ -1,6 +1,5 @@
 import inertia from '@inertiajs/vite';
 import { vitePlugin as formbraid } from '@formbraid/core/vite';
-import { wayfinder } from '@laravel/vite-plugin-wayfinder';
 import babel from '@rolldown/plugin-babel';
 import tailwindcss from '@tailwindcss/vite';
 import react, { reactCompilerPreset } from '@vitejs/plugin-react';
@@ -27,10 +26,6 @@ export default defineConfig({
             presets: [reactCompilerPreset()],
         }),
         tailwindcss(),
-        wayfinder({
-            // The Formbraid integration above owns Zero contract generation.
-            patterns: ['routes/**/*.php', 'app/**/*.php', 'config/wayfinder.php'],
-        }),
     ]),
     resolve: { dedupe: ['react', 'react-dom', '@rocicorp/zero'] },
     server: {

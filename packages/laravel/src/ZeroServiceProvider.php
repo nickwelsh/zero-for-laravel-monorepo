@@ -9,6 +9,7 @@ use Illuminate\Contracts\Http\Kernel;
 use Illuminate\Database\Events\MigrationsEnded;
 use Illuminate\Database\Migrations\Migrator;
 use Illuminate\Foundation\Application;
+use Illuminate\Foundation\DevCommands;
 use Illuminate\Routing\Events\RouteMatched;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Route;
@@ -24,6 +25,7 @@ use ZeroForLaravel\Console\ExposureCommand;
 use ZeroForLaravel\Console\FormbraidCommand;
 use ZeroForLaravel\Console\GenerateCommand;
 use ZeroForLaravel\Console\ResetCommand;
+use ZeroForLaravel\Console\SetupCommand;
 use ZeroForLaravel\Console\SyncPublicationCommand;
 use ZeroForLaravel\Http\AuthenticateZeroCache;
 use ZeroForLaravel\Http\ZeroController;
@@ -119,8 +121,17 @@ final class ZeroServiceProvider extends ServiceProvider
             $kernel->prependToMiddlewarePriority(Http\CaptureTransportCookies::class);
         });
         if ($this->app->runningInConsole()) {
+            $this->loadMigrationsFrom(__DIR__.'/../database/core-migrations');
             $this->publishes([__DIR__.'/../config/zero.php' => config_path('zero.php')], 'zero-config');
-            $this->commands([GenerateCommand::class, FormbraidCommand::class, SyncPublicationCommand::class, DevCommand::class, DoctorCommand::class, ResetCommand::class, ExposureCommand::class]);
+            $this->publishes([
+                __DIR__.'/../stubs/ZeroContext.php.stub' => app_path('Enums/ZeroContext.php'),
+                __DIR__.'/../stubs/ResolveZeroContext.php.stub' => app_path('Zero/ResolveZeroContext.php'),
+            ], 'zero-context');
+            $this->commands([SetupCommand::class, GenerateCommand::class, FormbraidCommand::class, SyncPublicationCommand::class, DevCommand::class, DoctorCommand::class, ResetCommand::class, ExposureCommand::class]);
+            if (class_exists(DevCommands::class)) {
+                DevCommands::register('php artisan zero:dev', 'zero');
+            }
+
             Event::listen(MigrationsEnded::class, function (MigrationsEnded $event): void {
                 if ($event->method !== 'up' || ($event->options['pretend'] ?? false) || ! config()->boolean('zero.sync_publication_on_migrate')) {
                     return;

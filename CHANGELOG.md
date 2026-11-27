@@ -1,5 +1,65 @@
 # Changelog
 
+## Unreleased
+
+- Rename `ZeroExclude` to `ZeroExcludeColumns` in model attributes and imports
+  before regenerating contracts or syncing the publication. The old name no longer excludes columns.
+- Live queries no longer require `#[ZeroPublic]` or a permission binding. Remove
+  the attribute. Binding a model in `permissions.resources` still requires policy
+  coverage on every live read of that model, including through relationships.
+- Zero mutation inputs now honor Eloquent's `$guarded` rules as well as `$fillable`.
+  Model reads include relationships in `$with` and omit relationships in `$hidden`.
+  Review `zero:exposure` and regenerate contracts after changing these settings.
+- PostgreSQL permission updates now maintain grants for the affected rule or domain.
+  Before upgrading an installation with maintained permissions, pause traffic and
+  drain old workers. Deploy the new code, refresh Laravel's config cache if used,
+  and run `php artisan permissions:rebuild` before resuming traffic with new workers.
+  Applications own any quota on the number of effective grants.
+- React query results no longer expose `render()` or the `RenderHandlers` type.
+  Switch on `query.status` and read `query.data` and `query.error` directly.
+
+## [0.15.0] - 2026-11-23
+
+- `php artisan zero:setup` checks PostgreSQL, guides Laravel session configuration,
+  offers installed integrations, and generates contracts. Zero also registers
+  with Laravel's dev runner. Applications can use the built-in user context.
+- Generated support files live in `resources/js/zero/generated/`. Application
+  modules such as `App/`, `tables/`, and `formbraid/` remain at the Zero import root.
+- Tables can filter on related records and display related fields. Definitions
+  with relations or display columns use protocol 3; scalar-only definitions
+  without display columns keep protocol 2 and their saved views.
+- Upgrade the PHP, client, and optional table packages together to **0.15.0**.
+  Regenerate and deploy both sets of contracts together. Zero remains **1.11.4**.
+
+## [0.14.0] - 2026-11-21
+
+### Breaking live query migration
+
+`Model::zeroQuery()` now declares live reads using Eloquent syntax. Ordinary
+`Model::query()` still executes SQL. Regenerate and deploy the PHP registrations
+and client contracts together; do not reuse old generated query identities.
+
+| Before                                                    | After                                                  |
+| --------------------------------------------------------- | ------------------------------------------------------ |
+| Bare returned builder or `->all()`                        | `->get()`                                              |
+| `->one()`                                                 | `->first()`, or `->find($id)` for a primary-key lookup |
+| `where('status', 'IN', $list)`                            | `whereIn('status', $list)`                             |
+| `whereExists('comments', ...)`                            | `whereHas('comments', ...)`; remove native hints       |
+| `->start($row)` or the old cursor-based `->paginate(25)`  | `->cursorPaginate(25)` and paginator navigation        |
+| `->infinite(25)`                                          | `Zero::scroll($query->paginate(25))`                   |
+| `#[ZeroScope]`, `#[ZeroScopedBy]`, `addZeroGlobalScope()` | Eloquent `#[Scope]`, `#[ScopedBy]`, `addGlobalScope()` |
+
+`paginate()` now means numbered pages. Like `simplePaginate()`, it has no count
+query or last-page promise. See the [query guide](apps/docs/content/docs/0.x/docs/queries.mdx).
+
+Use the Zero `/inertia` `InfiniteScroll` component with `Zero::scroll()` for
+bidirectional automatic or manual loading and viewport-aware page URLs.
+The component does not issue partial reloads or accept Inertia reload options.
+
+Upgrade `nickwelsh/zero-for-laravel`, `@nickwelsh/zero-for-laravel`, and the optional
+`@nickwelsh/zero-table` together to **0.14.0**. Table protocol **v2** and Zero
+**1.11.4** are unchanged.
+
 ## [0.13.0] - 2026-11-21
 
 - Migrate supported Inertia forms by changing the `Form` and generated controller
@@ -226,6 +286,8 @@ Deploy generated PHP and TypeScript contracts together. Supported targets are PH
 8.3+, Laravel 12/13, PostgreSQL 15+, and React 18/19. Automatic live pages require
 Inertia Laravel 3 and `@inertiajs/react` ^3.8.0.
 
+[0.15.0]: https://github.com/nickwelsh/zero-for-laravel-monorepo/releases/tag/v0.15.0
+[0.14.0]: https://github.com/nickwelsh/zero-for-laravel-monorepo/releases/tag/v0.14.0
 [0.13.0]: https://github.com/nickwelsh/zero-for-laravel-monorepo/releases/tag/v0.13.0
 [0.12.0]: https://github.com/nickwelsh/zero-for-laravel-monorepo/releases/tag/v0.12.0
 [0.11.1]: https://github.com/nickwelsh/zero-for-laravel-monorepo/releases/tag/v0.11.1

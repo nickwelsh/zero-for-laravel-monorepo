@@ -10,6 +10,7 @@ use ZeroForLaravel\Query\ZeroQuery;
 use ZeroForLaravel\Tests\Fixtures\DateQueryRequest;
 use ZeroForLaravel\Tests\Fixtures\QueryRequest;
 use ZeroForLaravel\Tests\Fixtures\Task;
+use ZeroForLaravel\Zero;
 
 final class TaskQueries
 {
@@ -31,28 +32,28 @@ final class TaskQueries
             $query->where('title', 'LIKE', '%'.$validated['title'].'%');
         }
 
-        return $query->orderBy('title', 'desc')->orderBy('id', 'asc')->limit(20);
+        return $query->orderBy('title', 'desc')->orderBy('id', 'asc')->limit(20)->get();
     }
 
     public function dated(DateQueryRequest $input): ZeroQuery
     {
         $validated = $input->validated();
 
-        return Task::zeroQuery()->visibleTo($input->user())->where('completed_at', '>=', $validated['after']);
+        return Task::zeroQuery()->visibleTo($input->user())->where('completed_at', '>=', $validated['after'])->get();
     }
 
     public function window(Request $request): ZeroQuery
     {
-        return Task::zeroQuery()->visibleTo($request->user())->orderBy('title', 'desc')->infinite(2);
+        return Zero::scroll(Task::zeroQuery()->visibleTo($request->user())->orderBy('title', 'desc')->paginate(2));
     }
 
     public function pages(Request $request): ZeroQuery
     {
-        return Task::zeroQuery()->visibleTo($request->user())->orderBy('title', 'desc')->paginate(2);
+        return Task::zeroQuery()->visibleTo($request->user())->orderBy('title', 'desc')->cursorPaginate(2);
     }
 
     public function detail(Request $request, string $id): ZeroQuery
     {
-        return Task::zeroQuery()->visibleTo($request->user())->where('id', $id)->one();
+        return Task::zeroQuery()->visibleTo($request->user())->find($id);
     }
 }

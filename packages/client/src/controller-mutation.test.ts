@@ -93,12 +93,16 @@ it('validates prepared UUID and ULID overrides before native request creation', 
         const layer = createControllerMutations(
             schema,
             definitions,
-            { [name]: { ...contract, sites: { s0: generator } } },
+            { [name]: { ...contract, sites: { s0: generator, s1: generator } } },
             { [name]: codecs },
         );
         const action = layer.bind(name, codecs);
         const id = generator === 'uuid' ? '784949de-4dd0-4fd1-9297-b9e43e7a9fb7' : '01K8VBQ37R3H2MXJP9DDX85XY7';
-        expect(action.prepare({ title: 'Valid' }, {}, { [generator]: () => id }).args.prepared.ids.s0).toBe(id);
+        const second = id.slice(0, -1).toLowerCase() + 'a';
+        const preparePair = (other: string) =>
+            action.prepare({ title: 'Valid' }, {}, { [generator]: vi.fn(() => other).mockReturnValueOnce(id) });
+        expect(preparePair(second).args.prepared.ids).toEqual({ s0: id, s1: second });
+        expect(() => preparePair(id.toLowerCase())).toThrow('Creation identities must be distinct');
         expect(action.prepare({ title: 'Default' }).args.prepared.ids.s0).toHaveLength(generator === 'uuid' ? 36 : 26);
         for (const invalid of ['123', id + '\n']) {
             expect(() => action.prepare({ title: 'Invalid' }, {}, { [generator]: () => invalid })).toThrow(

@@ -115,7 +115,7 @@ it('executes generated Effect mutations and queries on native Zero without chang
         const dated = queries.dated.tasks({ input: { after: new Date('2024-02-29T12:34:56.123Z') } });
         expect(dated.args).toEqual({ input: { after: '2024-02-29T12:34:56.123Z' } });
         expect(await zero.run(dated)).toEqual([]);
-        const filtered = queries.choices.tasks.live({ input: { priority: 7 }, __window: 3 });
+        const filtered = queries.choices.tasks.live({ input: { priority: 7 } });
         expect(filtered.input.apply({ priority: 2 })).toEqual({ input: { priority: 2 } });
         expect(() => filtered.input.apply({ priority: 3 })).toThrow();
         expect(() => queries.dated.tasks({ input: { after: new Date(NaN) } })).toThrow();

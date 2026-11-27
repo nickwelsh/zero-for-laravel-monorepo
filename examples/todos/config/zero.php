@@ -6,6 +6,9 @@ use App\Enums\ZeroContext;
 use App\Zero\ResolveZeroContext;
 
 return [
+    'inertia' => true,
+    'wayfinder' => ['enabled' => true],
+
     /*
     |--------------------------------------------------------------------------
     | Formbraid Integration

@@ -14,8 +14,10 @@ import {
     type TableQueryInput,
     type TableState,
     type CellSubmitResult,
+    type TableDescriptor,
+    type Capabilities,
 } from '../index';
-import { DataTable, useDataTable, type TableSession, type TableOptions } from './index';
+import { DataTable, useDataTable, TableSession, type TableOptions } from './index';
 
 const native = vi.hoisted(() => ({
     zero: { userID: 'alice', context: { user_id: 'alice', tenant_id: 'one' } },
@@ -108,12 +110,13 @@ const capabilities = {
     metadataURL: '/metadata',
 } as const;
 type Row = { id: string; title: string; done: boolean; list_id: string | null };
-const descriptor = createTable(capabilities, (args) => ({
+const selectRows = (args: TableQueryInput) => ({
     key: queryKey(args),
     one: false,
     request: () => ({ args }),
     decode: (raw: unknown) => raw as readonly Row[],
-}));
+});
+const descriptor = createTable(capabilities, selectRows);
 const editingKey = (id: string) =>
     queryKey({ filter: null, sort: [], groupBy: [], path: [], __window: 1, __row: [id] });
 let table: TableSession<Row, typeof capabilities>;
@@ -202,6 +205,262 @@ afterEach(() => {
     vi.useRealTimers();
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
+});
+
+it('runs one report consumer with different fields, lookup cells, sorts and groups by changing only the descriptor', async () => {
+    const relation = {
+        model: 'Tag',
+        table: 'tags',
+        key: 'id',
+        keyColumn: definitions.Tag.columns.id,
+        cardinality: 'many',
+        label: 'Tags',
+        operators: ['some', 'has', 'any', 'all'],
+        choices: { value: 'id', label: 'name' },
+        lookup: { field: 'name', limit: 1 },
+        filters: {
+            name: { field: 'name', kind: 'text', operators: ['contains'], column: definitions.Tag.columns.name },
+        },
+        relations: {},
+    } as const;
+    const people = createTable(
+        {
+            ...capabilities,
+            version: 3,
+            name: 'constituents',
+            model: 'Constituent',
+            displayColumns: [
+                { field: 'title', label: 'Constituent' },
+                { field: 'tags', label: 'Tags' },
+            ],
+            relations: { tags: relation },
+            defaults: { sort: [], groupBy: [] },
+        } as const,
+        selectRows,
+    );
+    const events = createTable(
+        {
+            ...capabilities,
+            version: 3,
+            name: 'events',
+            model: 'Event',
+            displayColumns: [{ field: 'title', label: 'Event' }],
+            filters: {
+                date: {
+                    field: 'created_at',
+                    kind: 'date',
+                    operators: ['gt'],
+                    column: definitions.Task.columns.created_at,
+                },
+            },
+            sorts: ['created_at'],
+            groups: { day: { field: 'created_at', label: null, model: null, relation: null } },
+            defaults: { sort: [], groupBy: [] },
+        } as const,
+        selectRows,
+    );
+    function Consumer<R, C extends Capabilities>({ report }: { report: TableDescriptor<R, C> }) {
+        const session = useDataTable(report, { urlState: true });
+        return (
+            <DataTable.Root table={session}>
+                <output>{session.columns.map((c) => c.header).join('|')}</output>
+                {session.filterFields().map((f) => (
+                    <button
+                        key={f.field}
+                        onClick={() => {
+                            const op = f.operators.find((o) => o.arity === 'one' && o.source !== 'nested')!;
+                            session.addFilter(
+                                session.buildFilter(
+                                    f.path,
+                                    op.id,
+                                    op.valueType === 'date' ? '2025-01-01T00:00:00Z' : 'A',
+                                ),
+                            );
+                        }}
+                    >
+                        {f.label}
+                    </button>
+                ))}
+                {session.filterFields().flatMap((f) =>
+                    f.operators
+                        .filter((op) => op.source === 'nested')
+                        .map((op) => (
+                            <button
+                                key={f.field}
+                                onClick={() => {
+                                    const child = session.filterFields(f.path)[0]!;
+                                    const rule = session.buildFilter(child.path, child.operators[0]!.id, 'Board');
+                                    session.replaceFilter(
+                                        [],
+                                        session.buildFilter(f.path, op.id, session.filterGroup('or', [rule])),
+                                    );
+                                }}
+                            >
+                                Match a {f.label} record
+                            </button>
+                        )),
+                )}
+                <button onClick={() => session.removeFilter([0, 0])}>Remove nested rule</button>
+                <button
+                    onClick={() => session.setSort([{ field: session.sorting.choices[0]!.field, direction: 'desc' }])}
+                >
+                    Sort descending
+                </button>
+                <button
+                    onClick={() =>
+                        session.setGroupBy([{ field: session.grouping.choices[0]!.field, direction: 'asc' }])
+                    }
+                >
+                    Group ascending
+                </button>
+                <output>
+                    {session.sorting.current.map((s) => s.field + ':' + s.direction)} /{' '}
+                    {session.grouping.current.map((s) => s.field + ':' + s.direction)}
+                </output>
+                <output>{JSON.stringify(session.state.filter)}</output>
+                <output>
+                    {session.sorting.choices.map((c) => c.field).join('|')} /{' '}
+                    {session.grouping.choices.map((c) => c.field).join('|')}
+                </output>
+                {session.items.flatMap((item) =>
+                    item.kind === 'row'
+                        ? session.columns.map((definition) => {
+                              const cell = session.cell(item.id, definition.id);
+                              return (
+                                  <span key={item.id + definition.id}>
+                                      {String(cell.value)}
+                                      {cell.truncated && '…'}
+                                  </span>
+                              );
+                          })
+                        : [],
+                )}
+            </DataTable.Root>
+        );
+    }
+    native.rows.set(queryKey({ filter: null, sort: [], groupBy: [], path: [], __window: 3 }), [
+        { id: '1', title: 'Alice', tags: [{ name: 'Board' }, { name: 'Donor' }] },
+    ]);
+    native.rows.set(
+        queryKey({
+            filter: { kind: 'relation', field: 'tags', operator: 'has', value: 'A' },
+            sort: [],
+            groupBy: [],
+            path: [],
+            __window: 3,
+        }),
+        [{ id: '2', title: 'Quinn', tags: [] }],
+    );
+    native.rows.set(
+        queryKey({
+            filter: { kind: 'condition', field: 'date', operator: 'gt', value: '2025-01-01T00:00:00Z' },
+            sort: [],
+            groupBy: [],
+            path: [],
+            __window: 3,
+        }),
+        [{ id: '3', title: 'Awards night' }],
+    );
+    vi.stubGlobal('fetch', async (_url: string, init: RequestInit) => {
+        if (typeof init.body !== 'string') throw new Error('Missing metadata request.');
+        const { directories } = JSON.parse(init.body) as { directories: { path: GroupPath }[] };
+        return Response.json({
+            version: 3,
+            requestKey: 'report',
+            observedAt: '2026-06-01',
+            totalCount: 1,
+            directories: directories.map(({ path }) => ({ path, groups: [], nextCursor: null })),
+        });
+    });
+    window.history.replaceState(null, '', '/');
+    const view = render(<Consumer report={people} />);
+    await waitFor(() => expect(view.getByText('Board…')).toBeDefined());
+    expect(view.getByText('Constituent|Tags')).toBeDefined();
+    expect(view.getByText('title / done|list')).toBeDefined();
+    fireEvent.click(view.getByRole('button', { name: 'Tags' }));
+    expect(view.getByText('{"kind":"relation","field":"tags","operator":"has","value":"A"}')).toBeDefined();
+    await waitFor(() => expect(view.getByText('Quinn')).toBeDefined());
+    fireEvent.click(view.getByRole('button', { name: 'Match a Tags record' }));
+    expect(view.getByText(/"operator":"some"/).textContent).toContain('"value":"Board"');
+    fireEvent.click(view.getByRole('button', { name: 'Remove nested rule' }));
+    expect(view.getByText('null')).toBeDefined();
+    fireEvent.click(view.getByRole('button', { name: 'Sort descending' }));
+    fireEvent.click(view.getByRole('button', { name: 'Group ascending' }));
+    expect(view.getByText('title:desc / done:asc')).toBeDefined();
+    view.rerender(<Consumer report={events} />);
+    expect(view.queryByRole('button', { name: 'Tags' })).toBeNull();
+    expect(view.getByText('created_at / day')).toBeDefined();
+    expect(view.getByText('Event')).toBeDefined();
+    fireEvent.click(view.getByRole('button', { name: 'Date' }));
+    expect(
+        view.getByText('{"kind":"condition","field":"date","operator":"gt","value":"2025-01-01T00:00:00Z"}'),
+    ).toBeDefined();
+    await waitFor(() => expect(view.getByText('Awards night')).toBeDefined());
+    view.rerender(<Consumer report={people} />);
+    expect(view.getByText('title:desc / done:asc')).toBeDefined();
+    window.history.replaceState(null, '', '/');
+});
+
+it('discovers readable scalar columns for a legacy descriptor, without overriding explicit empty columns', () => {
+    const view = render(<Harness mounted={false} />);
+    expect(table.columns.find((c) => c.id === 'list_id')?.header).toBe('List id');
+    expect(table.columns.find((c) => c.id === 'title')?.header).toBe('Title');
+    view.rerender(<Harness mounted={false} options={{ columns: [] }} />);
+    expect(table.columns).toEqual([]);
+});
+
+it('uses the declared relation operators for discovery, typed actions, and runtime validation', () => {
+    const tag = {
+        model: 'Tag',
+        table: 'tags',
+        key: 'id',
+        keyColumn: definitions.Tag.columns.id,
+        cardinality: 'many',
+        label: 'Tags',
+        choices: null,
+        lookup: { field: 'name', limit: 1 },
+        filters: capabilities.filters,
+        relations: {},
+    } as const;
+    const restricted = createTable(
+        {
+            ...capabilities,
+            version: 3,
+            relations: { tags: { ...tag, operators: ['any'] }, preview: { ...tag, operators: [] } },
+        } as const,
+        selectRows,
+    );
+    const session = new TableSession(restricted);
+    expect(session.filterFields().map((field) => field.field)).toEqual(['title', 'tags']);
+    expect(session.filterFields()[1]!.operators.map((op) => [op.id, op.source])).toEqual([['any', 'entry']]);
+    expect(() => session.filterFields(['tags'])).toThrow('Nested rules are not allowed');
+    session.setFilter({ kind: 'relation', field: 'tags', operator: 'any', value: ['A'] });
+    // @ts-expect-error Display-only relationships cannot be used as filter fields.
+    expect(() => session.setFilter({ kind: 'relation', field: 'preview', operator: 'any', value: ['A'] })).toThrow(
+        'relation operator',
+    );
+    // @ts-expect-error This descriptor does not admit single-ID membership.
+    expect(() => session.setFilter({ kind: 'relation', field: 'tags', operator: 'has', value: 'A' })).toThrow(
+        'relation operator',
+    );
+    expect(session.state.filter).toEqual({ kind: 'relation', field: 'tags', operator: 'any', value: ['A'] });
+});
+
+it('can reorder current rules and restore declared defaults on a concrete typed descriptor', () => {
+    render(<Harness mounted={false} />);
+    act(() => {
+        table.setSort([{ field: table.sorting.choices[0]!.field, direction: 'desc' }]);
+        table.setSort(table.sorting.current);
+        table.setGroupBy([...table.grouping.current].reverse());
+    });
+    expect(table.state.sort).toEqual([{ field: 'title', direction: 'desc' }]);
+    expect(table.state.groupBy.map((rule) => rule.field)).toEqual(['list', 'done']);
+    act(() => {
+        table.setSort(table.sorting.defaults);
+        table.setGroupBy(table.grouping.defaults);
+    });
+    expect(table.state.sort).toEqual([]);
+    expect(table.state.groupBy).toEqual(capabilities.defaults.groupBy);
 });
 
 it.each([false, true])('renders cached rows through StrictMode replay with native pending=%s', async (pending) => {
@@ -309,7 +568,7 @@ it.each(['success', 'denial', 'abort'] as const)(
         expect(table.items.map((item) => item.id)).toEqual(before.map((item) => item.id));
         view.rerender(<Harness options={options} />);
         await waitFor(() => expect(requests).toHaveLength(2));
-        expect(view.getByText('Cached 3', { exact: false })).toBeDefined();
+        expect(view.getByText('Cached 3', { selector: 'output', exact: false })).toBeDefined();
         expect(table.state.expanded).toEqual(expanded);
         expect(table.diagnostics.requestedRows).toBe(requestedRows);
         // Neither stale success, denial nor abort may overwrite or finish the current request.
@@ -343,7 +602,7 @@ it.each(['actor', 'context'] as const)(
         );
         const options = { initialState: { groupBy: [] } };
         const view = render(<Harness options={options} />, { wrapper: StrictMode });
-        await waitFor(() => expect(view.getByText('Previous identity')).toBeDefined());
+        await waitFor(() => expect(view.getByText('Previous identity', { selector: 'output' })).toBeDefined());
         const previous = table;
         native.zero.context = { ...native.zero.context };
         view.rerender(<Harness options={options} />);
@@ -364,7 +623,7 @@ it.each(['actor', 'context'] as const)(
         const row = { id: 'new', title: 'Current identity', done: false, list_id: null };
         native.rows.set(key, [row]);
         act(() => native.listeners.forEach((listener) => listener()));
-        await waitFor(() => expect(view.getByText(row.title, { exact: false })).toBeDefined());
+        await waitFor(() => expect(view.getByText(row.title, { selector: 'output', exact: false })).toBeDefined());
         expect(table.items.filter((item) => item.kind === 'row').map((item) => item.row)).toEqual([row]);
     },
 );

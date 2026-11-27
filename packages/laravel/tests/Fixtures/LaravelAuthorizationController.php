@@ -27,19 +27,19 @@ class LaravelAuthorizationController
     {
         $this->authorize('view', $task);
 
-        return Inertia::render('tasks/show', ['task' => $task, 'tasks' => Task::zeroQuery()->visibleTo($request->user())]);
+        return Inertia::render('tasks/show', ['task' => $task, 'tasks' => Task::zeroQuery()->visibleTo($request->user())->get()]);
     }
 
     public function literalText(Request $request): Response
     {
-        return Inertia::render('tasks/index', ['tasks' => Task::zeroQuery()->visibleTo($request->user())->where('title', 'args[ ctx[ encodeDate(')]);
+        return Inertia::render('tasks/index', ['tasks' => Task::zeroQuery()->visibleTo($request->user())->where('title', 'args[ ctx[ encodeDate(')->get()]);
     }
 
     public function classIndex(Request $request): Response
     {
         $this->authorize('viewAny', Task::class);
 
-        return Inertia::render('tasks/index', ['tasks' => Task::zeroQuery()->visibleTo($request->user())]);
+        return Inertia::render('tasks/index', ['tasks' => Task::zeroQuery()->visibleTo($request->user())->get()]);
     }
 
     public function conditionalClassIndex(Request $request, bool $check): Response
@@ -48,28 +48,28 @@ class LaravelAuthorizationController
             $this->authorize('viewAny', Task::class);
         }
 
-        return Inertia::render('tasks/index', ['tasks' => Task::zeroQuery()->visibleTo($request->user())]);
+        return Inertia::render('tasks/index', ['tasks' => Task::zeroQuery()->visibleTo($request->user())->get()]);
     }
 
     public function classPublicIndex(): Response
     {
         $this->authorize('viewAny', Task::class);
 
-        return Inertia::render('tasks/index', ['tasks' => VisibleTask::zeroQuery()]);
+        return Inertia::render('tasks/index', ['tasks' => VisibleTask::zeroQuery()->get()]);
     }
 
     public function classPivotIndex(Request $request): Response
     {
         $this->authorize('viewAny', Task::class);
 
-        return Inertia::render('tasks/index', ['tasks' => Task::zeroQuery()->visibleTo($request->user())->with('tags')]);
+        return Inertia::render('tasks/index', ['tasks' => Task::zeroQuery()->visibleTo($request->user())->with('tags')->get()]);
     }
 
     public function classStandalone(Request $request): ZeroQuery
     {
         $this->authorize('viewAny', Task::class);
 
-        return Task::zeroQuery()->visibleTo($request->user());
+        return Task::zeroQuery()->visibleTo($request->user())->get();
     }
 
     public function shell(): Response

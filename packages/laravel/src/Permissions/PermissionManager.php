@@ -141,24 +141,7 @@ final readonly class PermissionManager
     /** @return list<array{id: string, ptype: string, fields: list<string>}> */
     public function rules(): array
     {
-        $rules = [];
-        foreach ($this->connection()->table('permission_rules')->where('model', $this->name)->orderBy('id')->get() as $row) {
-            $fields = [];
-            for ($index = 0; $index < 6; $index++) {
-                $value = $row->{'v'.$index};
-                if (is_string($value)) {
-                    $fields[] = $value;
-                }
-            }
-
-            if (! is_string($row->id) || ! is_string($row->ptype)) {
-                throw new LogicException('Invalid permission rule identity.');
-            }
-
-            $rules[] = ['id' => $row->id, 'ptype' => $row->ptype, 'fields' => $fields];
-        }
-
-        return $rules;
+        return $this->readRules();
     }
 
     public function addPolicy(string ...$fields): bool
@@ -181,6 +164,34 @@ final readonly class PermissionManager
         return $this->write('g', array_values($fields), false);
     }
 
+    /** @return list<array{id: string, ptype: string, fields: list<string>}> */
+    private function readRules(bool $groupsOnly = false, ?string $domain = null): array
+    {
+        $query = $this->connection()->table('permission_rules')->where('model', $this->name);
+        if ($groupsOnly) {
+            $query->where('ptype', 'g')->where('v2', $domain);
+        }
+
+        $rules = [];
+        foreach ($query->orderBy('id')->get() as $row) {
+            $fields = [];
+            for ($index = 0; $index < 6; $index++) {
+                $value = $row->{'v'.$index};
+                if (is_string($value)) {
+                    $fields[] = $value;
+                }
+            }
+
+            if (! is_string($row->id) || ! is_string($row->ptype)) {
+                throw new LogicException('Invalid permission rule identity.');
+            }
+
+            $rules[] = ['id' => $row->id, 'ptype' => $row->ptype, 'fields' => $fields];
+        }
+
+        return $rules;
+    }
+
     /** @param list<string> $fields */
     private function write(string $type, array $fields, bool $add): bool
     {
@@ -200,11 +211,15 @@ final readonly class PermissionManager
 
         $fingerprint = hash('sha256', $source);
         $connection = $this->connection();
+        $position = array_search('p_dom', $model['p']['p']->tokens ?? [], true);
+        $domain = $type === 'g' ? ($fields[2] ?? null) : ($position === false ? null : ($fields[$position] ?? null));
 
-        return $connection->transaction(function () use ($connection, $fingerprint, $type, $fields, $add): bool {
+        return $connection->transaction(function () use ($connection, $fingerprint, $type, $fields, $add, $domain): bool {
             $projections = new ProjectionManager;
-            $projections->lock();
-            if ($connection->getSchemaBuilder()->hasTable('permission_installation')) {
+            $projections->lock($this->name, $domain);
+
+            $installed = $connection->getSchemaBuilder()->hasTable('permission_installation');
+            if ($installed) {
                 $projections->assertReady();
                 foreach (array_keys(config()->array('permissions.resources')) as $class) {
                     if (is_string($class) && is_subclass_of($class, Model::class)) {
@@ -219,7 +234,8 @@ final readonly class PermissionManager
             }
 
             $connection->table('permission_models')->insertOrIgnore(['id' => $this->name, 'fingerprint' => $fingerprint, 'revision' => 0]);
-            $state = $connection->table('permission_models')->where('id', $this->name)->lockForUpdate()->first();
+            $modelRow = $connection->table('permission_models')->where('id', $this->name);
+            $state = ($installed ? $modelRow : $modelRow->lockForUpdate())->first();
             if ($state === null || $state->fingerprint !== $fingerprint) {
                 throw new LogicException('Casbin model fingerprint mismatch. Rebuild permissions before writing rules.');
             }
@@ -236,12 +252,15 @@ final readonly class PermissionManager
                 $changed = $connection->table('permission_rules')->where('id', $id)->delete() > 0;
             }
 
-            if ($connection->getDriverName() === 'pgsql' && $connection->getSchemaBuilder()->hasTable('permission_installation')) {
+            if ($installed) {
                 $connection->statement("SET LOCAL zero.permissions_write = 'off'");
             }
 
-            if ($changed) {
-                new RoleGraph($this->rules());
+            if ($changed && $add && $type === 'g') {
+                new RoleGraph($this->readRules(groupsOnly: true, domain: $domain));
+            }
+
+            if ($changed && ! $installed) {
                 $connection->table('permission_models')->where('id', $this->name)->increment('revision');
                 $revision = $connection->table('permission_models')->where('id', $this->name)->value('revision');
                 $connection->table('permission_events')->insert(['model' => $this->name, 'revision' => $revision]);

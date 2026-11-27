@@ -17,6 +17,7 @@ use ZeroForLaravel\Query\QueryCompiler;
 use ZeroForLaravel\Query\ZeroQuery;
 use ZeroForLaravel\ResolvedContext;
 use ZeroForLaravel\Tests\Fixtures\OwnerPermissions;
+use ZeroForLaravel\Tests\Fixtures\OwnerPolicy;
 use ZeroForLaravel\Tests\Fixtures\OwnerUser;
 use ZeroForLaravel\Tests\Fixtures\Task;
 use ZeroForLaravel\Tests\Fixtures\VisibleTask;
@@ -58,10 +59,23 @@ test('a protected query requires an explicit trusted actor and rejects context s
     expect(json_encode($ast, JSON_THROW_ON_ERROR))->not->toContain('__visibility');
 });
 
-test('public reads cannot be used to bypass a bound private resource', function (): void {
+test('only a resource binding requires policy coverage for a declared read', function (): void {
+    Gate::policy(VisibleTask::class, OwnerPolicy::class);
+    $compile = function (): array {
+        $registry = new ModelRegistry([VisibleTask::class]);
+        $query = (new ZeroQuery($registry->get('VisibleTask'), $registry))->where('title', 'Overdue');
+
+        return (new QueryCompiler($registry))->compileDeclaration($query, new ResolvedContext([], 'alice'));
+    };
+    expect($compile()['where'])->toEqual([
+        'type' => 'simple', 'op' => '=',
+        'left' => ['type' => 'column', 'name' => 'title'],
+        'right' => ['type' => 'literal', 'value' => 'Overdue'],
+    ]);
+
     config(['permissions.resources.'.VisibleTask::class => config('permissions.resources.'.Task::class)]);
-    new ModelRegistry([VisibleTask::class]);
-})->throws(LogicException::class, 'never both');
+    expect($compile)->toThrow(LogicException::class, 'require visibleTo');
+});
 
 test('scalar ownership decisions use managed grants and fresh database identities', function (): void {
     OwnerPermissions::install();

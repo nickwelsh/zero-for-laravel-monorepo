@@ -84,7 +84,7 @@ it('executes the PHP-generated typed bindings without application-authored codec
         expectTypeOf<InferQueryInput<typeof choices.tasks>['input']['status']>().toEqualTypeOf<
             'active' | 'completed' | undefined
         >();
-        const filtered = choices.tasks.live({ input: { status: 'active', priority: 7 }, __window: 8 });
+        const filtered = choices.tasks.live({ input: { status: 'active', priority: 7 } });
         expect(filtered.input.options).toEqual({
             direction: ['asc', 'desc'],
             priority: [2, 7],

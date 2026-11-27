@@ -8,10 +8,12 @@ use Illuminate\Console\Command;
 use Illuminate\Filesystem\Filesystem;
 use LogicException;
 use Throwable;
+use ZeroForLaravel\Generation\AutoDetectFrontendDriver;
 use ZeroForLaravel\Generation\ControllerDiscovery;
 use ZeroForLaravel\Generation\ControllerQueryGenerator;
 use ZeroForLaravel\Generation\FormbraidGenerator;
 use ZeroForLaravel\Generation\FrontendDriver;
+use ZeroForLaravel\Generation\GeneratedLayout;
 use ZeroForLaravel\Generation\Mutations\ControllerMutationGenerator;
 use ZeroForLaravel\Generation\Mutations\MutationProgram;
 use ZeroForLaravel\Generation\NavigationGenerator;
@@ -43,19 +45,27 @@ final class GenerateCommand extends Command
         $mutations = $controllers->mutations();
         $source = $generator->generate($registry);
         $mutationGenerator = resolve(ControllerMutationGenerator::class);
-        $base = pathinfo($path, PATHINFO_FILENAME);
+        $layout = new GeneratedLayout($path);
         $outputs = [
             $path => $source,
-            dirname($path).'/'.$base.'.queries.ts' => $queries->typescript($definitions, './'.$base).(new NavigationGenerator)->typescript($definitions),
+            $layout->directory.'/'.$layout->sibling('queries').'.ts' => $queries->typescript($definitions, './'.$layout->base).(new NavigationGenerator)->typescript($definitions),
             config()->string('zero.generation.queries') => $queries->php($definitions, $tables),
-            dirname($path).'/'.$base.'.mutations.ts' => $mutationGenerator->typescript($mutations),
+            $layout->directory.'/'.$layout->sibling('mutations').'.ts' => $mutationGenerator->typescript($mutations),
             config()->string('zero.generation.mutations') => $mutationGenerator->php($mutations),
         ];
-        $public = (new PublicApiGenerator)->generate($mutations, $definitions, $base)
-            + (new TableGenerator)->typescript($tables, '../'.$base);
-        $manifest = dirname($path).'/'.$base.'.files.json';
+        $public = (new PublicApiGenerator)->generate($mutations, $definitions, $layout)
+            + (new TableGenerator)->typescript($tables, '../'.$layout->contractPath($layout->base), $definitions);
+        $publicRoot = $layout->editableRoot();
+        $manifest = $layout->directory.'/'.$layout->sibling('files.json');
         $previous = $files->exists($manifest) ? json_decode($files->get($manifest), true, flags: JSON_THROW_ON_ERROR) : [];
-        if (! is_array($previous)) {
+        // The original list tracked files relative to the schema, not the Zero root.
+        $previousRoot = $layout->directory;
+        if (is_array($previous) && isset($previous['public'])) {
+            $previousRoot = $publicRoot;
+            $previous = $previous['public'];
+        }
+
+        if (! is_array($previous) || ! array_is_list($previous)) {
             throw new LogicException('Invalid generated file manifest.');
         }
 
@@ -65,8 +75,8 @@ final class GenerateCommand extends Command
                 throw new LogicException('Invalid generated file path.');
             }
 
-            $old = dirname($path).'/'.$relative;
-            if (! isset($public[$relative]) && $files->exists($old)) {
+            $old = $previousRoot.'/'.$relative;
+            if (($previousRoot !== $publicRoot || ! isset($public[$relative])) && $files->exists($old)) {
                 if (! str_starts_with($files->get($old), PublicApiGenerator::HEADER)) {
                     throw new LogicException('Refusing to remove a file not owned by Zero: '.$old);
                 }
@@ -76,19 +86,28 @@ final class GenerateCommand extends Command
         }
 
         foreach ($public as $relative => $content) {
-            $outputs[dirname($path).'/'.$relative] = $content;
+            $target = $publicRoot.'/'.$relative;
+            if (! $this->option('check') && $publicRoot !== $layout->directory && $files->exists($target) && ! str_starts_with($files->get($target), PublicApiGenerator::HEADER)) {
+                throw new LogicException('Refusing to overwrite a file not owned by Zero: '.$target);
+            }
+
+            $outputs[$target] = $content;
         }
 
-        $outputs[$manifest] = json_encode(array_keys($public), JSON_THROW_ON_ERROR | JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES)."\n";
+        $paths = array_keys($public);
+        $outputs[$manifest] = json_encode($publicRoot === $layout->directory ? $paths : ['public' => $paths], JSON_THROW_ON_ERROR | JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES)."\n";
         $formbraid = $this->option('formbraid') || config()->boolean('zero.formbraid.enabled');
         $frontend = $this->option('react') || $formbraid ? resolve(ReactFrontendDriver::class) : resolve(FrontendDriver::class);
+        $frontend = $frontend instanceof AutoDetectFrontendDriver ? $frontend->detect() : $frontend;
+
         $custom = array_filter($mutations, fn (MutationProgram $mutation): bool => $mutation->optimism === 'custom') !== [];
-        foreach ($frontend->files($base, $custom) as $relative => $content) {
-            $outputs[dirname($path).'/'.$relative] = $content;
+        $modules = $frontend instanceof ReactFrontendDriver ? $frontend->files($layout, $custom) : $frontend?->files($layout->base, $custom) ?? [];
+        foreach ($modules as $relative => $content) {
+            $outputs[$layout->directory.'/'.$relative] = $content;
         }
 
-        $configuration = $frontend->configuration();
-        $config = dirname($path).'/zero.config.ts';
+        $configuration = $frontend?->configuration();
+        $config = $layout->editableRoot().'/zero.config.ts';
 
         if ($formbraid) {
             try {
@@ -141,10 +160,15 @@ final class GenerateCommand extends Command
         }
 
         $files->delete($stale);
+        $layout->writeIgnoreRules($files);
+        $layout->syncModuleIgnores($files, 'public modules', $paths);
 
         if ($configuration !== null && ! $files->exists($config)) {
             $files->replace($config, $configuration);
-            $this->info("Created {$config}. Configure your public cache URL here; this file will not be overwritten.");
+            $this->info("Created {$config}. This file will not be overwritten.");
+            if ($frontend instanceof ReactFrontendDriver) {
+                $this->line('Set VITE_APP_URL="${APP_URL}" and VITE_ZERO_CACHE_URL in .env and .env.example. Keep ZERO_API_KEY server-side.');
+            }
         }
 
         return self::SUCCESS;

@@ -12,7 +12,7 @@ public function index(): \Inertia\Response
 {
     return \Inertia\Inertia::render('tasks/index', [
         'heading' => 'Tasks',
-        'tasks' => Task::zeroQuery()->orderBy('title', 'asc')->infinite(25),
+        'tasks' => Task::zeroQuery()->orderBy('title')->paginate(25),
     ]);
 }
 ```
@@ -22,17 +22,30 @@ emits matching native TypeScript ZQL and authoritative PHP registrations. Input
 comes from the declared route/FormRequest contract. Laravel validates and
 authorizes each server invocation; the browser cannot supply an authoritative AST.
 
-`zeroQuery()` returns a mutable `ZeroForLaravel\Query\ZeroQuery`, separate from
-Eloquent's query builder. Use `where`, predicate callbacks, `with`, `whereHas`,
-`orderBy`, `limit`, `start`, and `one`. Supported expression callbacks provide
-comparisons, conjunction, disjunction, negation, existence, and literal comparisons.
-Native `related` and correlated `EXISTS` are compilation details; the Laravel-facing
-API uses `with` and `whereHas`, with no `related()` compatibility alias.
+`zeroQuery()` selects live delivery. Use Eloquent's query vocabulary: `where`,
+`orWhere`, grouped predicates, `whereIn`, `whereNull`, `whereBetween`, `whereKey`,
+`orderBy`, `latest`, `take`, and relationship constraints. End a collection with
+`get()` and a single-row declaration with `first()` or `find($id)`.
+`limit(1)->get()` still returns a list. These declare results; they do not fetch PHP models.
 
-Use `infinite(size)` for an expanding live window and `paginate(size)` for cursor
-pages. These require deterministic ordering. Raw cursor values retain storage
-precision; decoded `Date` values are not used to reconstruct cursor boundaries.
-Relationship queries retain native Zero semantics, including junction restrictions.
+## Choose numbered pages, cursors, or scrolling
+
+- `paginate(25)` and `simplePaginate(25)` return live numbered pages. Neither
+  returns a PHP paginator, a total count, or a last-page number. The entire
+  ordered prefix plus one lookahead row must fit inside `zero.limits.max_live_window`.
+- `cursorPaginate(25)` selects one live page at an ordering boundary. Use it for
+  deep traversal. The paginator adds a primary-key tie-breaker and preserves raw
+  storage precision. Call `nextPage()` or `previousPage()` on the live prop.
+- `\ZeroForLaravel\Zero::scroll($query->paginate(25))` keeps a growing live
+  window. Call `loadMore()` on the prop. Completion, not an empty local cache,
+  determines whether there are more results.
+
+For adjustable page sizes, declare a FormRequest field such as `per_page` with
+`['sometimes', 'integer', Rule::in([10, 25, 50])]` or a positive, bounded integer
+range. Read `$input = $request->validated()` and use `paginate($input['per_page'] ?? 25)`.
+Laravel validates the size and enforces the window cap independently. Use
+`pageName: 'tasks_page'` or `cursorName: 'tasks_cursor'` to distinguish paginators
+on one Inertia page. Do not also register the position as a FormRequest field.
 
 Generation supports a checked PHP subset around query declarations. Unknown calls,
 unsupported control flow, or ambiguous output fail with source diagnostics. It
@@ -54,14 +67,8 @@ parameter. The compiler matches the returned variable to the unconditional `view
 guard on that same variable. Laravel resolves the policy. A protected bound prop
 requires this instance guard even when the model uses `VisibleToCurrentUser`.
 
-The browser gets a named query whose local body is:
-
-```ts
-({ args }) => zql['todos'].where('id', args['todo']).one();
-```
-
-The matching PHP registration builds
-`Todo::zeroQuery()->where('id', $args['todo'])->one()->guardedBy(request()->user(), 'view')`.
+The generated query selects the bound todo by primary key on both the client
+and server. Its server registration retains the captured `view` ability.
 An initial HTTP visit still runs Laravel route binding and authorization. Later
 server subscriptions recheck the bound route and Gate and include the permission
 condition in the stream. The local ID lookup alone cannot grant access to a row.
@@ -96,7 +103,7 @@ final class TaskQueries
             ->where('title', 'LIKE', '%'.$validated['title'].'%')
             ->orderBy('title', 'asc')
             ->orderBy('id', 'asc')
-            ->limit(20);
+            ->limit(20)->get();
     }
 }
 ```
@@ -158,11 +165,10 @@ $active = (clone $base)->where('completed', false);
 $completed = (clone $base)->completed();
 ```
 
-`$active = $base` alone does not create a branch. Direct `Todo::completed()` and
-`Todo::zeroQuery()->completed()` invoke the same `#[ZeroScope]` method. Dynamic
-scope arguments are supported within the checked input/expression subset. The
-Eloquent-like higher-order form `Todo::completed()->orWhere->assignedTo($userId)`
-groups the next scope's conditions with OR. See [local scopes](./models.mdx#local-zero-scopes).
+`$active = $base` alone does not create a branch. `Todo::completed()` remains an
+ordinary Eloquent read. `Todo::zeroQuery()->completed()` translates the same
+portable local scope. `Todo::zeroQuery()->completed()->orWhere->assignedTo($userId)`
+groups the next scope's conditions with OR. See [scopes](./models.mdx#scopes-and-creation-defaults).
 
 Nested predicate callbacks and higher-order OR scopes contribute **conditions
 only**. A `withAttributes(...)` call inside one does not leak creation defaults
@@ -179,19 +185,21 @@ use ZeroForLaravel\Query\ZeroQuery;
 
 $lists = TodoList::zeroQuery()
     ->whereHas('todos', fn (ZeroQuery $todos) => $todos->completed())
-    ->with('todos', fn (ZeroQuery $todos) => $todos->completed()->orderBy('title', 'asc'));
+    ->with('todos', fn (ZeroQuery $todos) => $todos->completed()->orderBy('title'))->get();
 ```
 
 This returns lists with at least one completed todo and includes their completed
 todos. `with` by itself would not filter out a list with an empty matching include.
+Use `withWhereHas('todos', fn ($todos) => $todos->completed())` to apply the
+same condition to the parent filter and the included rows. Dotted relationship
+paths are supported, but thresholds such as “at least three” are not.
 Relationship definitions come from supported Eloquent relationships between
 opted-in models, not a `relations(...)` metadata list.
 
 Each related query applies its model's global scopes independently. Parent scope
 removal does not remove child scopes; remove a child's scope explicitly inside
 its callback if trusted application logic requires it. Related builders do not
-contribute creation defaults to the parent. Eloquent relationship calls such as
-`$list->todos()` remain Eloquent and cannot invoke a Zero scope.
+contribute creation defaults to the parent. `$list->todos()` remains Eloquent.
 
 The compiler checks relationship keys, target enrollment, and constraints. It
 does not auto-enroll target models, expose private correlation columns, or silently
@@ -220,7 +228,7 @@ public function index(DashboardRequest $request): \Inertia\Response
             ->where('completed', $values['status'] === 'completed'));
     }
 
-    return \Inertia\Inertia::render('dashboard', ['lists' => $lists->orderBy('name', 'asc')->infinite(25)]);
+    return \Inertia\Inertia::render('dashboard', ['lists' => \ZeroForLaravel\Zero::scroll($lists->orderBy('name')->paginate(25))]);
 }
 ```
 

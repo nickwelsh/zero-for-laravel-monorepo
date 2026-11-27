@@ -19,9 +19,9 @@ decision after removal. Global scoping also affects route binding (hidden rows
 produce 404 before Gates) and bulk writes; it is not separate write authorization.
 
 Schema publication uses `HasZeroQueries` discovery in the application's Composer
-namespaces. Public models require `#[ZeroPublic]` on the class; a missing permission
-binding never makes a model public. Creation defaults use `withAttributes()` with
-typed application context; explicit creation attributes win, and defaults never
+namespaces. Reads follow the declared query by default. A `permissions.resources`
+binding opts a model into mandatory policy coverage on every live read. Creation
+defaults use `withAttributes()` with typed application context; explicit creation attributes win, and defaults never
 stamp updates or authorize writes. Scout search uses `zeroSearch()` or explicit
 registration in an application provider. Column exposure rules remain unchanged.
 
@@ -56,19 +56,25 @@ Ordinary scalar Gates work without these projections or a running Zero-cache.
 
 Managed Casbin operations, source mass updates and direct SQL subject/resource
 writes maintain authority facts in the same transaction. Rule writes must use the
-managed API; raw rule DML and source truncation are rejected. Transactions acquire
-one advisory lock before model-row locks and source changes; managed writes and
-rebuilds retry detected concurrency conflicts up to three times. An enclosing
+managed API; raw rule DML and source truncation are rejected. A managed rule write
+takes a shared rebuild lock and an exclusive lock for its model and declared
+domain before changing rules. Rebuilds and subject/resource writes still take the
+exclusive rebuild lock. Managed writes and rebuilds retry detected concurrency
+conflicts up to three times. An enclosing
 application transaction should use Laravel's retry argument too. Rollback restores
 business rows, grants, projections and durable invalidations together.
 
-The initial projector recomputes effective grants on policy/role/subject changes,
-bounded at 100,000 effective grants. It does not expand global grants per resource.
-Effective-grant and resource projections upsert only changed facts and remove
-obsolete keys; unchanged grants are not deleted and reinserted. Computing the
-effective-grant diff can still span the full graph. This favors simple
-transactional correctness over large-graph throughput; applications must
-measure their own write/fan-out costs. Role inheritance is acyclic and limited to
+Policy edits reconcile grants by source rule ID. Role assignments and inheritance
+edits reconcile the declared domain (the whole model for global roles). Expansion
+walks from policies down to members. A policy without a subject applies to all
+subjects; a monitored subject change still refreshes all models. Resource changes
+refresh their resource facts, not the grant index. Neither global nor scoped
+grants expand per resource. Unchanged grants are not deleted and reinserted.
+
+Rule changes advance model revisions and record events at commit. The library
+does not count or cap effective grants; applications own any grant quotas.
+
+Role inheritance is acyclic and limited to
 eight edges. All authority tables and source models must use one connection and
 unprefixed public-schema tables. Each source table has one binding; custom table
 aliases and using the same table for subjects and resources are currently rejected.

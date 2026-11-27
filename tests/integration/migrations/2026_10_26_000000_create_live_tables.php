@@ -25,6 +25,9 @@ return new class extends Migration {
         }
         Schema::create('comments', function (Blueprint $table) {
             $table->uuid('id')->primary(); $table->uuid('task_id'); $table->string('user_id'); $table->string('body');
+            $table->integer('amount')->nullable();
+            $table->timestamp('received_at', 3)->nullable();
+            $table->uuid('event_id')->nullable();
         });
         Schema::create('task_tag', function (Blueprint $table) {
             $table->uuid('task_id'); $table->uuid('tag_id'); $table->primary(['task_id', 'tag_id']);
