@@ -21,7 +21,7 @@ final class EloquentVisibility
      */
     public function apply(Builder $query, Authenticatable $user): Builder
     {
-        $plan = (new PolicyCompiler)->compile($query->getModel()::class);
+        $plan = (new PolicyCompiler)->compile($query->getModel()::class, onScopedRows: true);
         $projector = new ProjectionManager;
         $projector->assertReady();
         $projector->assertConnection($query->getModel());

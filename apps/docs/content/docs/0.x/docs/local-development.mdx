@@ -3,7 +3,7 @@ title: Local startup and recovery
 description: Run, inspect, and recover a local Zero cache without application-specific startup scripts.
 ---
 
-Use matching **v0.13.0** Composer and JavaScript packages with
+Use matching **v0.15.0** Composer and JavaScript packages with
 Zero client and cache **1.11.4**. The PHP package
 supports PHP 8.3+, Laravel 12/13, and PostgreSQL 15+. Do not upgrade the Zero cache
 independently of the pinned client and tested callback protocol.
@@ -17,6 +17,11 @@ use `APP_ENV=local`:
 ```sh
 php artisan zero:dev
 ```
+
+If you use `php artisan dev` (directly or through `composer dev`), it starts Zero
+for you. `php artisan dev:list` shows the `zero` process. No `AppServiceProvider`
+edit is needed. If your starter runs its own process list instead, run
+`php artisan zero:dev` in a separate terminal.
 
 The command generates contracts, synchronizes the dedicated publication, and runs
 the application's installed Zero binary through Laravel's process API. It encodes
@@ -46,10 +51,10 @@ php artisan zero:doctor
 ```
 
 Exposure uses the same metadata that generates contracts and restricts publication
-columns. It lists queries, mutations, ownership rules, server visibility scopes,
-relationships, server fills, and published fields. An empty set of owner rules
-with no server visibility scopes means explicitly public reads, not an implicit
-authorization check. Included models retain their own visibility rules.
+columns. It lists published fields, global scopes, creation defaults, relationships,
+and whether the model requires policy coverage. Without a resource binding, the
+declared query determines which rows its callers can read. Included models retain
+their own visibility rules.
 
 Doctor is read-only. It reports PostgreSQL version, WAL configuration, replication
 slots/senders, role privileges, exact publication membership, contract freshness,

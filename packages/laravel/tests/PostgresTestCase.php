@@ -7,6 +7,7 @@ namespace ZeroForLaravel\Tests;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use LogicException;
+use ZeroForLaravel\Mutation\MutationIdentitySchema;
 
 abstract class PostgresTestCase extends TestCase
 {
@@ -33,6 +34,7 @@ abstract class PostgresTestCase extends TestCase
             Schema::dropIfExists('task_tag');
             Schema::dropIfExists('tags');
             Schema::dropIfExists('comments');
+            MutationIdentitySchema::drop(DB::connection());
         }
 
         parent::tearDown();
@@ -53,6 +55,7 @@ abstract class PostgresTestCase extends TestCase
 
         $this->ownsTables = true;
         parent::createTables();
+        MutationIdentitySchema::create(DB::connection());
     }
 
     protected function defineEnvironment($app): void

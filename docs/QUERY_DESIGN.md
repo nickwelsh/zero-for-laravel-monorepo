@@ -14,13 +14,13 @@ supported constraints are documented in [the contract guide](model-api.md) and
 
 The accepted 0.x context/scopes/relationships redesign supersedes the original
 builder spellings and immutability decision: use mutable `ZeroQuery`, explicit
-clones for branches, portable local/global Zero scopes, `with` includes, and
+clones for branches, portable local/global Eloquent scopes, `with` includes, and
 `whereHas` parent filters. Application-owned context enums and attributed resolver
 signatures replace package context keys; runtime values use `ResolvedContext`.
 Relationships come from opted-in Eloquent models, without silent target enrollment
 or private-column exposure. Native ZQL remains the compilation target, not a
 promise to translate arbitrary Eloquent or PHP. See the
-[migration mappings](../apps/docs/content/docs/0.x/docs/constraints.mdx#migrating-existing-0x-applications).
+[supported query operations](../apps/docs/content/docs/0.x/docs/constraints.mdx#which-php-operations-can-zero-translate).
 
 ## 1. Agreed decisions
 

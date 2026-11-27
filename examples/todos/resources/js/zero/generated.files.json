@@ -1,7 +1,0 @@
-[
-    "App/Http/Controllers/ShareListController.ts",
-    "App/Http/Controllers/TodoController.ts",
-    "App/Http/Controllers/TodoListController.ts",
-    "App/Http/Controllers/DashboardController.ts",
-    "tables/todos.ts"
-]

@@ -61,7 +61,7 @@ final readonly class MutationProcessor
         foreach ($mutations as $index => $mutation) {
             try {
                 if ($mutation['name'] === '_zero_cleanupResults') {
-                    $this->cleanup($body['clientGroupID'], $mutation);
+                    $this->cleanup($body['clientGroupID'], $mutation, $context);
 
                     continue;
                 }
@@ -69,6 +69,8 @@ final readonly class MutationProcessor
                 $responses[] = $this->apply($body['clientGroupID'], $mutation, $context);
             } catch (OutOfOrder) {
                 return $this->failure('oooMutation', array_slice($mutations, $index), 'Mutation is out of order.');
+            } catch (MutationIdentityConflict) {
+                return $this->failure('internal', array_slice($mutations, $index), 'Mutation processing failed; retry the push.');
             } catch (QueryException $error) {
                 report($error);
 
@@ -94,6 +96,7 @@ final readonly class MutationProcessor
         try {
             try {
                 return $this->registry->connection()->transaction(function () use ($group, $mutation, $context, $id): array {
+                    $this->claimIdentity($group, $context);
                     $this->advance($group, $mutation);
                     if (count($mutation['args']) !== 1) {
                         Input::fail('args', 'Expected one argument object.');
@@ -134,7 +137,8 @@ final readonly class MutationProcessor
 
             // A failed application transaction is fully rolled back before its
             // rejection and progress are committed together in a new transaction.
-            return $this->registry->connection()->transaction(function () use ($group, $mutation, $id, $failure): array {
+            return $this->registry->connection()->transaction(function () use ($group, $mutation, $context, $id, $failure): array {
+                $this->claimIdentity($group, $context);
                 $this->advance($group, $mutation);
                 $this->registry->connection()->table($this->upstreamSchema.'.mutations')->insert([
                     'clientGroupID' => $group, 'clientID' => $mutation['clientID'],
@@ -173,7 +177,7 @@ final readonly class MutationProcessor
     /**
      * @param  Invocation  $mutation
      */
-    private function cleanup(string $group, array $mutation): void
+    private function cleanup(string $group, array $mutation, ResolvedContext $context): void
     {
         try {
             if (count($mutation['args']) !== 1) {
@@ -206,10 +210,62 @@ final readonly class MutationProcessor
                 $query->where('clientID', $args['clientID'])->where('mutationID', '<=', $args['upToMutationID']);
             }
 
-            $query->delete();
+            if ($this->ownsIdentity($group, $context)) {
+                $query->delete();
+            }
         } catch (ValidationException) {
             // Like Zero's native handler, invalid internal cleanup is ignored.
         }
+    }
+
+    private function claimIdentity(string $group, ResolvedContext $context): void
+    {
+        $identity = $context->userId();
+        if ($identity === null) {
+            throw new MutationIdentityConflict;
+        }
+
+        $connection = $this->registry->connection();
+        $grammar = $connection->getQueryGrammar();
+        $table = $grammar->wrapTable(MutationIdentitySchema::TABLE);
+        $schema = $grammar->wrap($this->upstreamSchema);
+        $storage = $this->storageHash();
+        $expected = $this->identityHash($identity);
+        // The binding and first progress update share one transaction. Existing
+        // unbound bookkeeping predates identity evidence and cannot be claimed.
+        $owner = $connection->scalar(
+            'INSERT INTO '.$table.' AS bindings ("upstream_hash", "client_group_id", "identity_hash") SELECT ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM '.$schema.'.clients WHERE "clientGroupID" = ?) AND NOT EXISTS (SELECT 1 FROM '.$schema.'.mutations WHERE "clientGroupID" = ?) ON CONFLICT ("upstream_hash", "client_group_id") DO UPDATE SET "identity_hash" = bindings."identity_hash" RETURNING "identity_hash"',
+            [$storage, $group, $expected, $group, $group],
+        );
+        $owner ??= $connection->table(MutationIdentitySchema::TABLE)
+            ->where('upstream_hash', $storage)->where('client_group_id', $group)->value('identity_hash');
+
+        if (! is_string($owner) || ! hash_equals($owner, $expected)) {
+            throw new MutationIdentityConflict;
+        }
+    }
+
+    private function ownsIdentity(string $group, ResolvedContext $context): bool
+    {
+        $identity = $context->userId();
+        if ($identity === null) {
+            return false;
+        }
+
+        $owner = $this->registry->connection()->table(MutationIdentitySchema::TABLE)
+            ->where('upstream_hash', $this->storageHash())->where('client_group_id', $group)->value('identity_hash');
+
+        return is_string($owner) && hash_equals($owner, $this->identityHash($identity));
+    }
+
+    private function storageHash(): string
+    {
+        return hash('sha256', $this->upstreamSchema);
+    }
+
+    private function identityHash(string $identity): string
+    {
+        return hash('sha256', json_encode([$this->appId, $identity], JSON_THROW_ON_ERROR));
     }
 
     /** @phpstan-assert non-empty-string $value */

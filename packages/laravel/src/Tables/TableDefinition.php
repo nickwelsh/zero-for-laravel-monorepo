@@ -7,6 +7,7 @@ namespace ZeroForLaravel\Tables;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Support\Str;
 use ZeroForLaravel\Generation\QueryExpression;
+use ZeroForLaravel\Query\QueryLimits;
 use ZeroForLaravel\Query\ZeroQuery;
 use ZeroForLaravel\Support\Input;
 
@@ -17,7 +18,8 @@ final readonly class TableDefinition
 
     public function bind(?Authenticatable $actor): Table
     {
-        if ($this->visible) {
+        // Public roots do not need a visibility predicate, but their children can.
+        if ($this->visible || ! $this->table->base->model->policyVisibility) {
             $this->table->visibleTo($actor);
         }
 
@@ -34,9 +36,10 @@ final readonly class TableDefinition
     {
         $table = $this->table;
 
-        return ['version' => 2, 'name' => $this->name, 'contract' => $this->contract,
+        return ['version' => $table->version(), 'name' => $this->name, 'contract' => $this->contract,
+            ...($table->version() === 3 ? ['stateContract' => TableURLState::contract($table), 'relations' => (object) $table->relationCapabilities(), 'displayColumns' => $table->displayCapabilities()] : []),
             'model' => $table->base->model->name, 'key' => [$table->base->model->key],
-            'pageSize' => $table->increment, 'maxGroupDepth' => $table->depth ?? min(3, count($table->groups)),
+            'pageSize' => $table->increment, 'maxWindow' => QueryLimits::liveWindow(), 'maxGroupDepth' => $table->depth ?? min(3, count($table->groups)),
             'filters' => (object) array_map(fn (AllowedFilter $filter): array => ['field' => $filter->field, 'kind' => $filter->kind,
                 'operators' => $filter->operations, 'column' => $table->base->model->columns[$filter->field]], $table->filters),
             'sorts' => $table->sorts, 'groups' => (object) $table->groups,
@@ -57,7 +60,7 @@ final readonly class TableDefinition
         $path = $this->table->path($args['path'] ?? [], $groups, leaf: true);
         $sort = $this->table->ordering($args['sort'] ?? $this->table->defaultOrdering);
         $window = $args['__window'] ?? $this->table->increment + 1;
-        if (! is_int($window) || $window < 1 || $window > 2147483647) {
+        if (! is_int($window) || $window < 1 || $window > QueryLimits::liveWindow()) {
             Input::fail('window', 'Invalid live table window.');
         }
 

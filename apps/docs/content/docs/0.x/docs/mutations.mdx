@@ -89,7 +89,7 @@ Override generators globally when constructing the generated provider:
 
 ```ts
 import { v7 as uuid } from 'uuid';
-import { createZeroBindings } from '@/zero/generated.react';
+import { createZeroBindings } from '@/zero/generated/react';
 
 export const { ZeroProvider } = createZeroBindings({ uuid, now: () => new Date() });
 // With custom optimism: createZeroBindings(projections, { uuid, now: () => new Date() }).
@@ -181,7 +181,7 @@ as an optional boolean in the FormRequest. Keep `title` writable on the model;
 the checkbox controls navigation and is never a Todo attribute.
 
 `zero:generate` reads the controller source and checks the types of the request
-and model. It emits the same operations into `generated.mutations.ts` and the
+and model. It emits the same operations into `generated/mutations.ts` and the
 PHP mutation registration. For this action they are, in execution order:
 
 1. `guard`: Laravel runs `Gate::authorize('create', Todo::class)`. The browser
@@ -240,7 +240,7 @@ write committed but the client could not apply the response, do not resubmit it.
 Use Formbraid's normal descriptor API in a React 19 app:
 
 ```tsx
-import { store, update } from '@/formbraid/zero/App/Http/Controllers/TodoListController';
+import { store, update } from '@/zero/formbraid/App/Http/Controllers/TodoListController';
 import { Form } from '@/formbraid';
 
 <Form form={store} />;
@@ -267,7 +267,7 @@ export default {
     metadata: new URL('./_metadata.json', import.meta.url),
     command: ['php', 'artisan', 'zero:generate'],
     watch: ['app/**/*.php', 'routes/**/*.php', 'config/zero.php', 'config/formbraid.php'],
-    outputs: ['resources/js/formbraid/zero/**', 'resources/js/zero/**', 'app/Formbraid/FormField.php'],
+    outputs: ['resources/js/zero/{App,generated,formbraid,tables}/**', 'app/Formbraid/FormField.php'],
 } satisfies Integration;
 ```
 
@@ -283,7 +283,7 @@ Vite inspects the component registry and writes metadata before running Artisan.
 With `formbraid.enabled`, `zero:generate` reuses Formbraid's request extraction, field/group generation,
 component enum, and hash-owned publication. It refreshes native Zero contracts and
 the React provider, then emits definitions and callback-backed controller forms
-under `zero.formbraid.output` (default `resources/js/formbraid/zero`). Only
+under `zero.formbraid.output` (default `resources/js/zero/formbraid`). Only
 `#[ZeroMutation]` actions with one FormRequest produce forms. Parameterless actions
 export descriptors; actions with model/scalar route arguments export factories.
 There is no Zero-specific form hook or replacement `Form` component.
@@ -306,13 +306,13 @@ reuses its registered bindings/preparation, and retains the authoritative result
 `formbraid.runtime` is an import path, not another process to run. A generated form
 calls `controllerRuntime()` at submission to obtain the active client, registered
 actions, and ID/timestamp preparation. With `runtime` left `null`, it imports that
-function from `zero/generated.react.ts`.
+function from `zero/generated/react.ts`.
 
 When mutations use custom optimistic code, the generated React module exports a
 factory instead of ready-made bindings. Call it once in an application module:
 
 ```ts title="resources/js/zero/bindings.ts"
-import { createZeroBindings } from './generated.react';
+import { createZeroBindings } from './generated/react';
 import { projections } from './optimism';
 
 export const { ZeroProvider, controllerRuntime } = createZeroBindings(projections);
@@ -366,12 +366,12 @@ public function fields(): array
                 ->where('organization_id', OptionInput::field('organization_id'))
                 ->where('id', '!=', OptionInput::context('party'))
                 ->where('name', 'ILIKE', ZeroOptions::contains(OptionInput::value()))
-                ->orderBy('name', 'asc')->orderBy('id', 'asc')->limit(20),
+                ->orderBy('name')->orderBy('id')->limit(20)->get(),
             value: 'id', label: 'name',
             resolve: Party::zeroQuery()
                 ->where('organization_id', OptionInput::field('organization_id'))
                 ->where('id', '!=', OptionInput::context('party'))
-                ->where('id', OptionInput::field('other_party_id'))->one(),
+                ->find(OptionInput::field('other_party_id')),
             authorize: ['party' => 'view'],
         )),
     ];
@@ -393,7 +393,7 @@ actor's visibility; related protected paths still require explicit visibility.
 the typed value are escaped. Without it, operands keep the query operator's normal
 meaning. Listing requires an explicit literal limit from 1 through 100 and ordering
 that includes the model's primary key. The optional `resolve` query must end in
-`one()` and must not use `value()`. Give it the same eligibility/dependency filters,
+`first()` or `find()` and must not use `value()`. Give it the same eligibility/dependency filters,
 but compare the ID with the selected draft field. It resolves labels independently
 of the current search or result window, even while the picker is closed. Without
 a resolver, an existing selection is reported as unavailable. No dependency change
@@ -431,13 +431,14 @@ part of this integration. The optional React producer helper is exported from
 
 ## Creation defaults
 
-Use `withAttributes` on a Zero query or in a Zero scope to supply creation
+Use `withAttributes` on the Eloquent creation builder or in a shared Eloquent scope to supply creation
 defaults. By default it also adds equality conditions to reads:
 
 ```php
-use App\Enums\ZeroContext;
+use ZeroForLaravel\Context\ContextReference;
+use ZeroForLaravel\Context\ZeroContext;
 
-$query->withAttributes(['user_id' => ZeroContext::USER_ID]);
+$query->withAttributes(['user_id' => ContextReference::current(ZeroContext::USER_ID)]);
 // Read condition: user_id equals the resolved context value.
 // Create default: user_id is that value.
 // Explicit creation data can override it.
@@ -450,7 +451,7 @@ For a default without an owner-only read filter, pass `asConditions: false`:
 // Set the creator without an owner-only read condition.
 $query->whereHas('memberships')
     ->withAttributes(
-        ['user_id' => ZeroContext::USER_ID],
+        ['user_id' => ContextReference::current(ZeroContext::USER_ID)],
         asConditions: false,
     );
 ```
@@ -465,7 +466,7 @@ For example, an authorized Zero controller action can add root defaults, then
 override a default with explicit data:
 
 ```php
-$todo = Todo::zeroQuery()
+$todo = Todo::query()
     ->withAttributes(['completed' => false])
     ->create([
         'list_id' => $data['list_id'],

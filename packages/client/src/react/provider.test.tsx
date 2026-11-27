@@ -43,6 +43,43 @@ const Provider = createZeroProvider<Context>(
     contract,
 );
 
+it('sends the current Laravel cookie on both session callbacks without replacing app headers', () => {
+    const Session = createZeroProvider(schema, mutators, { laravelSession: true, queryHeaders: { 'X-Query': 'yes' } });
+    render(
+        <Session userID="alice" context={{}}>
+            ready
+        </Session>,
+    );
+    const { queryHeaders, mutateHeaders } = native.provider.mock.lastCall![0];
+    try {
+        expect(JSON.parse(JSON.stringify(mutateHeaders))).toEqual({});
+        document.cookie = 'XSRF-TOKEN=a%2Bb%3D';
+        expect(JSON.parse(JSON.stringify(queryHeaders))).toEqual({ 'X-Query': 'yes', 'X-XSRF-TOKEN': 'a+b=' });
+        document.cookie = 'XSRF-TOKEN=next%2Ftoken';
+        expect(JSON.parse(JSON.stringify(mutateHeaders))).toEqual({ 'X-XSRF-TOKEN': 'next/token' });
+
+        const Manual = createZeroProvider(schema, mutators, {
+            laravelSession: true,
+            queryHeaders: { 'x-csrf-token': 'manual' },
+        });
+        render(
+            <Manual userID="alice" context={{}}>
+                ready
+            </Manual>,
+        );
+        expect(native.provider.mock.lastCall![0].queryHeaders).toEqual({ 'x-csrf-token': 'manual' });
+
+        render(
+            <Provider userID="alice" context={{ tenant: 'a', actor: 1 }}>
+                ready
+            </Provider>,
+        );
+        expect(native.provider.mock.lastCall![0].mutateHeaders).toBeUndefined();
+    } finally {
+        document.cookie = 'XSRF-TOKEN=; Max-Age=0';
+    }
+});
+
 it('requires typed context and separate userID, without requiring user_id', () => {
     expectTypeOf<ComponentProps<typeof Provider>>().toEqualTypeOf<ProviderProps<Context>>();
     expectTypeOf<{ context: Context; children: ReactNode }>().not.toExtend<ComponentProps<typeof Provider>>();

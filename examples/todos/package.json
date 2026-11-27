@@ -10,12 +10,13 @@
         "check": "pnpm --workspace-root exec vp check examples/todos",
         "check:fix": "pnpm --workspace-root exec vp check --fix examples/todos",
         "types:check": "tsc --noEmit",
-        "zero:generate": "php artisan zero:generate --react && php artisan wayfinder:generate --fresh",
+        "zero:generate": "node scripts/formbraid-metadata.mjs && pnpm zero:contracts",
+        "zero:contracts": "php artisan zero:generate --react && php artisan wayfinder:generate --fresh",
         "zero:dev": "node scripts/start-zero.mjs",
         "zero:check": "php artisan zero:generate --check"
     },
     "dependencies": {
-        "@formbraid/core": "0.3.0",
+        "@formbraid/core": "0.3.1",
         "@formbraid/react": "0.3.0",
         "@inertiajs/react": "^3.0.0",
         "@inertiajs/vite": "^3.11.0",
@@ -57,7 +58,6 @@
         "zod": "^4.6.7"
     },
     "devDependencies": {
-        "@laravel/vite-plugin-wayfinder": "^0.1.11",
         "@rolldown/plugin-babel": "^0.2.3",
         "@types/node": "^26.6.5",
         "babel-plugin-react-compiler": "^1.0.0",

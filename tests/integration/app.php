@@ -27,6 +27,7 @@ use ZeroForLaravel\Permissions\Casbin;
 use ZeroForLaravel\Permissions\VisibleToCurrentUser;
 use ZeroForLaravel\Tables\AllowedFilter;
 use ZeroForLaravel\Tables\AllowedGroup;
+use ZeroForLaravel\Tables\AllowedRelation;
 use ZeroForLaravel\Tables\Table;
 use ZeroForLaravel\Tables\TableContext;
 use ZeroForLaravel\Tests\Fixtures\Comment;
@@ -93,15 +94,15 @@ class FixtureReads
 
         return Inertia::render('fixture/todos', [
             'heading' => 'Private heading',
-            'todos' => Todo::zeroQuery(),
-            'latest' => Todo::zeroQuery()->orderBy('title', 'desc')->limit(1),
+            'todos' => Todo::zeroQuery()->get(),
+            'latest' => Todo::zeroQuery()->orderByDesc('title')->limit(1)->get(),
         ]);
     }
 
     public function index(): Response
     {
         return Inertia::render('fixture/related', [
-            'tasks' => Task::zeroQuery()->with('tags'),
+            'tasks' => Task::zeroQuery()->with('tags')->get(),
         ]);
     }
 }
@@ -116,9 +117,26 @@ class TasksTable
                 AllowedFilter::exact('completed', 'done'),
                 AllowedFilter::exact('list', 'list_id')->nullable(),
                 AllowedFilter::date('date', 'completed_at')->operators(['equals', 'notEquals', 'in', 'gt', 'gte', 'lt', 'lte'])->nullable(),
-            ])->allowedSorts(['title', 'completed_at'])
+            ])->allowedRelations([
+                AllowedRelation::named('tags')->choices('id', 'name')->lookup('name', 2),
+                AllowedRelation::named('comments')->label('Gifts')->allowedFilters([
+                    AllowedFilter::number('amount')->operators(['gt']),
+                    AllowedFilter::date('received_at')->operators(['gte']),
+                    AllowedFilter::exact('status', 'body'),
+                ])->allowedRelations([AllowedRelation::named('event')->allowedFilters([AllowedFilter::text('name')])]),
+            ])->displayColumns(['title', 'tags'])->allowedSorts(['title', 'completed_at'])
             ->allowedGroups([AllowedGroup::field('done'), AllowedGroup::belongsTo('list')->label('name')])
             ->pageSize(2);
+    }
+}
+
+class EventsTable
+{
+    public function definition(TableContext $context): Table
+    {
+        return Table::for(TaskList::class)->visibleTo($context->user())
+            ->allowedFilters([AllowedFilter::text('name')])->allowedSorts(['name'])
+            ->allowedGroups([AllowedGroup::field('name')])->displayColumns(['name' => 'Event name']);
     }
 }
 
@@ -157,12 +175,14 @@ $app->afterBootstrapping(LoadConfiguration::class, function ($app) use ($root) {
         'logging.default' => 'single', 'logging.channels.single' => ['driver' => 'single', 'path' => $root.'/laravel.log'],
         'app.env' => 'local', 'app.debug' => false, 'app.key' => 'base64:'.base64_encode(str_repeat('0', 32)),
         'app.url' => getenv('APP_URL'), 'app.locale' => 'en', 'app.fallback_locale' => 'en',
+        'cache.default' => 'file',
         'database.default' => 'testing', 'database.connections.testing' => [
             'driver' => 'pgsql', 'host' => getenv('ZERO_TEST_PG_HOST') ?: '127.0.0.1',
             'port' => getenv('ZERO_TEST_PG_PORT') ?: 5432, 'database' => getenv('ZERO_LIVE_DATABASE'),
             'username' => getenv('ZERO_TEST_PG_USER') ?: 'postgres', 'password' => getenv('ZERO_TEST_PG_PASSWORD') ?: '',
             'charset' => 'utf8', 'prefix' => '', 'search_path' => 'public', 'sslmode' => 'prefer',
         ],
+        'zero.inertia' => true,
         'zero.context' => ZeroContext::class,
         'zero.context_resolver' => ContextResolver::class,
         'zero.middleware' => [FixtureIdentity::class], 'zero.api_key' => getenv('ZERO_API_KEY'),
@@ -176,7 +196,7 @@ ini_set('error_log', $root.'/php.log');
 $kernel = $app->make(PHP_SAPI === 'cli' ? Illuminate\Contracts\Console\Kernel::class : Kernel::class);
 $kernel->bootstrap();
 app()->instance(ZeroForLaravel\Support\ApplicationClasses::class, new ZeroForLaravel\Tests\Fixtures\DiscoveredClasses([
-    Task::class, TaskList::class, Tag::class, Comment::class, TasksTable::class, TaskQueries::class, Todo::class,
+    Task::class, TaskList::class, Tag::class, Comment::class, TasksTable::class, EventsTable::class, TaskQueries::class, Todo::class,
 ]));
 OwnerPermissions::configure();
 config(['permissions.subject.class' => OwnerUser::class,
@@ -227,7 +247,8 @@ if (PHP_SAPI === 'cli') {
     if (($argv[1] ?? null) === 'dev') {
         exit(Artisan::call('zero:dev', [], new ConsoleOutput));
     }
-    if (Artisan::call('migrate', ['--path' => __DIR__.'/migrations', '--realpath' => true, '--force' => true]) !== 0 || Artisan::call('zero:generate') !== 0 || Artisan::call('zero:generate', ['--check' => true]) !== 0) {
+    app('migrator')->path(__DIR__.'/migrations');
+    if (Artisan::call('migrate', ['--force' => true]) !== 0 || Artisan::call('zero:generate') !== 0 || Artisan::call('zero:generate', ['--check' => true]) !== 0) {
         throw new RuntimeException('Fixture setup failed.');
     }
     Schema::table('users', function (Illuminate\Database\Schema\Blueprint $table): void {

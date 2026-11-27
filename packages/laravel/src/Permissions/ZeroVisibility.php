@@ -17,7 +17,7 @@ final class ZeroVisibility
     /** @param list<ClassPermission|array{class: class-string<Model>, id: string, ability: string}> $guards */
     public function condition(ModelMetadata $model, string $subjectId, string $ability = 'view', array $guards = []): Condition
     {
-        $plan = (new PolicyCompiler)->compile($model->class, $ability);
+        $plan = (new PolicyCompiler)->compile($model->class, $ability, onScopedRows: true);
         $conditions = [$this->decision($plan, $subjectId)];
         foreach ($guards as $guard) {
             if ($guard instanceof ClassPermission) {

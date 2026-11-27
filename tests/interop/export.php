@@ -4,10 +4,21 @@ declare(strict_types=1);
 
 require __DIR__.'/../../packages/laravel/vendor/autoload.php';
 
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Foundation\Auth\User;
+use Illuminate\Foundation\Http\FormRequest;
+use Inertia\Inertia;
+use Inertia\Response;
+use Laravel\Surveyor\SurveyorServiceProvider;
 use PhpParser\ParserFactory;
 use ZeroForLaravel\Generation\ControllerQueryCompiler;
 use ZeroForLaravel\Generation\ControllerQueryGenerator;
+use ZeroForLaravel\Generation\EffectSchemaDriver;
+use ZeroForLaravel\Generation\NativeQueryEmitter;
+use ZeroForLaravel\Generation\QueryExpression;
+use ZeroForLaravel\Generation\TableCompiler;
+use ZeroForLaravel\Generation\TableGenerator;
 use ZeroForLaravel\Generation\TypeScriptGenerator;
 use ZeroForLaravel\Generation\ZodSchemaDriver;
 use ZeroForLaravel\Metadata\ModelRegistry;
@@ -15,8 +26,52 @@ use ZeroForLaravel\Query\MissingValue;
 use ZeroForLaravel\Query\QueryCompiler;
 use ZeroForLaravel\Query\ZeroQuery;
 use ZeroForLaravel\ResolvedContext;
+use ZeroForLaravel\Tests\Fixtures\Comment;
+use ZeroForLaravel\Tests\Fixtures\PredicateQueries;
+use ZeroForLaravel\Tests\Fixtures\PredicateTask;
 use ZeroForLaravel\Tests\Fixtures\QueryController;
+use ZeroForLaravel\Tests\Fixtures\Tag;
+use ZeroForLaravel\Tests\Fixtures\Task;
+use ZeroForLaravel\Tests\Fixtures\TaskList;
+use ZeroForLaravel\Tests\Fixtures\TaskReportTable;
 use ZeroForLaravel\Tests\OwnerTestCase as TestCase;
+use ZeroForLaravel\Zero;
+
+final class DatedInteropList extends TaskList
+{
+    /** @return HasMany<Task, $this> */
+    public function completedTasks(): HasMany
+    {
+        return $this->hasMany(Task::class, 'list_id')
+            ->where('completed_at', '>=', '2025-12-31T19:00:00.123-05:00')
+            ->whereIn('created_at', ['2026-01-01', '2026-01-02']);
+    }
+}
+
+final class PaginationInteropRequest extends FormRequest
+{
+    /** @return array<string, list<string>> */
+    public function rules(): array
+    {
+        return ['size' => ['sometimes', 'integer', 'min:1', 'max:7']];
+    }
+}
+
+final class PaginationInteropController
+{
+    public function index(PaginationInteropRequest $input): Response
+    {
+        $values = $input->validated();
+        $size = $values['size'] ?? 2;
+        $query = Task::zeroQuery()->visibleTo($input->user())->orderBy('title', 'desc');
+
+        return Inertia::render('tasks', [
+            'numbered' => $query->paginate($size, pageName: 'tasks'),
+            'scroll' => Zero::scroll($query->simplePaginate($size, pageName: 'feed')),
+            'cursor' => $query->cursorPaginate($size, cursorName: 'after'),
+        ]);
+    }
+}
 
 $fixture = new class('bootFixture') extends TestCase
 {
@@ -58,6 +113,49 @@ function publicAst(ZeroQuery $query): array
 }
 if (($argv[1] ?? null) === 'generate') {
     echo (new TypeScriptGenerator)->generate($registry);
+} elseif (($argv[1] ?? null) === 'table-relation-dates') {
+    $registry = new ModelRegistry([DatedInteropList::class, Task::class]);
+    $parent = $registry->get('DatedInteropList');
+    $target = $registry->get($registry->relation($parent, 'completedTasks')['model']);
+    $query = new ZeroQuery($target, $registry);
+    $parent->applyRelationConstraints('completedTasks', $query);
+    echo json_encode([
+        'typescript' => (new NativeQueryEmitter)->relationMembership($parent, 'completedTasks', new QueryExpression('query', model: $target, type: 'query')),
+        'ast' => publicAst($query),
+    ], JSON_THROW_ON_ERROR);
+} elseif (($argv[1] ?? null) === 'junction-preview') {
+    // The native construction includes application scopes. Policy is installed privately in the transform.
+    config(['zero.route_prefix' => 'zero']);
+    Tag::addGlobalScope('catalog', fn (Builder $q) => $q->where('user_id', 'alice'));
+    $definition = (new TableCompiler($registry))->compile('report', TaskReportTable::class);
+    $definition->bind(request()->user());
+    $query = $definition->rows([]);
+    echo json_encode([
+        'schema' => (new TypeScriptGenerator)->generate($registry),
+        'descriptor' => (new TableGenerator)->typescript([$definition], './generated')['tables/report.ts'],
+        'ast' => publicAst($query),
+        'authorized' => (new QueryCompiler($registry))->compileDeclaration($query, new ResolvedContext(['user_id' => 'alice'], 'alice')),
+    ], JSON_THROW_ON_ERROR);
+} elseif (($argv[1] ?? null) === 'predicates') {
+    app()->register(SurveyorServiceProvider::class);
+    $queries = new PredicateQueries;
+    $filtered = resolve(ControllerQueryCompiler::class)->compile(PredicateQueries::class, 'filtered')[0]->typescript();
+    $cases = [];
+    foreach ([true, false] as $flag) {
+        $cases[] = ['args' => ['flag' => $flag], 'ast' => publicAst($queries->filtered(request(), $flag))];
+    }
+    app()->instance(ModelRegistry::class, new ModelRegistry([PredicateTask::class, Comment::class]));
+    $constrained = resolve(ControllerQueryCompiler::class)->compile(PredicateQueries::class, 'constrained')[0]->typescript();
+    echo json_encode([
+        ['typescript' => $filtered, 'cases' => $cases],
+        ['typescript' => $constrained, 'cases' => [['args' => (object) [], 'ast' => publicAst($queries->constrained(request()))]]],
+    ], JSON_THROW_ON_ERROR);
+} elseif (($argv[1] ?? null) === 'pagination-module') {
+    app()->register(SurveyorServiceProvider::class);
+    config(['zero.limits.max_live_window' => 22]);
+    $driver = $argv[2] === 'effect' ? new EffectSchemaDriver : new ZodSchemaDriver;
+    $queries = resolve(ControllerQueryCompiler::class)->compile(PaginationInteropController::class, 'index');
+    echo (new ControllerQueryGenerator($driver))->typescript($queries, './generated');
 } elseif (in_array($argv[1] ?? null, ['controller', 'controller-module'], true)) {
     $compiler = new ControllerQueryCompiler((new ParserFactory)->createForHostVersion(), $registry);
     $definition = $compiler->compile(QueryController::class, 'index')[0];
@@ -94,21 +192,20 @@ if (($argv[1] ?? null) === 'generate') {
         'typescript' => $definition->typescript(), 'schema' => $schemas->object($definition->parameters), 'cases' => $cases,
         'filtered' => ['typescript' => $filtered->typescript(), 'schema' => $schemas->object($filtered->parameters), 'cases' => $filteredCases],
         'relationships' => ['typescript' => $relationships->typescript(), 'ast' => publicAst($relationshipQuery), 'format' => $relationshipQuery->format()],
-        'window' => ['typescript' => $window->typescript(), 'ast' => publicAst($windowQuery)],
+        'window' => ['name' => $window->name(), 'ast' => publicAst($windowQuery)],
     ], JSON_THROW_ON_ERROR);
 } elseif (($argv[1] ?? null) === 'declarations') {
     $query = (new ZeroQuery($registry->get('Task'), $registry))->withoutGlobalScopes();
     $queries = [
         'unbounded' => clone $query,
         'zeroLimit' => (clone $query)->limit(0),
-        'one' => (clone $query)->where('id', 'task-a')->one(),
-        'cursor' => (clone $query)->orderBy('title', 'desc')->orderBy('id', 'asc')->start(['title' => '0', 'id' => 'task-a'], ['inclusive' => true])->limit(7),
-        'exclusive' => (clone $query)->orderBy('id', 'asc')->start(['id' => 'task-a']),
+        'one' => $query->find('task-a'),
+        'cursor' => (clone $query)->orderBy('title', 'desc')->cursorPaginate(6)->atPosition(['__cursor' => ['title' => '0', 'id' => 'task-a']]),
         'relationships' => (clone $query)->with('comments', fn ($q) => $q->withoutGlobalScopes()->where('body', 'NOT ILIKE', '%private%')->orderBy('id', 'desc')->limit(3))->with('list', fn ($q) => $q->withoutGlobalScopes()),
-        'junction' => (clone $query)->with('tags', fn ($q) => $q->withoutGlobalScopes()->where('name', 'IN', ['0', 'work'])),
-        'exists' => (clone $query)->whereExists('comments', fn ($q) => $q->withoutGlobalScopes()->where('body', 'NOT LIKE', 'secret%'), ['flip' => false]),
-        'scalar' => (clone $query)->whereExists('list', fn ($q) => $q->withoutGlobalScopes()->where('id', 'list-a'), ['scalar' => true]),
-        'junctionExists' => (clone $query)->whereExists('tags', fn ($q) => $q->withoutGlobalScopes()->where('name', 'work'), ['flip' => true]),
+        'junction' => (clone $query)->with('tags', fn ($q) => $q->withoutGlobalScopes()->whereIn('name', ['0', 'work'])),
+        'exists' => (clone $query)->whereHas('comments', fn ($q) => $q->withoutGlobalScopes()->where('body', 'not like', 'secret%')),
+        'scalar' => (clone $query)->whereHas('list', fn ($q) => $q->withoutGlobalScopes()->whereKey('list-a')),
+        'junctionExists' => (clone $query)->whereHas('tags', fn ($q) => $q->withoutGlobalScopes()->where('name', 'work')),
         'negation' => (clone $query)->where('done', '!=', false)->whereDoesntHave('comments', fn ($q) => $q->withoutGlobalScopes()->where('body', 'hidden')),
         'nullEquality' => (clone $query)->where('list_id', null),
         'nullInequality' => (clone $query)->where('list_id', '!=', null),
@@ -116,14 +213,12 @@ if (($argv[1] ?? null) === 'generate') {
     foreach (['=', '!=', '<', '<=', '>', '>=', 'LIKE', 'NOT LIKE', 'ILIKE', 'NOT ILIKE'] as $operator) {
         $queries[$operator] = (clone $query)->where('title', $operator, '0');
     }
-    foreach (['IN', 'NOT IN'] as $operator) {
-        $queries[$operator] = (clone $query)->where('title', $operator, ['0', 'two']);
-    }
-    foreach (['IS', 'IS NOT'] as $operator) {
-        $queries[$operator] = (clone $query)->where('list_id', $operator, null);
-    }
+    $queries['IN'] = (clone $query)->whereIn('title', ['0', 'two']);
+    $queries['NOT IN'] = (clone $query)->whereNotIn('title', ['0', 'two']);
+    $queries['IS'] = (clone $query)->whereNull('list_id');
+    $queries['IS NOT'] = (clone $query)->whereNotNull('list_id');
     $output = array_map(fn ($q) => ['ast' => $q->ast(), 'format' => $q->format()], $queries);
-    $eb = $query->expressionBuilder();
+    $eb = new \ZeroForLaravel\Query\ExpressionBuilder($query->model);
     foreach ([
         'literals' => $eb->or($eb->cmpLit('0', '=', '0'), $eb->and($eb->cmpLit(0, '!=', 1), $eb->cmp('list_id', 'IS', null))),
         'emptyGroups' => $eb->and($eb->or(), $eb->cmp('done', true)),
@@ -138,7 +233,7 @@ if (($argv[1] ?? null) === 'generate') {
     $queries = [
         'root' => clone $query,
         'related' => (clone $query)->with('list', fn ($q) => $q->visibleTo($alice))->with('comments', fn ($q) => $q->visibleTo($alice)->limit(3)),
-        'junction' => (clone $query)->whereExists('tags', fn ($q) => $q->visibleTo($alice)->where('id', 'owned')),
+        'junction' => (clone $query)->whereHas('tags', fn ($q) => $q->visibleTo($alice)->where('id', 'owned')),
         'groups' => (clone $query)->where(fn ($q) => $q
             ->whereHas('tags', fn ($q) => $q->visibleTo($alice)->where('name', 'Reading'))
             ->orWhere(fn ($q) => $q->whereHas('tags', fn ($q) => $q->visibleTo($alice)->where('name', 'Other')))),

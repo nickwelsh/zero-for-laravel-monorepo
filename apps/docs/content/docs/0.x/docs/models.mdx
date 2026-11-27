@@ -35,47 +35,61 @@ methods; no `zero()` method or `ZeroDefinition` is needed. Use
 `Task::zeroQuery()->visibleTo($request->user())` for protected reads, and scope related
 paths explicitly. The corresponding REST query is `Task::query()->visibleTo($user)`.
 See [authorization](./authorization.mdx) for policies, Casbin and the portable subset.
-Intentionally public models declare `#[ZeroForLaravel\Attributes\ZeroPublic]` on
-the model itself. The attribute is not inherited. Missing permissions never imply
-public access, and read visibility never grants write permission.
+Binding the model in `permissions.resources` makes this coverage mandatory.
+Without a binding, a live read follows its declared filters and scopes. Defining a
+Laravel policy does not apply it automatically. Read visibility never grants write permission.
 
 ## Columns and privacy
 
 The same resolved column plan drives generated TypeScript and the dedicated
 PostgreSQL publication. Nonempty `$visible` is the default allowlist.
-`ZeroColumns` replaces it; `$hidden` and `ZeroExclude` subtract columns.
+`ZeroColumns` replaces it; `$hidden` and `ZeroExcludeColumns` subtract columns.
 `ZeroIncludeColumns` deliberately opts columns back in but cannot expand an
 explicit `ZeroColumns` allowlist. Accessors and appended properties are not stored
 columns and do not become replicated values.
 
+`$hidden` can also name accessors and relationships. A relationship in `$hidden`
+or outside a nonempty `$visible` is omitted from live results, even when explicitly
+requested with `with()`. `whereHas()` can still test the relationship if its join keys
+and filter columns are published and its policy requirements are met.
+
+Model reads honor `$with`: for example, `protected $with = ['customer', 'items.product'];`
+adds those relationships to `Order::zeroQuery()->get()`. Explicit `with()` callbacks
+can refine a default include. Each returned path requires the same visibility
+coverage as an explicit include. Use names and dotted paths; column selections
+such as `customer:id,name` are not supported in live defaults.
+
 Primary keys, enabled timestamps, query/default columns, and relationship
 keys must remain available. Missing required columns fail generation instead of
-silently expanding exposure. `$fillable` separately controls write fields; it does
-not hide replicated data. Primary keys and lifecycle timestamps are not patchable
+silently expanding exposure. Zero uses Eloquent's `$fillable` and `$guarded` rules
+for exposed write fields. With `$guarded = []`, exposed mass-assignable business
+columns are writable; hiding a column keeps it out of mutation inputs as well.
+Primary keys and lifecycle timestamps are not patchable
 business input. Authorize ownership and association changes explicitly in controllers.
 
 Authority-only attributes may remain private in maintained permission projections.
 They do not need to become public business columns.
 
-## Zero scopes and creation defaults
+## Scopes and creation defaults
 
-Use `#[ZeroScope]` on a nonpublic method accepting `ZeroQuery` to define local
-query construction. It may return the supplied builder or `void`. Eloquent scopes
-remain separate. Zero builders are mutable; aliases share changes, and `clone`
+Define one Eloquent local scope using `#[Scope]` or the `scopeFoo` convention.
+Its portable body applies to both Eloquent reads and `Model::zeroQuery()->foo()`.
+Zero builders are mutable; aliases share changes, and `clone`
 creates an independent branch. Use `with()`, `whereHas()` and `whereDoesntHave()`
 for relationships, and query-builder callbacks for grouped `where()` conditions.
 
-`ZeroGlobalScope` implementations can be registered using `#[ZeroScopedBy]` or
-`addZeroGlobalScope()`. Globals remain AND constraints outside caller OR groups.
+Register Eloquent globals using `#[ScopedBy]` or `addGlobalScope()`.
+Globals remain AND constraints outside caller OR groups.
 `withoutGlobalScope()` / `withoutGlobalScopes()` remove their predicates and defaults.
 These business scopes do not replace explicit policy visibility.
 
-`withAttributes(['user_id' => ZeroContext::USER_ID], asConditions: false)` supplies
+`withAttributes(['user_id' => ContextReference::current(ZeroContext::USER_ID)], asConditions: false)` supplies
 creation-only defaults from the application's typed context enum. Without
 `asConditions: false`, the attributes also constrain reads. Register a creator
-default in `booted()` with `addZeroGlobalScope()` when needed. Explicit creation
+default in `booted()` with `addGlobalScope()` when needed. Explicit creation
 attributes override defaults; updates do not receive them. These defaults are
-not an ownership authorization boundary. Context enum cases are symbolic;
+not an ownership authorization boundary. `ZeroForLaravel\Context\ContextReference::current()`
+resolves the value for Eloquent and compiles to a trusted context reference for Zero;
 `ZeroContext::USER_ID->value` is just a literal string. See
 [configuration](./configuration.mdx) for the attributed resolver contract.
 

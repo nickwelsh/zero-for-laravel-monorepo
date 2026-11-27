@@ -32,7 +32,7 @@ final class Metadata
     public function read(TableDefinition $definition, ResolvedContext $context, ?Authenticatable $actor, array $input): array
     {
         Input::keys($input, ['version', 'contract', 'filter', 'groupBy', 'directories'], 'metadata');
-        if (($input['version'] ?? null) !== 2) {
+        if (($input['version'] ?? null) !== $definition->table->version()) {
             Input::fail('version', 'Unsupported table protocol.');
         }
 
@@ -144,7 +144,7 @@ final class Metadata
                     'nextCursor' => $more && $last !== null ? Crypt::encryptString(json_encode(['scope' => $scope, 'after' => $last], JSON_THROW_ON_ERROR)) : null];
             }
 
-            return ['version' => 2, 'requestKey' => hash('sha256', serialize([$filter, $groupBy, $directories])),
+            return ['version' => $table->version(), 'requestKey' => hash('sha256', serialize([$filter, $groupBy, $directories])),
                 'observedAt' => now('UTC')->toIso8601String(), 'totalCount' => $total, 'directories' => $results];
         });
     }

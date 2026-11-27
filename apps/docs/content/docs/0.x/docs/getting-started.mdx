@@ -1,10 +1,10 @@
 ---
 title: Getting started
-description: Install v0.13 and generate controller-first queries and mutations.
+description: Install v0.15 and generate controller-first queries and mutations.
 ---
 
-Install matching **v0.13.0** Composer and npm packages and deploy their generated output together.
-The optional `@nickwelsh/zero-table` package also uses **0.13.0**.
+Install matching **v0.15.0** Composer and npm packages and deploy their generated output together.
+The optional `@nickwelsh/zero-table` package also uses **0.15.0**.
 
 - PHP 8.3+, Laravel 12/13, PDO PostgreSQL, and PostgreSQL 15+ with logical replication.
 - Native Zero client and cache **1.11.4**, pinned together.
@@ -14,8 +14,8 @@ The optional `@nickwelsh/zero-table` package also uses **0.13.0**.
 In an existing Laravel application:
 
 ```sh
-composer require nickwelsh/zero-for-laravel:^0.13.0
-pnpm add @nickwelsh/zero-for-laravel@^0.13.0 @rocicorp/zero@1.11.4
+composer require nickwelsh/zero-for-laravel:^0.15.0
+pnpm add @nickwelsh/zero-for-laravel@^0.15.0 @rocicorp/zero@1.11.4
 ```
 
 For Inertia pages, install `inertiajs/inertia-laravel:^3.0` and
@@ -28,31 +28,23 @@ contains installation commands, migrations, authentication, sharing, and the loc
 Composer/pnpm wiring. Its application requires PHP 8.4.1+.
 
 Configure Laravel's PostgreSQL connection and migrate the application's tables.
-Define the application's string-backed `App\Enums\ZeroContext` enum and attributed
-resolver, then set both `context` and `context_resolver` in `config/zero.php`.
-Follow the [typed context setup](./configuration.mdx#typed-context-and-resolver);
-generation reflects signatures rather than executing resolver methods.
+Zero supplies `user_id` from Laravel's authenticated request; no context classes
+need to be created or published. To add fields, see
+[typed context and resolver](./configuration.mdx#typed-context-and-resolver).
 
 Opt models in with `HasZeroQueries`; their Composer namespaces are discovered automatically.
-Define column allowlists and supported Eloquent relationships. Protect private
-models with ordinary Laravel policies, `HasPolicyVisibility`, and explicit
-`visibleTo($request->user())` on each protected query path. Public models must be
-marked deliberately with `#[ZeroForLaravel\Attributes\ZeroPublic]`. See
-[policy bindings and managed grants](./authorization.mdx#configure-bindings-and-managed-grants)
-for RBAC/ABAC setup and transactional sharing. Zero global scopes remain useful
-for business constraints and creation defaults; they do not replace visibility.
+Define column allowlists and supported Eloquent relationships. No permissions
+setup is required: each live query returns the rows its filters and scopes select.
+To require policy coverage on every read of a model, including through relationships,
+bind it in `permissions.resources`. Follow [policy bindings and managed grants](./authorization.mdx#configure-bindings-and-managed-grants)
+before generating contracts for those models.
 
-Publish permissions configuration and migrations, configure the subject/resource
-bindings, migrate, and backfill any existing ACLs into managed grants. Rebuild the
-private projections before generation. Declare queries and mutations on registered
-controller routes, then generate against that database:
+Declare queries and mutations on registered controller routes, then generate
+against your application's database:
 
 ```sh
 php artisan vendor:publish --tag=zero-config
-php artisan vendor:publish --tag=permissions-config
-php artisan vendor:publish --tag=permissions-migrations
 php artisan migrate
-php artisan permissions:rebuild
 php artisan zero:generate --react
 php artisan zero:sync-publication --dry-run
 ```
@@ -70,5 +62,4 @@ and register [controller mutations](./mutations.mdx). Install the
 [Inertia adapter](./react.mdx) in the page resolver and pass both `userID` and typed
 `context` to the provider. Keep policies, Gates, and FormRequest association checks;
 creation defaults do not authorize writes. Deploy generated PHP and TypeScript
-together, and use `zero:generate --check` to detect stale output. Existing 0.x
-applications should follow the [breaking migration mappings](./constraints.mdx#migrating-existing-0x-applications).
+together, and use `zero:generate --check` to detect stale output.

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace ZeroForLaravel\Tests\Fixtures;
 
 use Carbon\CarbonImmutable;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -14,7 +15,7 @@ use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Support\Carbon;
 use ZeroForLaravel\Concerns\HasPolicyVisibility;
 use ZeroForLaravel\Concerns\HasZeroQueries;
-use ZeroForLaravel\Query\ZeroQuery;
+use ZeroForLaravel\Context\ContextReference;
 
 /**
  * @property string $id
@@ -63,8 +64,8 @@ class Task extends Model
 
     protected static function booted(): void
     {
-        static::addZeroGlobalScope('creator', function (ZeroQuery $query): void {
-            $query->withAttributes(['user_id' => ZeroContext::USER_ID], asConditions: false);
+        static::addGlobalScope('creator', function (Builder $query): void {
+            $query->withAttributes(['user_id' => ContextReference::current(ZeroContext::USER_ID)], asConditions: false);
         });
     }
 

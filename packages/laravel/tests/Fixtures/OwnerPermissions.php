@@ -17,7 +17,7 @@ use ZeroForLaravel\Permissions\PermissionSchema;
 use ZeroForLaravel\Permissions\PermissionServiceProvider;
 use ZeroForLaravel\Permissions\ProjectionManager;
 
-/** Shared real owner bindings; private fixtures are never public read opt-ins. */
+/** Owner fixtures opt into policy coverage through resource bindings. */
 final class OwnerPermissions
 {
     /** @param list<class-string<Model>> $classes */

@@ -73,25 +73,62 @@ test('the cache request size limit still bounds transform work', function (): vo
         ]]])->assertStatus(413);
 });
 
-test('generation command writes verified contracts and can detect drift', function (): void {
+test('default generation separates disposable modules from editable files and detects drift without writing', function (): void {
     /** @var HttpTestCase $this */
-    $path = sys_get_temp_dir().'/zero-for-laravel-'.uniqid().'.ts';
+    $directory = sys_get_temp_dir().'/zero-default-'.uniqid();
+    $original = base_path();
+    app()->setBasePath($directory);
     try {
-        $command = $this->artisan('zero:generate', ['--output' => $path]);
-        $this->assertInstanceOf(PendingCommand::class, $command);
-        $command->assertSuccessful()->run();
-        $source = file_get_contents($path);
-        $this->assertIsString($source);
-        $this->assertStringContainsString('export type TaskRow =', $source);
-        $command = $this->artisan('zero:generate', ['--output' => $path, '--check' => true]);
-        $this->assertInstanceOf(PendingCommand::class, $command);
-        $command->assertSuccessful()->run();
-        file_put_contents($path, '// out of date');
-        $command = $this->artisan('zero:generate', ['--output' => $path, '--check' => true]);
-        $this->assertInstanceOf(PendingCommand::class, $command);
-        $command->assertFailed()->run();
+        config(['zero.generation' => []]);
+        (new ZeroServiceProvider(app()))->register();
+        expect(config('zero.wayfinder.module'))->toBe('@/zero');
+        $root = resource_path('js/zero');
+        File::ensureDirectoryExists($directory);
+        File::put($directory.'/.gitignore', "# Keep this\r\n/bootstrap/zero-queries.php");
+        File::put($directory.'/package.json', '{"dependencies":{"react":"^19"}}');
+        $this->discover([...$this->models(), TasksTable::class]);
+        Route::post('/write', [ControllerMutationController::class, 'store']);
+        Route::get('/tasks/{title}', [QueryController::class, 'index']);
+
+        expect(Artisan::call('zero:generate', ['--check' => true]))->toBe(1);
+        expect(File::exists($root))->toBeFalse();
+        // Older versions tracked these same relative paths under generated/.
+        File::ensureDirectoryExists($root.'/generated/tables');
+        File::put($root.'/generated/files.json', '["tables/tasks.ts"]');
+        File::put($root.'/generated/tables/tasks.ts', '// Generated Zero public API. Do not edit.');
+        expect(Artisan::call('zero:generate'))->toBe(0, Artisan::output());
+        expect(File::exists($root.'/generated/tables/tasks.ts'))->toBeFalse();
+        $ignores = File::get($root.'/.gitignore');
+        expect($ignores)->toContain("generated/\n", "/tables/tasks.ts\n", "/ZeroForLaravel/Tests/Fixtures/QueryController.ts\n");
+        expect(File::get($root.'/generated/index.ts'))->toContain('export type TaskRow =');
+        expect(File::get($root.'/generated/react.ts'))->toContain('"../zero.config"', '"./index"', '"./mutations"');
+        expect(File::get($root.'/generated/queries.ts'))->toContain(json_encode('./index', JSON_THROW_ON_ERROR));
+        expect(File::get($root.'/tables/tasks.ts'))->toContain('"../generated/index"');
+        expect(File::get($root.'/ZeroForLaravel/Tests/Fixtures/ControllerMutationController.ts'))->toContain('"../../../generated/mutations"');
+        expect(File::get($root.'/ZeroForLaravel/Tests/Fixtures/QueryController.ts'))->toContain('"../../../generated/queries"');
+        expect(File::exists($root.'/zero.config.ts'))->toBeTrue();
+        expect(File::exists($root.'/generated/zero.config.ts'))->toBeFalse();
+        expect(File::exists(base_path('bootstrap/zero-queries.php')))->toBeTrue();
+        expect(File::exists(base_path('bootstrap/zero-mutations.php')))->toBeTrue();
+
+        File::put($root.'/zero.config.ts', '// Application options');
+        File::put($root.'/.gitignore', '# Application rule');
+        expect(Artisan::call('zero:generate'))->toBe(0, Artisan::output());
+        expect(Artisan::call('zero:generate'))->toBe(0, Artisan::output());
+        expect(File::get($root.'/zero.config.ts'))->toBe('// Application options');
+        expect(File::get($root.'/.gitignore'))->toBe("# Application rule\n".$ignores);
+        expect(File::get($directory.'/.gitignore'))->toBe("# Keep this\r\n/bootstrap/zero-queries.php\r\n/bootstrap/zero-mutations.php\r\n");
+        expect(Artisan::call('zero:generate', ['--check' => true]))->toBe(0, Artisan::output());
+        File::put($root.'/generated/mutations.ts', '// out of date');
+        expect(Artisan::call('zero:generate', ['--check' => true]))->toBe(1);
+        expect(File::get($root.'/generated/mutations.ts'))->toBe('// out of date');
+        $this->discover($this->models());
+        expect(Artisan::call('zero:generate'))->toBe(0, Artisan::output());
+        expect(File::get($root.'/.gitignore'))->not->toContain('/tables/tasks.ts');
+        expect(File::exists($root.'/tables/tasks.ts'))->toBeFalse();
     } finally {
-        File::delete($path);
+        app()->setBasePath($original);
+        File::deleteDirectory($directory);
     }
 });
 
@@ -186,7 +223,7 @@ test('generation owns named controller modules and removes only stale generated 
     }
 });
 
-test('Formbraid generation publishes direct descriptors and bound factories without overwriting edits', function (): void {
+test('Formbraid generation publishes direct descriptors and bound factories without overwriting edits', function (bool $nested): void {
     $id = uniqid();
     $directory = 'resources/js/zero-forms-'.$id;
     $root = base_path($directory);
@@ -201,10 +238,10 @@ test('Formbraid generation publishes direct descriptors and bound factories with
         'components' => (object) [], 'groups' => (object) [],
     ], JSON_THROW_ON_ERROR));
     config([
-        'zero.generation.output' => $root.'/native/generated.ts',
+        'zero.generation.output' => $root.($nested ? '/generated/index.ts' : '/native/generated.ts'),
         'zero.generation.queries' => $root.'/queries.php',
         'zero.generation.mutations' => $root.'/mutations.php',
-        'zero.formbraid.output' => $directory.'/forms',
+        ...($nested ? [] : ['zero.formbraid.output' => $directory.'/forms']),
         'formbraid.metadata' => $directory.'/metadata.json',
         'formbraid.component_enum' => $enum,
         'formbraid.fields.types' => ['string' => 'Input', 'boolean' => 'Input'],
@@ -215,7 +252,8 @@ test('Formbraid generation publishes direct descriptors and bound factories with
     Route::post('/options/{task}', [ControllerMutationController::class, 'options']);
     Route::get('/query/{title}', [QueryController::class, 'index']);
     try {
-        $path = $root.'/forms/ZeroForLaravel/Tests/Fixtures/ControllerMutationController.ts';
+        $forms = $root.($nested ? '/formbraid' : '/forms');
+        $path = $forms.'/ZeroForLaravel/Tests/Fixtures/ControllerMutationController.ts';
         expect(Artisan::call('zero:generate'))->toBe(0, Artisan::output());
         expect(File::exists($path))->toBeFalse();
         config(['zero.formbraid.enabled' => true]);
@@ -227,15 +265,17 @@ test('Formbraid generation publishes direct descriptors and bound factories with
         expect(Artisan::call('zero:formbraid', ['--check' => true]))->toBe(0, Artisan::output());
         $source = File::get($path);
         expect($source)->toContain('const _form_store = createControllerForm(', 'parameters: {"task": string | number | boolean}', 'as store}', 'as complete}');
+        expect($source)->toContain($nested ? 'from "../../../../generated/react"' : 'from "../../../../native/generated.react"');
+        expect($source)->toContain($nested ? 'from "../../../../generated/queries"' : 'from "../../../../native/generated.queries"');
         expect($source)->not->toContain('useControllerForm', 'fetch(');
         expect($source)->toContain('createZeroOptionSource', 'withOptionSources(', '"task": parameters["task"]', 'resolve:', '"kind":"value"');
         preg_match_all('/_optionBindings\["(q_[a-f0-9]+)"\]/', $source, $bindings);
         foreach ($bindings[1] as $binding) {
-            expect(File::get($root.'/native/generated.queries.ts'))->toContain('"'.$binding.'"');
+            expect(File::get($root.($nested ? '/generated/queries.ts' : '/native/generated.queries.ts')))->toContain('"'.$binding.'"');
         }
 
-        expect(File::get($root.'/forms/requests/ZeroForLaravel/Tests/Fixtures/ControllerMutationRequest.ts'))->toContain('defineForm<ControllerMutationRequestValues>()', '"maxLength": 100');
-        expect(File::exists($root.'/forms/ZeroForLaravel/Tests/Fixtures/QueryController.ts'))->toBeFalse();
+        expect(File::get($forms.'/requests/ZeroForLaravel/Tests/Fixtures/ControllerMutationRequest.ts'))->toContain('defineForm<ControllerMutationRequestValues>()', '"maxLength": 100');
+        expect(File::exists($forms.'/ZeroForLaravel/Tests/Fixtures/QueryController.ts'))->toBeFalse();
         expect(Task::query()->count())->toBe(0);
         config(['zero.formbraid.enabled' => false]);
         expect(Artisan::call('zero:formbraid'))->toBe(0, Artisan::output());
@@ -258,7 +298,7 @@ test('Formbraid generation publishes direct descriptors and bound factories with
         File::deleteDirectory($root);
         File::delete(base_path($enum));
     }
-});
+})->with(['default layout' => true, 'named output with custom forms directory' => false]);
 
 class InvalidContextResolver
 {
@@ -346,14 +386,14 @@ test('Composer namespaces discover nested models and tables without configuratio
         'autoload' => ['psr-4' => [$namespace.'\\' => ['app', 'missing']]],
         'autoload-dev' => ['psr-4' => [$namespace.'\\Dev\\' => 'dev']],
     ], JSON_THROW_ON_ERROR));
-    File::put($directory.'/app/Domain/NestedTask.php', '<?php namespace '.$namespace.'\\Domain; #[\\ZeroForLaravel\\Attributes\\ZeroPublic] class NestedTask extends \\ZeroForLaravel\\Tests\\Fixtures\\VisibleTask {}');
+    File::put($directory.'/app/Domain/NestedTask.php', '<?php namespace '.$namespace.'\\Domain; class NestedTask extends \\ZeroForLaravel\\Tests\\Fixtures\\VisibleTask {}');
     File::put($directory.'/app/Domain/AbstractTask.php', '<?php namespace '.$namespace.'\\Domain; abstract class AbstractTask extends NestedTask {}');
     File::put($directory.'/app/Domain/Unpublished.php', '<?php namespace '.$namespace.'\\Domain; class Unpublished extends \\Illuminate\\Database\\Eloquent\\Model {}');
     File::put($directory.'/app/Domain/Deep/Utility.php', '<?php namespace '.$namespace.'\\Domain\\Deep; class Utility {}');
-    File::put($directory.'/app/Other/OtherTask.php', '<?php namespace '.$namespace.'\\Other; #[\\ZeroForLaravel\\Attributes\\ZeroPublic] class OtherTask extends \\ZeroForLaravel\\Tests\\Fixtures\\VisibleTask { protected $table = "lists"; protected $visible = ["id", "name"]; protected $fillable = ["name"]; }');
+    File::put($directory.'/app/Other/OtherTask.php', '<?php namespace '.$namespace.'\\Other; class OtherTask extends \\ZeroForLaravel\\Tests\\Fixtures\\VisibleTask { protected $table = "lists"; protected $visible = ["id", "name"]; protected $fillable = ["name"]; }');
     File::put($directory.'/dev/DevTask.php', '<?php namespace '.$namespace.'\\Dev; class DevTask extends \\ZeroForLaravel\\Tests\\Fixtures\\VisibleTask {}');
     File::put($directory.'/app/Domain/TasksTable.php', '<?php namespace '.$namespace.'\\Domain; use '.Table::class.'; class TasksTable { public function definition(): Table { return Table::for(NestedTask::class)->allowedSorts(["title"]); } }');
-    File::put($directory.'/app/Domain/ReadTasks.php', '<?php namespace '.$namespace.'\\Domain; class ReadTasks { public function all(): \\ZeroForLaravel\\Query\\ZeroQuery { return NestedTask::zeroQuery()->orderBy("title", "asc")->limit(5); } }');
+    File::put($directory.'/app/Domain/ReadTasks.php', '<?php namespace '.$namespace.'\\Domain; class ReadTasks { public function all(): \\ZeroForLaravel\\Query\\ZeroQuery { return NestedTask::zeroQuery()->orderBy("title", "asc")->limit(5)->get(); } }');
     $loader->addPsr4($namespace.'\\', $directory.'/app');
     $loader->addPsr4($namespace.'\\Dev\\', $directory.'/dev');
     $loader->register();
@@ -478,9 +518,9 @@ final readonly class ApplicationSchemaDriver implements MutationSchemaDriver
         return "// Application schema driver\n".$this->driver->imports();
     }
 
-    public function object(array $parameters, ?array $cursor = null, bool $public = false, array $contracts = [], bool $routed = true, bool $window = false): string
+    public function object(array $parameters, ?array $cursor = null, bool $public = false, array $contracts = [], bool $routed = true, ?string $pagination = null): string
     {
-        return $this->driver->object($parameters, $cursor, $public, $contracts, $routed, $window);
+        return $this->driver->object($parameters, $cursor, $public, $contracts, $routed, $pagination);
     }
 
     public function encode(array $parameters, string $input): string

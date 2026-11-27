@@ -36,7 +36,7 @@ export async function readTableMetadata<C extends Capabilities>(
     const result: unknown = await readMetadata(capabilities, state, directories, signal);
     if (
         !record(result) ||
-        result.version !== 2 ||
+        result.version !== capabilities.version ||
         typeof result.requestKey !== 'string' ||
         typeof result.observedAt !== 'string' ||
         !count(result.totalCount) ||

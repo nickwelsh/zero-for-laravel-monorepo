@@ -51,6 +51,8 @@ const env = {
     APP_ENV: 'local',
     APP_KEY: `base64:${randomBytes(32).toString('base64')}`,
     ZERO_API_KEY: randomBytes(32).toString('hex'),
+    ZERO_QUERY_ALLOWED_CLIENT_HEADERS: 'x-xsrf-token',
+    ZERO_MUTATE_ALLOWED_CLIENT_HEADERS: 'x-xsrf-token',
     ZERO_APP_ID: `test_${suffix}`,
     ZERO_APP_PUBLICATIONS: `laravel_zero_test_${suffix}`,
     ZERO_PORT: String(await port()),

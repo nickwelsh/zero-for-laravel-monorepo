@@ -4,26 +4,22 @@ declare(strict_types=1);
 
 namespace ZeroForLaravel\Search;
 
-use Illuminate\Support\Facades\Cache;
-use Illuminate\Support\Str;
-
-/** Opaque index-level markers, updated only after the search engine succeeds. */
+/** Opaque markers derived only from documents visible under a server-resolved scope. */
 final class SearchRevision
 {
-    public static function current(string $index): string
+    public static function current(string $index, string $filter, string $documents): string
     {
-        $revision = Cache::get(self::key($index), '');
+        $revisions = [];
+        foreach (preg_split('/\r\n|\n|\r/', trim($documents)) ?: [] as $document) {
+            if ($document !== '') {
+                $revisions[] = hash('sha256', $document);
+            }
+        }
 
-        return is_string($revision) ? $revision : '';
-    }
+        sort($revisions, SORT_STRING);
 
-    public static function touch(string $index): void
-    {
-        Cache::forever(self::key($index), (string) Str::uuid());
-    }
+        $domain = json_encode([$index, $filter], JSON_THROW_ON_ERROR);
 
-    private static function key(string $index): string
-    {
-        return 'zero:search:revision:'.hash('sha256', config()->string('zero.app_id').':'.$index);
+        return hash_hmac('sha256', $domain."\n".implode("\n", $revisions), config()->string('app.key'));
     }
 }

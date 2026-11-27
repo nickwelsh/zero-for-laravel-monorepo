@@ -6,6 +6,7 @@ namespace ZeroForLaravel\Tests\Feature;
 
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Database\Eloquent\Attributes\ScopedBy;
+use Illuminate\Database\Eloquent\Concerns\HasUlids;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\QueryException;
 use Illuminate\Database\Schema\Blueprint;
@@ -20,11 +21,16 @@ use PhpParser\ParserFactory;
 use RuntimeException;
 use stdClass;
 use Symfony\Component\Process\Process;
+use ZeroForLaravel\Attributes\ZeroMutation;
 use ZeroForLaravel\Generation\ControllerQueryCompiler;
 use ZeroForLaravel\Generation\ControllerQueryGenerator;
+use ZeroForLaravel\Generation\Mutations\ControllerMutationCompiler;
 use ZeroForLaravel\Generation\TypeScriptGenerator;
 use ZeroForLaravel\Generation\ZodSchemaDriver;
+use ZeroForLaravel\Http\ControllerRouteDispatcher;
 use ZeroForLaravel\Metadata\ModelRegistry;
+use ZeroForLaravel\Mutation\ControllerMutationRegistry;
+use ZeroForLaravel\Permissions\Binding;
 use ZeroForLaravel\Permissions\Casbin;
 use ZeroForLaravel\Permissions\PermissionSchema;
 use ZeroForLaravel\Permissions\PermissionServiceProvider;
@@ -44,6 +50,24 @@ use ZeroForLaravel\Tests\PostgresTestCase;
 
 uses(PostgresTestCase::class);
 
+final class UlidPermissionList extends PermissionList
+{
+    use HasUlids;
+
+    protected $table = 'permission_ulid_lists';
+
+    protected $fillable = ['owner_id', 'department_id'];
+}
+
+final class UlidListController
+{
+    #[ZeroMutation]
+    public function store(): void
+    {
+        UlidPermissionList::create(['owner_id' => '01arz3ndektsv4rrffq69g5fav', 'department_id' => 'engineering']);
+    }
+}
+
 #[ScopedBy([VisibleToCurrentUser::class])]
 class AutomaticallyVisibleList extends PermissionList
 {
@@ -58,12 +82,12 @@ final class AutomaticallyVisibleController
 {
     public function index(): \Inertia\Response
     {
-        return \Inertia\Inertia::render('lists/index', ['lists' => AutomaticallyVisibleList::zeroQuery()->with('siblings')->where('id', 7)]);
+        return \Inertia\Inertia::render('lists/index', ['lists' => AutomaticallyVisibleList::zeroQuery()->with('siblings')->where('id', 7)->get()]);
     }
 
     public function bypass(): \Inertia\Response
     {
-        return \Inertia\Inertia::render('lists/index', ['lists' => AutomaticallyVisibleList::zeroQuery()->withoutGlobalScope(VisibleToCurrentUser::class)]);
+        return \Inertia\Inertia::render('lists/index', ['lists' => AutomaticallyVisibleList::zeroQuery()->withoutGlobalScope(VisibleToCurrentUser::class)->get()]);
     }
 }
 
@@ -121,6 +145,28 @@ test('private permission projections replicate without entering the browser sche
     expect($sql)->toContain('permission_subjects', 'permission_index');
     $browser = (new TypeScriptGenerator)->generate($registry);
     expect($browser)->not->toContain('permission_subjects', 'permission_index', 's_is_admin', 'a_owner_id');
+});
+
+test('permission projections preserve Laravel ULID resource and owner keys', function (): void {
+    Schema::create('permission_ulid_lists', function (Blueprint $table): void {
+        $table->ulid('id')->primary();
+        $table->foreignUlid('owner_id');
+        $table->char('department_id', 16);
+    });
+    config(['permissions.resources' => [UlidPermissionList::class => config('permissions.resources.'.PermissionList::class)]]);
+    (new ProjectionManager)->rebuild();
+
+    Route::post('/ulid-lists', [UlidListController::class, 'store']);
+    $models = new ModelRegistry([UlidPermissionList::class]);
+    $program = (new ControllerMutationCompiler((new ParserFactory)->createForHostVersion(), $models))->compile(UlidListController::class, 'store');
+    $registry = new ControllerMutationRegistry($models, new ControllerRouteDispatcher, [$program->name() => ['contract' => $program->contract(), 'guards' => []]]);
+    $id = (new UlidPermissionList)->newUniqueId();
+    $wire = ['version' => $program->fingerprint, 'input' => [], 'route' => [], 'prepared' => ['timestamp' => 1700000000000, 'ids' => ['s0' => $id]]];
+    DB::transaction(fn (): array => $registry->execute($program->name(), $wire, new ResolvedContext(['user_id' => null])));
+
+    $row = DB::table(Binding::resource(UlidPermissionList::class)->projectionTable())->where('resource_id', $id)->firstOrFail();
+    expect($row->object_id)->toBe($id)->and($row->a_owner_id)->toBe('01arz3ndektsv4rrffq69g5fav');
+    expect($row->a_department_id)->toBe(str_pad('engineering', 16));
 });
 
 test('portable Zero queries use trusted actors and captured Gates replay without executing the controller', function (): void {
@@ -239,10 +285,18 @@ test('alternate role paths survive removal without leaking across domains and re
     Casbin::addGroupingPolicy('user:42', 'role:second', 'list:7');
     Casbin::addGroupingPolicy('role:first', 'role:reader', 'list:7');
     Casbin::addGroupingPolicy('role:second', 'role:reader', 'list:7');
+    Casbin::addPolicy('user:42', 'list:7', 'todo-list', 'view', 'any', 'allow');
+    Casbin::addPolicy('user:42', 'list:8', 'todo-list', 'update', 'any', 'allow');
+    Casbin::removePolicy('user:42', 'list:7', 'todo-list', 'view', 'any', 'allow');
     expect(PermissionList::query()->visibleTo($alice)->pluck('id')->all())->toBe([7]);
-    Casbin::removeGroupingPolicy('role:first', 'role:reader', 'list:7');
-    expect(PermissionList::query()->visibleTo($alice)->pluck('id')->all())->toBe([7]);
-    (new ProjectionManager)->rebuild();
+    DB::transaction(function () use ($alice): void {
+        Casbin::removeGroupingPolicy('role:first', 'role:reader', 'list:7');
+        expect(PermissionList::query()->visibleTo($alice)->pluck('id')->all())->toBe([7]);
+        $incremental = DB::table('permission_index')->orderBy('id')->get()->toJson();
+        DB::table('permission_index')->delete();
+        (new ProjectionManager)->rebuild();
+        expect(DB::table('permission_index')->orderBy('id')->get()->toJson())->toBe($incremental);
+    });
     expect(PermissionList::query()->visibleTo($alice)->pluck('id')->all())->toBe([7]);
     DB::table('permission_test_lists')->where('id', 7)->update(['owner_id' => '84']);
     expect(PermissionList::query()->visibleTo($alice)->count())->toBe(0);
@@ -250,6 +304,33 @@ test('alternate role paths survive removal without leaking across domains and re
     expect(PermissionList::query()->visibleTo($alice)->count())->toBe(1);
     Casbin::removeGroupingPolicy('role:second', 'role:reader', 'list:7');
     expect(PermissionList::query()->visibleTo($alice)->count())->toBe(0);
+});
+
+test('independent domains commit while a competing role edit waits for its own domain', function (): void {
+    $alice = PermissionUser::create(['id' => 42, 'department_id' => 'engineering']);
+    foreach ([7, 8] as $id) {
+        PermissionList::create(['id' => $id, 'owner_id' => '42', 'department_id' => 'engineering', 'name' => 'List '.$id]);
+        Casbin::addPolicy('role:reader', 'list:'.$id, 'todo-list', 'view', 'any', 'allow');
+    }
+
+    config(['database.connections.other' => DB::connection()->getConfig()]);
+    DB::connection('other')->statement("SET lock_timeout = '300ms'");
+    $assign = fn (int $id): bool => Casbin::addGroupingPolicy('user:42', 'role:reader', 'list:'.$id);
+    DB::transaction(function () use ($assign): void {
+        expect($assign(7))->toBeTrue();
+        config(['permissions.connection' => 'other']);
+        try {
+            expect($assign(8))->toBeTrue();
+            expect(fn (): bool => Casbin::removePolicy('role:reader', 'list:7', 'todo-list', 'view', 'any', 'allow'))->toThrow(QueryException::class, 'lock timeout');
+        } finally {
+            config(['permissions.connection' => null]);
+        }
+    });
+    expect(PermissionList::query()->visibleTo($alice)->orderBy('id')->pluck('id')->all())->toBe([7, 8]);
+    config(['permissions.connection' => 'other']);
+    expect(Casbin::removePolicy('role:reader', 'list:7', 'todo-list', 'view', 'any', 'allow'))->toBeTrue();
+    config(['permissions.connection' => null]);
+    expect(PermissionList::query()->visibleTo($alice)->pluck('id')->all())->toBe([8]);
 });
 
 test('a policy admin falls back to normal grants when its live override is removed', function (): void {

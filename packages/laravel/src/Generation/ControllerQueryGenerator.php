@@ -5,7 +5,9 @@ declare(strict_types=1);
 namespace ZeroForLaravel\Generation;
 
 use LogicException;
+use ZeroForLaravel\Query\QueryLimits;
 use ZeroForLaravel\Tables\TableDefinition;
+use ZeroForLaravel\Tables\TableRelationPath;
 
 /** Emits deployable registrations; never executes an HTTP action to sample its query. */
 final readonly class ControllerQueryGenerator
@@ -42,11 +44,24 @@ final readonly class ControllerQueryGenerator
             'const zql = createBuilder(schema);',
             'const defineQueries = defineQueriesWithType<typeof schema>();',
             'const defineQuery = defineQueryWithType<typeof schema, Context>();',
-            'export const inputs = {',
         ];
+        if (str_contains($code, 'pagePrefix(')) {
+            $cap = QueryLimits::liveWindow();
+            $lines[] = <<<TS
+function pagePrefix(size: number, page = 1, window?: number) {
+    if (!Number.isSafeInteger(size) || size < 1 || !Number.isSafeInteger(page) || page < 1 || page > Math.floor(({$cap} - 1) / size)) throw new RangeError('Page exceeds the live window cap.');
+    const prefix = page * size + 1;
+    if (window !== undefined && (!Number.isSafeInteger(window) || window < prefix || window > {$cap})) throw new RangeError('Invalid scroll window.');
+    return window ?? prefix;
+}
+TS;
+        }
+
+        $lines[] = 'export const inputs = {';
         foreach ($queries as $query) {
             $cursor = null;
-            if ($query->expression->kind === 'paginate') {
+            $mode = $query->expression->kind === 'paginate' ? $query->expression->stringValue() : null;
+            if ($mode === 'cursor') {
                 $cursor = [];
                 foreach ($query->expression->cursorFields() as $field) {
                     $column = $query->expression->model?->columns[$field];
@@ -58,7 +73,7 @@ final readonly class ControllerQueryGenerator
                 }
             }
 
-            $lines[] = '  '.json_encode($query->name(), JSON_THROW_ON_ERROR).': '.$this->schemas->object($query->parameters, $cursor, contracts: $query->optionContracts(), routed: $query->optionSource === null && ! $query->standalone, window: $query->expression->kind === 'infinite').',';
+            $lines[] = '  '.json_encode($query->name(), JSON_THROW_ON_ERROR).': '.$this->schemas->object($query->parameters, $cursor, contracts: $query->optionContracts(), routed: $query->optionSource === null && ! $query->standalone, pagination: $mode).',';
         }
 
         $lines[] = '};';
@@ -80,9 +95,11 @@ final readonly class ControllerQueryGenerator
             $name = json_encode($query->name(), JSON_THROW_ON_ERROR);
             $parse = $this->schemas->parse('inputs['.$name.']', 'args');
             $model = json_encode($query->expression->model?->name, JSON_THROW_ON_ERROR);
-            $pageSize = in_array($query->expression->kind, ['infinite', 'paginate'], true) ? ', '.$query->expression->value : '';
+            $pageSize = '';
             if ($query->expression->kind === 'paginate') {
-                $pageSize .= ', '.json_encode($query->expression->cursorFields(), JSON_THROW_ON_ERROR);
+                $mode = $query->expression->stringValue();
+                $pageSize = ', '.$query->expression->children[1]->emit(true).', '.($mode === 'cursor' ? json_encode($query->expression->cursorFields(), JSON_THROW_ON_ERROR) : 'undefined')
+                    .', '.QueryLimits::liveWindow().', '.json_encode(['mode' => $mode, 'name' => $query->expression->children[2]->stringValue()], JSON_THROW_ON_ERROR);
             }
 
             $request = null;
@@ -143,6 +160,18 @@ final readonly class ControllerQueryGenerator
 
         foreach ($tables as $table) {
             $lines[] = '    '.var_export($table->queryName(), true).' => new \\ZeroForLaravel\\Tables\\RegisteredTableQuery('.var_export($table->name, true).', '.var_export($table->contract, true).'),';
+            foreach (TableRelationPath::all($table) as $path) {
+                if ($path->choices === null) {
+                    continue;
+                }
+
+                foreach (['list', 'resolve'] as $operation) {
+                    $bindings = array_keys(TableChoiceBindings::for($path, $operation, $queries));
+                    $name = $path->queryName($table, $operation, $bindings);
+                    $arguments = [$table->name, $table->contract, $operation, $path->path, $bindings, $name];
+                    $lines[] = '    '.var_export($name, true).' => new \\ZeroForLaravel\\Tables\\RegisteredTableQuery('.implode(', ', array_map(static fn (string|array $value): string => var_export($value, true), $arguments)).'),';
+                }
+            }
         }
 
         $lines[] = '];';

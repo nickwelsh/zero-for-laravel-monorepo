@@ -10,6 +10,8 @@ parameters:
     phpVersion: 80300
     tmpDir: .cache/phpstan
     parseModelCastsMethod: true
+    stubFiles:
+        - tests/Fixtures/scoped-todo-query.stub
     paths:
         - src
         - tests

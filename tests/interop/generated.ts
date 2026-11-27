@@ -236,10 +236,14 @@ export const definitions = {
             "done",
             "completed_at"
         ],
-        "scopeFingerprint": "fae932e1cd8b0385d7e7593e3e09afcba51d8494c277942e13f57de06da3d7fb",
+        "scopeFingerprint": "fd5c8e679c5107799431f8fe29305aecc10ea322311e406ddcd436a50cd72921",
         "creationDefaults": {
             "op": "merge",
             "values": [
+                {
+                    "op": "merge",
+                    "values": []
+                },
                 {
                     "op": "merge",
                     "values": [
@@ -256,10 +260,6 @@ export const definitions = {
                             ]
                         }
                     ]
-                },
-                {
-                    "op": "merge",
-                    "values": []
                 }
             ]
         },

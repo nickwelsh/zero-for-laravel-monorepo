@@ -19,6 +19,7 @@ test('Wayfinder owns page declarations while registered Zero props infer their l
     $directory = sys_get_temp_dir().'/zero-wayfinder-'.uniqid();
     app()->register(\Laravel\Wayfinder\WayfinderServiceProvider::class);
     expect(resolve(InertiaData::class)::class)->toBe(InertiaData::class);
+    config(['zero.wayfinder.enabled' => true]);
     app()->register(WayfinderServiceProvider::class);
     config([
         'zero.generation.queries' => $directory.'/queries.php',

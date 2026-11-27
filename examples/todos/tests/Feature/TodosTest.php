@@ -7,6 +7,7 @@ use App\Models\Todo;
 use App\Models\TodoList;
 use App\Models\User;
 use App\Permissions\ListPermissions;
+use Database\Seeders\TodosDemoSeeder;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Contracts\Http\Kernel;
 use Illuminate\Database\Events\QueryExecuted;
@@ -41,6 +42,19 @@ function runTodoMutation(User $user, string $controller, string $method, array $
 
     return $models->connection()->transaction(fn () => $registry->execute($program->name(), $args, new ResolvedContext(['user_id' => $user->id], (string) $user->id)));
 }
+
+test('the demo can be seeded twice without a signed-in user', function () {
+    app()->detectEnvironment(fn () => 'local');
+    $this->seed(TodosDemoSeeder::class);
+    $this->seed(TodosDemoSeeder::class);
+
+    $this->assertGuest();
+    $alice = User::where('email', 'alice@example.com')->firstOrFail();
+    $this->assertDatabaseHas('todo_lists', ['name' => 'Household', 'user_id' => $alice->id]);
+    $this->assertDatabaseHas('todo_lists', ['name' => 'Personal', 'user_id' => $alice->id]);
+    $this->assertDatabaseCount('todo_lists', 2);
+    $this->assertDatabaseCount('todos', 3);
+});
 
 test('creating a list returns its identity and grants only its authenticated owner access', function () {
     $owner = User::factory()->create();

@@ -18,16 +18,22 @@ final class NativeQueryEmitter
 {
     private int $depth = 0;
 
-    public function emit(QueryExpression $query): string
+    /** Relationship membership is independent of any preview's ordering and limit. */
+    public function relationMembership(ModelMetadata $parent, string $relation, QueryExpression $base): string
+    {
+        return $this->emit($base, $this->relationConditions($base, $parent->relationConstraints[$relation]['wheres'] ?? []));
+    }
+
+    public function emit(QueryExpression $query, ?QueryExpression $relationFilter = null, bool $modelRead = false): string
     {
         if (++$this->depth > 8) {
             throw new LogicException('Recursive Zero scope/relationship expansion exceeds eight levels at '.$query->model?->name.'.');
         }
 
         try {
-            $query = $this->distribute($query->snapshot());
+            $query = $query->snapshot()->distribute();
             if ($query->kind === 'conditional') {
-                return '('.$query->children[0]->emit(true).' ? '.$this->emit($query->children[1]).' : '.$this->emit($query->children[2]).')';
+                return '('.$query->children[0]->emit(true).' ? '.$this->emit($query->children[1], $relationFilter, $modelRead).' : '.$this->emit($query->children[2], $relationFilter, $modelRead).')';
             }
 
             [$root, $steps] = $this->steps($query);
@@ -50,32 +56,58 @@ final class NativeQueryEmitter
                 }
             }
 
+            if ($relationFilter instanceof QueryExpression) {
+                $conditions[] = $this->condition($relationFilter);
+            }
+
             $conditions[] = $this->condition($query);
             $conditions = array_values(array_filter($conditions, fn (string $condition): bool => $condition !== 'eb.and()'));
             if ($conditions !== []) {
                 $base .= '.where(eb => '.(count($conditions) === 1 ? $conditions[0] : 'eb.and('.implode(', ', $conditions).')').')';
             }
 
-            foreach ($scopes as $scope) {
-                [, $scopeSteps] = $this->steps($scope);
-                array_push($steps, ...$scopeSteps);
-            }
-
+            $cursor = $query->kind === 'paginate' && $query->value === 'cursor';
             foreach ($steps as $step) {
                 $args = array_slice($step->children, 1);
                 if ($step->kind === 'scope') {
                     [, $body] = $this->steps($step->children[1]);
-                    $base = $this->structural($base, $body);
-                } elseif ($step->kind === 'infinite') {
-                    $base .= '.limit(args.__window ?? '.((int) $step->value + 1).')';
-                } elseif ($step->kind === 'paginate') {
-                    $base .= '.limit('.((int) $step->value + 1).')';
-                    $base = '(args.__cursor === undefined ? '.$base.' : '.$base.'.start(args.__cursor))';
+                    $base = $this->structural($base, $body, $cursor, $modelRead);
+                } elseif ($step->value === 'orderBy') {
+                    $base .= $this->orderBy($step, $cursor);
                 } elseif ($step->value === 'with') {
-                    $base .= $this->include($step);
+                    $base .= $this->include($step, $modelRead);
+                } elseif ($step->value === 'first') {
+                    $base .= '.one()';
                 } elseif (in_array($step->value, ['orderBy', 'limit', 'start', 'one'], true)) {
                     $base .= '.'.$step->value.'('.implode(', ', array_map(fn (QueryExpression $arg): string => $arg->emit(true), $args)).')';
                 }
+            }
+
+            foreach ($scopes as $scope) {
+                [, $body] = $this->steps($scope);
+                // Model reads already merged the global includes with the model's and caller's.
+                $base = $this->structural($base, $body, $cursor, false, ! $modelRead);
+            }
+
+            if ($query->kind === 'paginate') {
+                $key = $query->queryModel()->key;
+                $ordered = $query->children[0]->cursorFields();
+                foreach ($scopes as $scope) {
+                    array_push($ordered, ...$scope->cursorFields());
+                }
+
+                if (! in_array($key, $ordered, true)) {
+                    $base .= '.orderBy('.json_encode($key, JSON_THROW_ON_ERROR).', '.($cursor ? 'args.__reverse ? "desc" : "asc"' : '"asc"').')';
+                }
+
+                $size = $query->children[1]->emit(true);
+                if ($cursor) {
+                    $base .= '.limit('.$size.' + 1)';
+
+                    return '(args.__cursor === undefined ? '.$base.' : '.$base.'.start(args.__cursor))';
+                }
+
+                $base .= '.limit(pagePrefix('.$size.', args.__page'.($query->value === 'scroll' ? ', args.__window' : '').'))';
             }
 
             return $base;
@@ -86,7 +118,7 @@ final class NativeQueryEmitter
 
     public function condition(QueryExpression $query): string
     {
-        $query = $this->distribute($query);
+        $query = $query->distribute();
         if ($query->kind === 'conditional') {
             return '('.$query->children[0]->emit(true).' ? '.$this->condition($query->children[1]).' : '.$this->condition($query->children[2]).')';
         }
@@ -106,6 +138,9 @@ final class NativeQueryEmitter
                 }
 
                 $added = $args[0]->kind === 'callback' ? $this->condition($args[0]->children[0]) : $this->comparison($args);
+            } elseif (in_array($step->value, ['whereIn', 'orWhereIn', 'whereNotIn', 'orWhereNotIn'], true)) {
+                $boolean = str_starts_with($step->stringValue(), 'or') ? 'or' : 'and';
+                $added = $this->membership($args[0], $args[1], str_contains($step->stringValue(), 'Not'));
             } elseif ($step->value === 'withAttributes' && ($args[1]->value ?? true)) {
                 $parts = [];
                 foreach ($args[0]->children as $property) {
@@ -113,17 +148,20 @@ final class NativeQueryEmitter
                 }
 
                 $added = 'eb.and('.implode(', ', $parts).')';
-            } elseif (in_array($step->value, ['whereHas', 'whereDoesntHave', 'whereExists'], true)) {
-                [$symbol, $child] = $this->child($step, $args[0]->stringValue());
-                $option = $args[2] ?? (($args[1]->type ?? null) === 'object' ? $args[1] : null);
-                $options = $option === null ? '' : ', '.$option->emit(true);
-                $added = 'eb.exists('.$args[0]->emit(true).', '.$symbol.' => '.$this->emit($child).$options.')';
+            } elseif (in_array($step->value, ['whereHas', 'whereDoesntHave'], true)) {
+                [$symbol, $child, $filter] = $this->child($step, $args[0]->stringValue());
+                $added = 'eb.exists('.$args[0]->emit(true).', '.$symbol.' => '.$this->emit($child, $filter).')';
                 if ($step->value === 'whereDoesntHave') {
                     $added = 'eb.not('.$added.')';
                 }
             }
 
             if ($added !== null && $added !== 'eb.and()') {
+                if ($step->kind === 'scope' && count($groups) > 1) {
+                    // Eloquent groups the pre-scope disjunction separately from the new constraints.
+                    $groups = [[$this->joinConditions($groups)]];
+                }
+
                 if ($boolean === 'or' && end($groups) !== []) {
                     $groups[] = [];
                 }
@@ -132,20 +170,28 @@ final class NativeQueryEmitter
             }
         }
 
+        return $this->joinConditions($groups);
+    }
+
+    /** @param list<list<string>> $groups */
+    private function joinConditions(array $groups): string
+    {
         $terms = array_map(fn (array $parts): string => count($parts) === 1 ? $parts[0] : 'eb.and('.implode(', ', $parts).')', $groups);
 
         return count($terms) === 1 ? $terms[0] : 'eb.or('.implode(', ', $terms).')';
     }
 
     /** @param list<QueryExpression> $steps */
-    private function structural(string $base, array $steps): string
+    private function structural(string $base, array $steps, bool $cursor, bool $modelRead, bool $include = true): string
     {
         foreach ($steps as $step) {
             if ($step->kind === 'scope') {
                 [, $body] = $this->steps($step->children[1]);
-                $base = $this->structural($base, $body);
-            } elseif ($step->value === 'with') {
-                $base .= $this->include($step);
+                $base = $this->structural($base, $body, $cursor, $modelRead, $include);
+            } elseif ($step->value === 'orderBy') {
+                $base .= $this->orderBy($step, $cursor);
+            } elseif ($step->value === 'with' && $include) {
+                $base .= $this->include($step, $modelRead);
             } elseif (in_array($step->value, ['orderBy', 'limit', 'start', 'one'], true)) {
                 $base .= '.'.$step->value.'('.implode(', ', array_map(fn (QueryExpression $arg): string => $arg->emit(true), array_slice($step->children, 1))).')';
             }
@@ -154,15 +200,29 @@ final class NativeQueryEmitter
         return $base;
     }
 
-    private function include(QueryExpression $step): string
+    private function orderBy(QueryExpression $step, bool $cursor): string
     {
-        $name = $step->children[1]->stringValue();
-        [$symbol, $child] = $this->child($step, $name);
+        $direction = $step->children[2]->emit(true);
+        if ($cursor) {
+            $reverse = match ($direction) {
+                '"asc"' => '"desc"', '"desc"' => '"asc"', default => '('.$direction.' === "asc" ? "desc" : "asc")',
+            };
+            $direction = 'args.__reverse ? '.$reverse.' : '.$direction;
+        }
 
-        return '.related('.json_encode($name, JSON_THROW_ON_ERROR).', '.$symbol.' => '.$this->emit($child).')';
+        return '.orderBy('.$step->children[1]->emit(true).', '.$direction.')';
     }
 
-    /** @return array{string, QueryExpression} */
+    private function include(QueryExpression $step, bool $modelRead): string
+    {
+        $step = $step->firstRelationHop();
+        $name = $step->children[1]->stringValue();
+        [$symbol, $child, $filter] = $this->child($step, $name);
+
+        return '.related('.json_encode($name, JSON_THROW_ON_ERROR).', '.$symbol.' => '.$this->emit($child, $filter, $modelRead).')';
+    }
+
+    /** @return array{string, QueryExpression, QueryExpression|null} */
     private function child(QueryExpression $step, string $name): array
     {
         $model = $step->queryModel();
@@ -171,23 +231,30 @@ final class NativeQueryEmitter
         $callback = $step->children[2] ?? null;
         $symbol = $callback?->kind === 'callback' ? $callback->stringValue() : 'zeroRelated';
         $local = new QueryExpression('local', $symbol, model: $target, type: 'query');
-        $base = $this->relationConditions($local, $model->relationConstraints[$name]['wheres'] ?? []);
+        $wheres = $model->relationConstraints[$name]['wheres'] ?? [];
+        $filter = $wheres === [] ? null : $this->relationConditions($local, $wheres);
+        $base = $local;
         foreach ($model->relationConstraints[$name]['orders'] ?? [] as $order) {
             $base = new QueryExpression('method', 'orderBy', [$base, ScopeCompiler::value(ModelMetadata::column($order['column'])), ScopeCompiler::value($order['direction'])], $target, 'query');
         }
 
         $body = $callback?->kind === 'callback' ? $this->replaceRoot($callback->children[0], $base) : $base;
 
-        return [$symbol, $body];
+        return [$symbol, $body, $filter];
     }
 
     /** @param list<RelationWhere> $wheres */
     private function relationConditions(QueryExpression $base, array $wheres): QueryExpression
     {
         foreach ($wheres as $where) {
-            $args = $where['type'] === 'Nested'
-                ? [new QueryExpression('callback', 'zeroNested', [$this->relationConditions(new QueryExpression('local', 'zeroNested', model: $base->model, type: 'query'), ModelRegistry::relationWheres($where['wheres'], $base->queryModel(), normalized: true))], type: 'callback')]
-                : [ScopeCompiler::value($where['column']), ScopeCompiler::value($where['operator']), ScopeCompiler::value($where['value'])];
+            if ($where['type'] === 'Nested') {
+                $args = [new QueryExpression('callback', 'zeroNested', [$this->relationConditions(new QueryExpression('local', 'zeroNested', model: $base->model, type: 'query'), ModelRegistry::relationWheres($where['wheres'], $base->queryModel(), normalized: true))], type: 'callback')];
+            } else {
+                $column = $base->queryModel()->columns[$where['column']];
+                $operand = $column['date'] ? ScopeCompiler::dateValue($where['value'], $column['dateFormat'] ?? null) : ScopeCompiler::value($where['value']);
+                $args = [ScopeCompiler::value($where['column']), ScopeCompiler::value($where['operator']), $operand];
+            }
+
             $base = new QueryExpression('method', $where['boolean'] === 'or' ? 'orWhere' : 'where', [$base, ...$args], $base->model, 'query');
         }
 
@@ -211,12 +278,30 @@ final class NativeQueryEmitter
         return new QueryExpression($query->kind, $query->value, array_values($children), $query->model, $query->type, $query->singular);
     }
 
+    private function membership(QueryExpression $field, QueryExpression $values, bool $not): string
+    {
+        $nonNull = array_values(array_filter($values->children, static fn (QueryExpression $v): bool => $v->type !== 'null'));
+        if ($nonNull === [] || $not && count($nonNull) !== count($values->children)) {
+            return 'eb.cmpLit(1, "=", '.($not && $values->children === [] ? '1' : '0').')';
+        }
+
+        return 'eb.cmp('.$field->emit(true).', "'.($not ? 'NOT IN' : 'IN').'", '.(new QueryExpression('list', children: $nonNull, type: 'list'))->emit(true).')';
+    }
+
     /** @param non-empty-list<QueryExpression> $args */
     private function comparison(array $args): string
     {
         $field = $args[0]->emit(true);
         $operator = count($args) === 2 ? '=' : $args[1]->value;
+        if ($operator === '<>') {
+            $operator = '!='; // Reflected Eloquent relationship constraints retain their SQL spelling.
+        }
+
         $operand = $args[array_key_last($args)];
+        if (in_array($operator, ['IN', 'NOT IN'], true)) {
+            return $this->membership($args[0], $operand, $operator === 'NOT IN');
+        }
+
         $value = $operand->emit(true);
         if (in_array($operator, ['=', '!='], true) && $operand->type === 'null') {
             $operator = $operator === '=' ? 'IS' : 'IS NOT';
@@ -239,22 +324,5 @@ final class NativeQueryEmitter
         }
 
         return [$query, $steps];
-    }
-
-    private function distribute(QueryExpression $query): QueryExpression
-    {
-        if (in_array($query->kind, ['method', 'scope', 'infinite', 'paginate', 'guarded'], true)) {
-            $receiver = $this->distribute($query->children[0]);
-            if ($receiver->kind === 'conditional') {
-                $yes = clone $query;
-                $no = clone $query;
-                $yes->children[0] = $receiver->children[1];
-                $no->children[0] = $receiver->children[2];
-
-                return new QueryExpression('conditional', children: [$receiver->children[0], $this->distribute($yes), $this->distribute($no)], model: $query->model, type: 'query', singular: $query->singular);
-            }
-        }
-
-        return $query;
     }
 }

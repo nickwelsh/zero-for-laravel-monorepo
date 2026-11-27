@@ -46,3 +46,6 @@ yarn-error.log
 
 /storage/app/zero/
 /resources/js/formbraid/_metadata.json
+/app/Formbraid/FormField.php
+/bootstrap/zero-queries.php
+/bootstrap/zero-mutations.php

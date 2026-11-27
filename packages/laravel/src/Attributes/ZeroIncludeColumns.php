@@ -7,7 +7,7 @@ namespace ZeroForLaravel\Attributes;
 use Attribute;
 
 /**
- * Opt database columns back in despite $visible, $hidden, or ZeroExclude.
+ * Opt database columns back in despite $visible, $hidden, or ZeroExcludeColumns.
  *
  * An explicit ZeroColumns allowlist remains the upper bound on replication.
  */

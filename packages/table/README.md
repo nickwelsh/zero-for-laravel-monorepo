@@ -6,8 +6,8 @@ import its generated descriptor. The React-free root exports descriptor types,
 query lowering, filter validation and stable identities. `/react` owns sessions
 and subscriptions using Zero for Laravel's existing authorization-aware `useData`.
 
-Use matching table, PHP, and client **0.13.0** packages with Zero client/cache **1.11.4**.
-Install `@nickwelsh/zero-table@^0.13.0` alongside client **^0.13.0** and regenerate
+Use matching table, PHP, and client **0.15.0** packages with Zero client/cache **1.11.4**.
+Install `@nickwelsh/zero-table@^0.15.0` alongside client **^0.15.0** and regenerate
 contracts after upgrading the PHP package. The optional Formbraid bridge requires
 Formbraid **^0.3.0**; other entry points do not require Formbraid.
 
@@ -48,6 +48,72 @@ visibility wraps the entire user filter, including OR branches. Rows use native
 Zero queries; directories and counts use an authenticated SQL snapshot endpoint.
 The endpoint accepts table state, never arbitrary browser ZQL or SQL.
 
+### One table component, different reports
+
+Pass a generated descriptor to your application's table component: `<AppDataTable descriptor={constituents} />`.
+Declare what it can show and query in Laravel. For example, a constituent report can expose related gifts and tags:
+
+```php
+return Table::for(Constituent::class)->visibleTo($context->user())
+    ->allowedRelations([
+        AllowedRelation::named('donations')->label('Gifts')->allowedFilters([
+            AllowedFilter::number('amount')->operators(['gt', 'gte']),
+            AllowedFilter::date('received_at')->operators(['gte', 'lt']),
+        ]),
+        AllowedRelation::named('tags')->choices('id', 'name')->lookup('name', 5),
+    ])
+    ->displayColumns(['name' => 'Constituent', 'tags' => 'Tags'])
+    ->allowedSorts(['name'])->allowedGroups([AllowedGroup::field('city')]);
+```
+
+`allowedRelations` can nest. A `some` rule means **one visible related record** satisfies its entire child rule.
+Combine amount and date inside the same donation rule; combine that rule and the tag rule at the constituent level.
+This tests an individual gift, not the sum of gifts. `has` takes one ID; `any` and `all` take nonempty lists.
+Membership tests the full visible relation, not just the lookup values on screen.
+
+**Unsupported: “has no visible related records.”** Zero 1.11.4 cannot run `NOT EXISTS` in a live client query
+([Zero issue #3438](https://bugs.rocicorp.dev/p/zero/issue/3438)).
+Tables therefore do not offer or accept a `none` relation operator, including on nested rules. This applies to
+all relation types, not just tags. A nullable scalar foreign key can still use `isNull` to find an unassigned
+record; that is not a test of whether a related collection is empty.
+
+Inside `AppDataTable`, `useDataTable(descriptor)` supplies:
+
+| Session interface                            | What the UI gets                                                                                                                                      |
+| -------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `table.columns`                              | Ordered default display columns. Pass `columns` to override them. Lookup columns provide a read-only value and `preview(row)` with a truncation flag. |
+| `table.filterFields(path)`                   | Fields and relations in that scope (omit the path for the root). Each field lists its operators, value type, arity, and input source.                 |
+| `table.buildFilter(path, operator, operand)` | A checked rule for that scope. Combine rules with `table.filterGroup('and', rules)`; apply them with `addFilter`, `replaceFilter` and `removeFilter`. |
+| `table.sorting` and `table.grouping`         | Independent menus with choices, labels, directions, current rules, defaults and limits. Apply edits with `setSort` and `setGroupBy`.                  |
+
+For an operator with `source: 'query'`, render your own picker using the public React hook:
+
+```tsx
+const options = useTableFilterOptions(table, field.path, {
+    operator: operator.id,
+    selected: selectedIds,
+    search,
+    enabled: open,
+});
+```
+
+`items` is the current page. `hasMore`/`loadMore` advances it; `hasPreviousPage`/`previousPage` goes back.
+Pages are ordered by label, then ID, so identical labels remain reachable. `selectedItems` is independent of the current page and search.
+`status` describes the listing; `selectionStatus` and `unavailable` distinguish missing selections from an in-flight lookup.
+Closing the menu stops the listing. The selection lookup resolves all selected IDs together. Store only IDs in table state;
+do not remove a rule because one of its IDs became unavailable. No Formbraid dependency or per-table query import is required.
+
+`choices('id', 'name')` searches the eligible catalog by label, not the current live window. To restrict eligibility,
+pass a named standalone query as the third argument and optionally a further selection restriction as the fourth.
+Use input-free membership queries on the target model; the table owns the search, ordering, and bounds. The target's
+policy visibility still applies. `lookup` alone does not grant filtering permission: it displays an allowed field on a direct relation, with a
+bounded preview for collections. A collection has no implicit sort or grouping key.
+
+After declaring relations or display columns, regenerate with `php artisan zero:generate` and deploy the PHP and client
+contracts together. These definitions use protocol **3**. A saved URL from a different version or with a changed
+filter-field mapping restores the whole namespace's defaults rather than partially applying old rules. Scalar-only definitions without `displayColumns`
+retain protocol 2 and existing saved views. Neither protocol grants access through URL state.
+
 ### Ordered grouping and migration
 
 `groupBy` is an ordered list of rules, each with a required `field` alias and
@@ -82,7 +148,7 @@ changing the rules still preserves descendant expansion.
 
 To migrate, replace all string-array grouping in PHP defaults, TypeScript state
 and saved views with explicit rules. Table capabilities, metadata requests and
-responses, and table URL envelopes now use **version 2**. Run
+responses, and table URL envelopes on scalar-only definitions use **version 2** (relation and display definitions use **version 3**). Run
 `php artisan zero:generate` and deploy matching PHP and TypeScript output together;
 contract fingerprints include the protocol version. Version-1 URLs and invalid
 version-2 `groupBy: ['completed']` links fall back to the whole namespace's
@@ -156,7 +222,7 @@ That entry uses Inertia's client-side router, preserving page state and scroll,
 and restores the URL state during SSR from `usePage().url`. It merges rapid writes
 from multiple tables while navigation is pending. Only this entry requires the
 optional `@inertiajs/react@^3.8.0` peer; `/react` has no Inertia dependency.
-Both entries and PHP `TableURLState` use the same version-2 rule validation,
+Both entries and PHP `TableURLState` use the same versioned rule validation,
 default fallback and expansion restoration, including direct loads and Back/Forward.
 For PHP-first, multi-source controlled pages, see [URL state integration](../../docs/URL_STATE.md).
 
@@ -286,7 +352,7 @@ The optional `@nickwelsh/zero-table/formbraid` entry exports `editorFromForm`,
 patch to the full generated request explicitly: required siblings are not inferred.
 Relation editors reuse the existing generated Zero option sources, independently
 resolve selected IDs, search authorized choices, and grow server-declared infinite
-queries. Pass an `->infinite(20)` query to `ZeroOptions::query(...)` in the source
+queries. Pass `Zero::scroll($query->paginate(20))` to `ZeroOptions::query(...)` in the source
 definition; a browser cannot turn a fixed query into an unlimited one. Submit IDs, not labels.
 Candidate visibility does not imply assignment permission.
 

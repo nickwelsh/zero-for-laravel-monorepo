@@ -21,7 +21,7 @@ trait HasPolicyVisibility
             throw new AuthorizationException('Visibility requires an authenticated actor.');
         }
 
-        $query->withoutGlobalScope(VisibleToCurrentUser::class);
+        $query->withoutGlobalScopes(VisibleToCurrentUser::names($query->getModel()));
 
         return (new EloquentVisibility)->apply($query, $user);
     }

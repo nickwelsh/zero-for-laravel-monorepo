@@ -27,6 +27,7 @@ use ZeroForLaravel\Tests\OwnerTestCase as TestCase;
 uses(TestCase::class);
 
 beforeEach(function (): void {
+    config(['zero.inertia' => true]);
     OwnerPermissions::install();
     \Pest\Laravel\actingAs(OwnerUser::findOrFail('alice'));
 });

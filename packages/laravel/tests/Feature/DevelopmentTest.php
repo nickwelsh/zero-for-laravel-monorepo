@@ -11,6 +11,7 @@ use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Process;
 use LogicException;
+use PHPUnit\Framework\Assert;
 use ZeroForLaravel\Development\LocalEnvironment;
 use ZeroForLaravel\Tests\OwnerPostgresTestCase as PostgresTestCase;
 use ZeroForLaravel\ZeroServiceProvider;
@@ -79,6 +80,13 @@ abstract class DevelopmentTestCase extends PostgresTestCase
 }
 
 uses(DevelopmentTestCase::class);
+
+test('artisan dev includes the Zero cache without application registration', function (): void {
+    expect(Artisan::call('dev:list', ['--json' => true]))->toBe(0);
+    $processes = json_decode(Artisan::output(), true, flags: JSON_THROW_ON_ERROR);
+    Assert::assertIsArray($processes);
+    expect(array_column($processes, 'command', 'name'))->toHaveKey('zero', 'php artisan zero:dev');
+})->skip(! class_exists(\Illuminate\Foundation\DevCommands::class), 'Laravel has no dev process registry.');
 
 test('development commands refuse production before changing files or starting processes', function (): void {
     app()->instance('env', 'production');

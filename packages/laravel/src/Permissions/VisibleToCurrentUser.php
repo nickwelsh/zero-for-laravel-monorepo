@@ -8,23 +8,23 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Scope;
 use Illuminate\Support\Facades\Auth;
-use ZeroForLaravel\Query\ZeroQuery;
-use ZeroForLaravel\Scopes\ZeroGlobalScope;
 
 /**
  * Opt in with #[ScopedBy([VisibleToCurrentUser::class])].
  *
  * @implements Scope<Model>
  */
-final class VisibleToCurrentUser implements Scope, ZeroGlobalScope
+final class VisibleToCurrentUser implements Scope
 {
-    /** @param Builder<covariant Model>|ZeroQuery $builder */
-    public function apply(Builder|ZeroQuery $builder, Model $model): void
+    /** @return list<string> Registration keys, not assumptions about the names of application scopes. */
+    public static function names(Model $model): array
     {
-        if ($builder instanceof ZeroQuery) {
-            $builder->visibleTo(Auth::user());
-        } else {
-            $builder->scopes(['visibleTo' => [Auth::user()]]);
-        }
+        return array_map(strval(...), array_keys(array_filter($model->getGlobalScopes(), static fn (mixed $scope): bool => $scope instanceof self)));
+    }
+
+    /** @param Builder<covariant Model> $builder */
+    public function apply(Builder $builder, Model $model): void
+    {
+        $builder->scopes(['visibleTo' => [Auth::user()]]);
     }
 }

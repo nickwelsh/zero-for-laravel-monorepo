@@ -10,6 +10,19 @@ use ZeroForLaravel\Tests\OwnerTestCase as TestCase;
 
 uses(TestCase::class);
 
+test('a generated report describes display fields separately from related filter paths', function (): void {
+    /** @var TestCase $this */
+    $models = new ModelRegistry($this->models());
+    app()->instance(ModelRegistry::class, $models);
+    config(['zero.route_prefix' => 'zero']);
+    $definition = (new \ZeroForLaravel\Generation\TableCompiler($models))->compile('report', \ZeroForLaravel\Tests\Fixtures\TaskReportTable::class);
+    $capabilities = $definition->capabilities();
+    expect($capabilities['version'])->toBe(3)
+        ->and($capabilities['displayColumns'])->toBe([['field' => 'title', 'label' => 'Task title'], ['field' => 'tags', 'label' => 'Assigned tags']])
+        ->and(array_keys((array) $capabilities['relations']))->toBe(['tags', 'list'])
+        ->and($capabilities['sorts'])->toBe([]);
+});
+
 test('generates native schema and plain row contracts', function (): void {
     /** @var TestCase $this */
     $output = (new TypeScriptGenerator)->generate(new ModelRegistry($this->models()));

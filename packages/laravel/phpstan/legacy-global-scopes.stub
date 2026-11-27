@@ -1,0 +1,32 @@
+<?php
+
+// Before Laravel 13.5 the model template belongs to Scope::apply(), not Scope.
+// Override our annotations without redeclaring the framework's Scope in Larastan.
+namespace ZeroForLaravel\Permissions;
+
+/** Implements the non-generic Eloquent Scope. */
+final class VisibleToCurrentUser {}
+
+namespace ZeroForLaravel\Tests\Fixtures;
+
+/** Implements the non-generic Eloquent Scope. */
+final class OwnedScope {}
+/** Implements the non-generic Eloquent Scope. */
+final class OwnerReadScope {}
+
+namespace ZeroForLaravel\Tests\Feature;
+
+/** Implements the non-generic Eloquent Scope. */
+class OwnershipScope {}
+/** Implements the non-generic Eloquent Scope. */
+class ParentDefaultScope {}
+/** Implements the non-generic Eloquent Scope. */
+class ChildDefaultScope {}
+
+namespace ZeroForLaravel\Scopes;
+
+use Closure;
+use Illuminate\Database\Eloquent\Scope;
+
+/** @phpstan-type RegisteredScope Closure|Scope */
+final class ScopeRegistry {}

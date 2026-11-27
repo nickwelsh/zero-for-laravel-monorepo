@@ -6,7 +6,6 @@ namespace ZeroForLaravel\Tests\Feature;
 
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Foundation\Auth\User;
-use Illuminate\Validation\ValidationException;
 use InvalidArgumentException;
 use LogicException;
 use ZeroForLaravel\Metadata\ModelRegistry;
@@ -30,7 +29,12 @@ test('declarations mutate aliases, clone independent branches, do not execute SQ
 
     $base = Task::zeroQuery()->withoutGlobalScopes();
     $ascending = (clone $base)->where('title', '0')->orderBy('id', 'asc')->limit(0);
-    $descending = (clone $base)->orderBy('id', 'desc')->one();
+    $descending = (clone $base)->orderBy('id', 'desc')->first();
+    $single = $base->find('task-a');
+    $collection = (clone $base)->limit(1)->get();
+    expect($single->format()['singular'])->toBeTrue()
+        ->and(data_get($single->ast(), 'where.right.value'))->toBe('task-a')
+        ->and($collection->format()['singular'])->toBeFalse();
     expect($base->ast())->toBe(['table' => 'tasks']);
     expect($ascending->where('done', false))->toBe($ascending);
     expect($ascending->ast()['limit'])->toBe(0);
@@ -38,12 +42,10 @@ test('declarations mutate aliases, clone independent branches, do not execute SQ
     expect($connection->getQueryLog())->toBe([]);
     expect(fn (): string => json_encode($base, JSON_THROW_ON_ERROR))->toThrow(LogicException::class, 'extracted');
 
-    $cursor = $base->start(['id' => 'original'])->with('comments', fn ($query) => $query->start(['id' => 'child']));
+    $cursor = $base->cursorPaginate(2)->atPosition(['__cursor' => ['id' => 'original']]);
     $export = $cursor->ast();
     data_set($export, 'start.row.id', 'changed');
-    data_set($export, 'related.0.subquery.start.row.id', 'changed child');
     expect(data_get($cursor->ast(), 'start.row.id'))->toBe('original');
-    expect(data_get($cursor->ast(), 'related.0.subquery.start.row.id'))->toBe('child');
 });
 
 test('declaration compilation enforces visibility on results and negative existence predicates', function (): void {
@@ -69,10 +71,10 @@ test('declarations reject unsupported columns and native junction bounds', funct
     /** @var TestCase $this */
     app()->instance(ModelRegistry::class, new ModelRegistry($this->models()));
     expect(fn (): ZeroQuery => Task::zeroQuery()->where('secret', 'value'))->toThrow(InvalidArgumentException::class);
-    expect(fn (): ZeroQuery => Task::zeroQuery()->where('id', 'IN', [null]))->toThrow(ValidationException::class);
+    expect(fn (): ZeroQuery => Task::zeroQuery()->where('id', 'IN', [null]))->toThrow(InvalidArgumentException::class, 'whereIn');
     expect(fn (): ZeroQuery => Task::zeroQuery()->limit(-1))->toThrow(InvalidArgumentException::class);
     expect(fn (): ZeroQuery => Task::zeroQuery()->with('tags', fn ($query) => $query->limit(2)))->toThrow(LogicException::class);
-    expect(fn (): ZeroQuery => Task::zeroQuery()->whereExists('tags', ['scalar' => true]))->toThrow(InvalidArgumentException::class);
+    expect(fn (): ZeroQuery => Task::zeroQuery()->__call('whereExists', ['tags', ['scalar' => true]]))->toThrow(LogicException::class, 'whereHas');
 });
 
 test('unregistered controller queries are rejected', function (): void {

@@ -46,6 +46,7 @@ $fixture = new class('export') extends TestCase
     {
         $this->setUp();
         app()->register(SurveyorServiceProvider::class);
+        app()->instance(ModelRegistry::class, new ModelRegistry($this->models()));
         $schemas = match ($driver) {
             'zod' => new ZodMutationSchemaDriver,
             'effect' => new EffectSchemaDriver,
@@ -100,7 +101,7 @@ $fixture = new class('export') extends TestCase
             $fields[] = 'scalars: '.$schemas->object(['text' => 'string', 'active' => 'bool', 'score' => 'float', 'limit' => 'int'], routed: false);
             $fields[] = 'internalOption: '.$schemas->object([], routed: false);
             $fields[] = 'publicOption: '.$schemas->object([], public: true, routed: false);
-            $fields[] = 'windowOption: '.$schemas->object([], routed: false, window: true);
+            $fields[] = 'windowOption: '.$schemas->object([], routed: false, pagination: 'scroll');
             $request = ['input' => 'request:'.DateQueryRequest::class];
             $fields[] = 'requestPublic: '.$schemas->object($request, public: true);
             $fields[] = 'requestWire: '.$schemas->object($request);
