@@ -67,6 +67,7 @@ test('maintained list and todo visibility agrees with Gates through sharing revo
     Todo::create(['list_id' => $private->id, 'title' => 'Private todo']);
     ListPermissions::grantReader($shared, $reader->id);
 
+    request()->setUserResolver(fn () => $reader);
     expect(TodoList::query()->visibleTo($reader)->pluck('id')->all())->toBe([$shared->id]);
     expect(TodoList::query()->visibleTo($outsider)->count())->toBe(0);
     expect(Todo::query()->visibleTo($reader)->where('completed', false)->pluck('id')->all())->toBe([$todo->id]);

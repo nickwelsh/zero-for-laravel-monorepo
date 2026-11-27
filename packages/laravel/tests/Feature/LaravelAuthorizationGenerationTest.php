@@ -264,6 +264,7 @@ test('coalescing result contracts remove nullability without coercing false empt
 test('revocation metadata agrees across guarded server props and navigation without redirecting collections', function (): void {
     /** @var TestCase $this */
     OwnerPermissions::install();
+    config(['zero.inertia' => true]);
     app()->register(ZeroInertiaServiceProvider::class);
     $this->actingAs(OwnerUser::findOrFail('alice'));
     Gate::policy(Task::class, LaravelRevocationPolicy::class);

@@ -159,11 +159,10 @@ const cases: { name: keyof typeof zod.schemas; valid: unknown[]; invalid: unknow
                 ...routed,
                 __route: '/tasks',
                 __routeArgs: { task: '0', count: -7 },
-                __window: 1,
                 __generation: uuid,
                 __cursor: { title: null, id: 'a' },
             },
-            { ...routed, __window: 2147483647, __cursor: { title: 'z', id: 'b' } },
+            { ...routed, __reverse: true, __cursor: { title: 'z', id: 'b' } },
         ],
         invalid: [
             {},
@@ -174,8 +173,10 @@ const cases: { name: keyof typeof zod.schemas; valid: unknown[]; invalid: unknow
             { ...routed, __routeArgs: { count: 2.5 } },
             { ...routed, __routeArgs: { task: null } },
             { ...routed, __window: 0 },
-            { ...routed, __window: 2147483648 },
+            { ...routed, __window: 10001 },
             { ...routed, __window: 2.5 },
+            { ...routed, __page: 2 },
+            { ...routed, __reverse: true },
             { ...routed, __generation: 'bad' },
             { ...routed, __cursor: { title: null } },
             { ...routed, __cursor: { title: null, id: 'a', extra: true } },
@@ -184,8 +185,9 @@ const cases: { name: keyof typeof zod.schemas; valid: unknown[]; invalid: unknow
     },
     {
         name: 'publicQuery',
-        valid: [routed, { ...routed, __route: '/tasks', __routeArgs: {}, __window: 3 }],
+        valid: [routed, { ...routed, __route: '/tasks', __routeArgs: {} }],
         invalid: [
+            { ...routed, __window: 3 },
             { ...routed, __generation: uuid },
             { ...routed, __cursor: { title: null, id: 'a' } },
         ],
@@ -209,8 +211,8 @@ const cases: { name: keyof typeof zod.schemas; valid: unknown[]; invalid: unknow
     { name: 'publicOption', valid: [{}], invalid: [{ __generation: uuid }, { __window: 1 }, 'text', []] },
     {
         name: 'windowOption',
-        valid: [{}, { __window: 1 }, { __window: 2147483647, __generation: uuid }],
-        invalid: [{ __window: 0 }, { __window: 2147483648 }, { __route: '/tasks' }],
+        valid: [{}, { __window: 1 }, { __page: 2, __window: 10000, __generation: uuid }],
+        invalid: [{ __window: 0 }, { __window: 10001 }, { __page: 0 }, { __page: 1.5 }, { __route: '/tasks' }],
     },
     {
         name: 'requestPublic',
@@ -309,7 +311,7 @@ describe.each([
     });
 
     it('encodes public query dates while preserving route selection', () => {
-        const input = { input: { after: date }, __route: '/dated', __routeArgs: { task: '0' }, __window: 3 };
+        const input = { input: { after: date }, __route: '/dated', __routeArgs: { task: '0' } };
         const expected = { ...input, input: { after: instant } };
         expect(generated.encodeQuery(input)).toStrictEqual(expected);
         expect(generated.schemas.requestWire.parse(expected)).toStrictEqual(expected);

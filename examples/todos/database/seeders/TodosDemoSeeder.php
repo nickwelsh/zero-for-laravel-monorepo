@@ -28,12 +28,12 @@ class TodosDemoSeeder extends Seeder
             $bob = User::firstOrCreate(['email' => 'bob@example.com'], [
                 'name' => 'Bob', 'password' => Hash::make('todos-demo-password'), 'email_verified_at' => now(),
             ]);
-            $shared = TodoList::firstOrCreate(['user_id' => $alice->id, 'name' => 'Household']);
+            $shared = TodoList::withoutGlobalScope('creator')->firstOrCreate(['user_id' => $alice->id, 'name' => 'Household']);
             ListPermissions::grantOwner($shared);
             ListPermissions::grantReader($shared, $bob->id);
             Todo::firstOrCreate(['list_id' => $shared->id, 'title' => 'Pick up groceries']);
             Todo::firstOrCreate(['list_id' => $shared->id, 'title' => 'Water the plants']);
-            $private = TodoList::firstOrCreate(['user_id' => $alice->id, 'name' => 'Personal']);
+            $private = TodoList::withoutGlobalScope('creator')->firstOrCreate(['user_id' => $alice->id, 'name' => 'Personal']);
             ListPermissions::grantOwner($private);
             Todo::firstOrCreate(['list_id' => $private->id, 'title' => 'Plan the weekend']);
         });

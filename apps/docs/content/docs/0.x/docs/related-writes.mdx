@@ -26,8 +26,8 @@ Each Zero create receives its own model's global creation defaults; a child does
 not inherit its parent's query defaults. Explicit association data still takes
 precedence and must be authorized by policies, Gates, or FormRequest association
 checks. Defaults do not authorize `person_id` or other foreign keys. Ordinary
-Eloquent relationship builders remain Eloquent and cannot invoke `#[ZeroScope]`
-methods. See [creation defaults](./mutations.mdx#creation-defaults).
+Eloquent relationship builders remain Eloquent. See
+[creation defaults](./mutations.mdx#creation-defaults).
 
 Explicit operations use `Mutation::create(Model::class, data: ..., key: ...)`.
 Supported bounded list loops require unique stable item keys; preparation derives

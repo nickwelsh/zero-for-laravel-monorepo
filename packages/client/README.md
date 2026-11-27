@@ -1,7 +1,7 @@
 # @nickwelsh/zero-for-laravel
 
 Controller-first Laravel queries and mutations on native Rocicorp Zero **1.11.4**.
-Use **v0.13.0** with the matching `nickwelsh/zero-for-laravel` Composer package.
+Use **v0.15.0** with the matching `nickwelsh/zero-for-laravel` Composer package.
 Generate and deploy the PHP and TypeScript contracts together. React and Inertia are optional peers;
 the `/inertia` adapter requires Inertia 3 and `@inertiajs/react` ^3.8.0.
 
@@ -17,7 +17,7 @@ query bindings in the page resolver:
 
 ```tsx
 import { createInertiaAdapter } from '@nickwelsh/zero-for-laravel/inertia';
-import { bindings, navigation } from '@/zero/generated.queries';
+import { bindings, navigation } from '@/zero/generated/queries';
 
 const livePages = createInertiaAdapter(bindings, { navigation });
 // Inside createInertiaApp's resolver, after loading the page component:
@@ -42,6 +42,12 @@ Live props distinguish loading, success, refreshing, stale, failure, and idle
 states. Connection status is separate from query completion. Infinite queries grow
 one live window; cursor pages keep raw ordering values to avoid rounding timestamps.
 
+For a page prop declared with `Zero::scroll($query->paginate(50))`, import
+`InfiniteScroll` from `@nickwelsh/zero-for-laravel/inertia` and wrap the rows
+with `<InfiniteScroll data="lists">`. Loading earlier or later pages keeps the
+existing rows visible. By default the URL follows the most visible page;
+`preserveUrl` disables that update. HTTP reload options are not supported.
+
 For editable FormRequest inputs, type injected props as `QueryData<typeof index.lists>`
 from `/react`. `lists.inputs.values` holds current inputs; `options` holds finite
 enum/`in` choices; `set(partial)` validates and resubscribes; `reset()` restores the
@@ -54,7 +60,7 @@ No global page types are generated. The same named query works with native Zero:
 `zero.run(index.lists(input))` or `useQuery(index.lists(input))`. For decoded live
 data, use `useData(index.lists.live(input))`. `InferQueryInput` and `InferQueryResult`
 describe native calls; `InferLiveQueryResult` describes decoded rows. The generated
-`.react.ts` exports a schema-typed `useZero` returning the native instance.
+`generated/react.ts` exports a schema-typed `useZero` returning the native instance.
 
 ## Controller mutations
 
@@ -110,7 +116,7 @@ controls and field errors at the original URL. See the [form migration guide](..
 React 19 apps using Formbraid **0.3** consume generated descriptors directly:
 
 ```tsx
-import { store } from '@/formbraid/zero/App/Http/Controllers/TodoListController';
+import { store } from '@/zero/formbraid/App/Http/Controllers/TodoListController';
 import { Form } from '@/formbraid';
 
 return <Form form={store} />;

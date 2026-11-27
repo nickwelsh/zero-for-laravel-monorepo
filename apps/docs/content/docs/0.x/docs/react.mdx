@@ -11,7 +11,7 @@ Install the query bindings in Inertia's page resolver:
 
 ```tsx
 import { createInertiaAdapter } from '@nickwelsh/zero-for-laravel/inertia';
-import { bindings, navigation } from '@/zero/generated.queries';
+import { bindings, navigation } from '@/zero/generated/queries';
 
 const livePages = createInertiaAdapter(bindings, { navigation });
 // After loading the requested component in createInertiaApp.resolve:
@@ -57,11 +57,10 @@ and infer live data from the exported queries. Ordinary props remain application
 
 ## Optional Wayfinder page types
 
-If you use `laravel/wayfinder` **`dev-next`** to generate `Inertia.Pages`, register
-`ZeroForLaravel\WayfinderServiceProvider::class` in `bootstrap/providers.php`.
-This is opt-in and requires Wayfinder's next-branch Inertia converter; the stable
-route-only Wayfinder release does not expose it. Zero does not install Wayfinder
-as a production dependency.
+Run `php artisan zero:setup` or set `ZERO_WAYFINDER=true` in `.env` to enable
+live-query types in `Inertia.Pages`. Laravel discovers the provider automatically.
+Setup offers this option with Wayfinder **`dev-next`**; the route-only release
+has no page-type converter.
 
 Generate Zero's contracts first, then let Wayfinder generate its own declarations:
 
@@ -150,6 +149,50 @@ Laravel's FormRequest again; normalize numeric and boolean URL strings there.
 `QueryData` includes both decoded rows and editable inputs; `Data` alone describes
 the read-only `useData` result. Native calls still pass their inputs explicitly.
 
+## Infinite scroll on Inertia pages
+
+Return a named `Zero::scroll($query->paginate(50))` live prop from Laravel, then
+use the Zero `InfiniteScroll` import instead of Inertia's. Read the injected prop
+from the page component. There is only one live query, even as its window grows.
+
+```tsx
+import { InfiniteScroll } from '@nickwelsh/zero-for-laravel/inertia';
+
+<InfiniteScroll
+    data="lists"
+    as="nav"
+    buffer={200}
+    manualAfter={2}
+    next={({ manualMode, hasMore, fetch }) => manualMode && hasMore && <button onClick={fetch}>More lists</button>}
+>
+    {lists.data.map((list) => (
+        <a key={list.id} href={`/lists/${list.id}`}>
+            {list.name}
+        </a>
+    ))}
+</InfiniteScroll>;
+```
+
+The `previous`, `next`, and `loading` slots and the `fetchPrevious()` and
+`fetchNext()` ref methods use the same live window. `onlyPrevious` and `onlyNext`
+limit automatic loads. For a newest-first chat query, render the rows in reverse
+query order (oldest first) and pass `reverse`. This swaps trigger placement and
+starts at the bottom; it does not reorder your children. `autoScroll` overrides
+the initial positioning. Use `manual` to disable automatic triggers.
+`itemsElement`, `startElement`, and `endElement` accept selectors or React refs.
+Use one keyed direct child per row in the items container for reliable page
+detection and scroll anchoring. If that container scrolls separately from the
+wrapper, place custom triggers inside the scrollable region so they can enter
+its viewport.
+
+The URL follows the page with the most visible items. `preserveUrl` keeps the
+incoming link unchanged. The first and last loaded pages are retained on warm
+Back/Forward navigation; opening a copied link starts with one page. Rows can
+move between pages when their live ordering changes. A configured window cap
+is not exhaustion: see the prop's `stopReason`. Cursor windows, HTTP `params`,
+and Inertia reload options on ref methods are unsupported. Set filters through
+`lists.inputs.set(...)`; use upstream Inertia for HTTP partial reloads.
+
 ## Headless tables and ordered grouping
 
 `@nickwelsh/zero-table` uses generated PHP table capabilities for authorized live
@@ -196,6 +239,17 @@ rows within a leaf. Allowlists, maximum depth, authorization, mandatory scopes,
 nested filters and multi-sort retain their existing semantics. Presentation and
 grouping controls remain application-owned.
 
+For descriptor-driven controls, use `table.filterFields()` at the root or pass a declared relation path to discover
+its fields and operators. `table.sorting` and `table.grouping` describe their own menus independently. A relation
+can declare a searchable option source; `useTableFilterOptions` supplies its results, pagination and selected
+labels without requiring a particular combobox or Formbraid. Default display columns come from the descriptor,
+so the same app component can render different tables without importing their individual queries.
+
+Relation filters support `some`, `has`, `any`, and `all`, subject to the table's allowlist.
+“Has no visible related records” is not supported: Zero 1.11.4 cannot run `NOT EXISTS` on the client
+([Zero issue #3438](https://bugs.rocicorp.dev/p/zero/issue/3438)).
+This limit does not depend on tenant size. Use `isNull` for nullable scalar fields, not for empty collections.
+
 Directory pagination uses opaque keyset cursors scoped to the full grouping rules,
 including order/direction, plus contract, actor/context, filter and directory path.
 Changing rules clears metadata, cancels old requests and ignores stale responses.
@@ -207,17 +261,18 @@ identical rules preserve them. Full controlled state or URL restoration can
 explicitly supply both rules and expansion. Collapsing a parent still preserves
 descendant expansion when rules have not changed.
 
-### Version-2 migration and URL parity
+### Table versions and URL parity
 
 Replace all legacy string-array grouping in PHP defaults, TypeScript state and
-saved views with explicit `{ field, direction }` rules. Capabilities, metadata
-requests/responses and table URL envelopes now use **version 2**. Regenerate
+saved views with explicit `{ field, direction }` rules. Scalar-only tables keep **version 2**.
+Declaring `allowedRelations` or `displayColumns` opts into **version 3** for capabilities,
+metadata and saved URLs. A mismatched version restores the entire table's defaults. Regenerate
 descriptors and deploy matching PHP/TypeScript output together; contract
 fingerprints include the protocol version. Version-1 URLs and invalid version-2
 string-array grouping fall back to the whole namespace's application/descriptor
 defaults, with no silent conversion. Invalid defaults and programmatic writes throw.
 
-The browser `/react` and `/inertia` hooks use the same version-2 URL contract as PHP
+The browser `/react` and `/inertia` hooks use the same versioned URL contract as PHP
 `TableURLState`, including rule directions, expansion, validation and fallback.
 Inertia's hook restores from `usePage().url` during SSR, uses client-side router
 writes, merges pending changes across tables, and restores Back/Forward without
@@ -234,7 +289,7 @@ produce native requests, usable by `run`, `preload`, `materialize`, or Zero's `u
 
 ```tsx
 import { useQuery } from '@rocicorp/zero/react';
-import { useZero, actions } from '@/zero/generated.react';
+import { useZero, actions } from '@/zero/generated/react';
 import { index } from '@/zero/App/Http/Controllers/TaskController';
 import { store } from '@/zero/App/Http/Controllers/TaskController';
 import type {
@@ -265,7 +320,7 @@ selection accepted by `useData`, whose dates are decoded to `Date`. Its row type
 Mutation requests must come from the bindings registered with that Zero instance.
 The generated provider exports its `actions` and native `mutators`; applications
 with custom projections obtain both from their `createZeroBindings(projections)`
-result. Outside React, use `createControllerMutationBindings` from `.mutations.ts`
+result. Outside React, use `createControllerMutationBindings` from `generated/mutations.ts`
 and pass its `mutators` to `new Zero`. No React lifecycle or global singleton is
 required by that factory. `useZero` follows native lifecycle semantics and must run
 under the initialized provider, not the pre-initialization Inertia shell.
@@ -280,8 +335,12 @@ without a `.data` wrapper or mutation methods. Live objects distinguish loading,
 refreshing, success, stale data, failure, and idle/disabled state. Connection status
 does not imply query completeness.
 
-Infinite props expose `loadMore`, `hasMore`, and loading state; cursor-page props
-expose navigation. Completion determines whether more data is known to exist.
+`Zero::scroll()` props expose `loadMore`, `hasMore`, and loading state. Numbered
+and cursor props expose `nextPage()`, `previousPage()`, and availability flags.
+Numbered props also expose `currentPage`; neither mode computes a total. The
+Inertia adapter reads the position from the URL before subscribing and restores
+it on Back/Forward. Route-free reads leave browser history alone. Completion
+determines whether more data is known to exist.
 Partial reloads and history use reserved page metadata; query descriptors never
 replace the omitted live prop in serialized page props. Initial SSR and hydration
 render a deterministic loading shell before native client initialization.

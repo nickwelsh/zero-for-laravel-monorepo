@@ -7,6 +7,7 @@ namespace ZeroForLaravel\Generation;
 use Illuminate\Database\Eloquent\Model;
 use LogicException;
 use ZeroForLaravel\Generation\Mutations\ValueContract;
+use ZeroForLaravel\Query\QueryLimits;
 
 /**
  * A query extracted without invoking its HTTP controller.
@@ -40,7 +41,9 @@ final readonly class ControllerQuery
     {
         // A single registry key: dots and slashes have native path semantics.
         // Never reuse a registration across changed construction, input, or model contracts.
-        return 'q_'.hash('sha256', $this->action."\0".$this->prop."\0".$this->php()."\0".$this->schemaFingerprint."\0".json_encode([$this->parameters, $this->guards], JSON_THROW_ON_ERROR).($this->standalone ? "\0standalone-v1" : ''));
+        $pagination = $this->expression->kind === 'paginate' ? "\0pagination-v2:".QueryLimits::liveWindow() : '';
+
+        return 'q_'.hash('sha256', $this->action."\0".$this->prop."\0".$this->php()."\0".$this->schemaFingerprint."\0".json_encode([$this->parameters, $this->guards], JSON_THROW_ON_ERROR).($this->standalone ? "\0standalone-v1" : '').$pagination);
     }
 
     public function php(): string
@@ -62,7 +65,7 @@ final readonly class ControllerQuery
 
     public function typescript(): string
     {
-        $body = $this->expression->emit(true);
+        $body = (new NativeQueryEmitter)->emit(EagerLoadCompiler::expand($this->expression), modelRead: true);
         // Every emitted string literal is JSON; its contents are not identifiers.
         $code = preg_replace('/"(?:[^"\\\\]|\\\\.)*"/s', '""', $body) ?? throw new LogicException('Cannot inspect generated query inputs.');
         $parameters = array_filter(['args', 'ctx'], static fn (string $name): bool => preg_match('/\b'.$name.'[.\[]/', $code) === 1);

@@ -8,6 +8,7 @@ use Illuminate\Support\Facades\DB;
 use LogicException;
 use ZeroForLaravel\Metadata\ModelDiscovery;
 use ZeroForLaravel\Metadata\ModelRegistry;
+use ZeroForLaravel\Mutation\MutationIdentitySchema;
 
 final readonly class PublicationManager
 {
@@ -82,6 +83,10 @@ final readonly class PublicationManager
 
         foreach ($this->registry->pivots() as $table => $columns) {
             $tables[$table] = $columns;
+        }
+
+        if (isset($tables[MutationIdentitySchema::TABLE])) {
+            throw new LogicException('Mutation identity infrastructure cannot be published as application data.');
         }
 
         foreach ($this->registry->accessTables() as $table => $definition) {

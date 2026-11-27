@@ -38,7 +38,8 @@
             "dest",
             "wayfinder",
             "globals",
-            "doesnt"
+            "doesnt",
+            "lookups"
         ]
     }
 }

@@ -37,6 +37,8 @@ const child = spawn(process.execPath, [join(dirname(require.resolve('@rocicorp/z
         ZERO_MUTATE_API_KEY: process.env.ZERO_API_KEY,
         ZERO_QUERY_FORWARD_COOKIES: 'true',
         ZERO_MUTATE_FORWARD_COOKIES: 'true',
+        ZERO_QUERY_ALLOWED_CLIENT_HEADERS: process.env.ZERO_QUERY_ALLOWED_CLIENT_HEADERS ?? 'x-xsrf-token',
+        ZERO_MUTATE_ALLOWED_CLIENT_HEADERS: process.env.ZERO_MUTATE_ALLOWED_CLIENT_HEADERS ?? 'x-xsrf-token',
         ZERO_REPLICA_FILE: replica,
         ZERO_PORT: process.env.ZERO_PORT ?? '4858',
         ZERO_NUM_SYNC_WORKERS: '1',

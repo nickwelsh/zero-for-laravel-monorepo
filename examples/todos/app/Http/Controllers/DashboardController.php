@@ -8,6 +8,7 @@ use App\Http\Requests\DashboardRequest;
 use App\Models\TodoList;
 use Inertia\Inertia;
 use Inertia\Response;
+use ZeroForLaravel\Zero;
 
 final class DashboardController extends Controller
 {
@@ -23,7 +24,7 @@ final class DashboardController extends Controller
             });
 
         return Inertia::render('dashboard', [
-            'lists' => $lists->orderBy('name', 'asc')->infinite(50),
+            'lists' => Zero::scroll($lists->orderBy('name', 'asc')->paginate(50)),
         ]);
     }
 }

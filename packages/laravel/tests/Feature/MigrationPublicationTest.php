@@ -14,7 +14,6 @@ use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Schema;
 use RuntimeException;
-use ZeroForLaravel\Attributes\ZeroPublic;
 use ZeroForLaravel\Concerns\HasZeroQueries;
 use ZeroForLaravel\Metadata\ModelRegistry;
 use ZeroForLaravel\Publication\PublicationManager;
@@ -23,7 +22,6 @@ use ZeroForLaravel\Tests\Fixtures\DiscoveredClasses;
 use ZeroForLaravel\Tests\PostgresTestCase;
 use ZeroForLaravel\ZeroServiceProvider;
 
-#[ZeroPublic]
 class MigrationRecord extends Model
 {
     use HasZeroQueries;

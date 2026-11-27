@@ -74,19 +74,19 @@ function mutationProtocolProgram(string $method, string $controller = Controller
  * @param  array<string, mixed>|null  $params
  * @return array<string, mixed>
  */
-function mutationProtocolProcess(array $mutations, ?array $params = null, int $version = 1): array
+function mutationProtocolProcess(array $mutations, ?array $params = null, int $version = 1, string $identity = 'alice', string $group = 'group-a', string $app = 'test', string $schema = 'zero_test_0'): array
 {
-    $user = (new User)->setKeyType('string')->forceFill(['id' => 'alice']);
+    $user = (new User)->setKeyType('string')->forceFill(['id' => $identity]);
     $request = Request::create('/zero/mutate', 'POST');
     $request->setUserResolver(fn (): User => $user);
 
     app()->instance('request', $request);
-    $processor = new MutationProcessor(resolve(ModelRegistry::class), 'test', 'zero_test_0');
+    $processor = new MutationProcessor(resolve(ModelRegistry::class), $app, $schema);
 
     return $processor->process([
-        'clientGroupID' => 'group-a', 'pushVersion' => $version, 'timestamp' => 1,
+        'clientGroupID' => $group, 'pushVersion' => $version, 'timestamp' => 1,
         'requestID' => 'request-a', 'mutations' => $mutations,
-    ], $params ?? ['appID' => 'test', 'schema' => 'zero_test_0'], new ResolvedContext(['user_id' => 'alice'], 'alice'));
+    ], $params ?? ['appID' => $app, 'schema' => $schema], new ResolvedContext(['user_id' => $identity], $identity));
 }
 
 /** @param array<string, mixed> $input
@@ -249,6 +249,47 @@ test('result cleanup is scoped to the current group and preserves progress', fun
     expect(mutationProtocolProcess([$cleanup])['kind'])->toBe('MutateResponse');
     expect(DB::table('zero_test_0.mutations')->pluck('clientGroupID')->all())->toBe(['other']);
     expect(DB::table('zero_test_0.clients')->value('lastMutationID'))->toBe(1);
+});
+
+test('mutation progress and cleanup are bound to the authenticated Zero identity', function (): void {
+    mutationProtocolProcess([mutationProtocolMutation(1)]);
+    DB::table('zero_test_0.mutations')->insert(['clientGroupID' => 'group-a', 'clientID' => 'client-b', 'mutationID' => 1, 'result' => '{}']);
+
+    $collision = mutationProtocolProcess([mutationProtocolMutation(2)], identity: 'bob');
+    expect($collision['kind'])->toBe('PushFailed')
+        ->and(DB::table('zero_test_0.clients')->value('lastMutationID'))->toBe(1)
+        ->and(DB::table('zero_test_0.mutations')->count())->toBe(2)
+        ->and(Task::count())->toBe(1);
+    expect(mutationProtocolProcess([mutationProtocolMutation(2)], app: 'other')['kind'])->toBe('PushFailed')
+        ->and(DB::table('zero_test_0.clients')->value('lastMutationID'))->toBe(1);
+
+    $single = ['type' => 'custom', 'id' => 0, 'clientID' => 'client-a', 'name' => '_zero_cleanupResults', 'timestamp' => 1,
+        'args' => [['clientGroupID' => 'group-a', 'clientID' => 'client-a', 'upToMutationID' => 1]]];
+    $bulk = ['type' => 'custom', 'id' => 0, 'clientID' => 'client-a', 'name' => '_zero_cleanupResults', 'timestamp' => 1,
+        'args' => [['type' => 'bulk', 'clientGroupID' => 'group-a', 'clientIDs' => ['client-a', 'client-b']]]];
+    expect(mutationProtocolProcess([$single], identity: 'bob')['kind'])->toBe('MutateResponse')
+        ->and(mutationProtocolProcess([$bulk], identity: 'bob')['kind'])->toBe('MutateResponse')
+        ->and(DB::table('zero_test_0.mutations')->count())->toBe(2);
+
+    expect(mutationProtocolProcess([mutationProtocolMutation(2)])['kind'])->toBe('MutateResponse')
+        ->and(DB::table('zero_test_0.clients')->value('lastMutationID'))->toBe(2)
+        ->and(Task::count())->toBe(2);
+    mutationProtocolProcess([$single]);
+    expect(DB::table('zero_test_0.mutations')->count())->toBe(2);
+});
+
+test('unbound legacy bookkeeping cannot be claimed or cleaned by a callback identity', function (): void {
+    DB::table('zero_test_0.clients')->insert(['clientGroupID' => 'legacy', 'clientID' => 'client-a', 'lastMutationID' => 1]);
+    DB::table('zero_test_0.mutations')->insert(['clientGroupID' => 'legacy', 'clientID' => 'client-a', 'mutationID' => 1, 'result' => '{}']);
+
+    expect(mutationProtocolProcess([mutationProtocolMutation(2)], identity: 'alice', group: 'legacy')['kind'])->toBe('PushFailed')
+        ->and(DB::table('zero_test_0.clients')->where('clientGroupID', 'legacy')->value('lastMutationID'))->toBe(1)
+        ->and(Task::count())->toBe(0);
+
+    $cleanup = ['type' => 'custom', 'id' => 0, 'clientID' => 'client-a', 'name' => '_zero_cleanupResults', 'timestamp' => 1,
+        'args' => [['clientGroupID' => 'legacy', 'clientID' => 'client-a', 'upToMutationID' => 1]]];
+    expect(mutationProtocolProcess([$cleanup], identity: 'alice', group: 'legacy')['kind'])->toBe('MutateResponse')
+        ->and(DB::table('zero_test_0.mutations')->where('clientGroupID', 'legacy')->count())->toBe(1);
 });
 
 test('policy not-found denial remains a durable concealed mutation failure', function (): void {

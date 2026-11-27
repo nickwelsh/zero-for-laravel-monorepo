@@ -26,7 +26,9 @@ use PhpParser\ParserFactory;
 use ReflectionClass;
 use ReflectionMethod;
 use ReflectionNamedType;
+use ReflectionProperty;
 use ZeroForLaravel\Attributes;
+use ZeroForLaravel\Mutation\MutationIdentitySchema;
 use ZeroForLaravel\Permissions\Binding;
 use ZeroForLaravel\Permissions\ProjectionManager;
 use ZeroForLaravel\Search\ScoutSearch;
@@ -252,6 +254,10 @@ final class ModelRegistry
             throw new LogicException('Access infrastructure tables cannot be registered as application models.');
         }
 
+        if ($model->getTable() === MutationIdentitySchema::TABLE) {
+            throw new LogicException('Mutation identity infrastructure cannot be registered as an application model.');
+        }
+
         if (! preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/D', $model->getTable())) {
             throw new LogicException("{$name}: Zero tables must use unqualified identifiers.");
         }
@@ -266,15 +272,6 @@ final class ModelRegistry
         }
 
         $this->connectionName = $connection;
-        $public = (new ReflectionClass($class))->getAttributes(Attributes\ZeroPublic::class) !== [];
-        $policy = array_key_exists($class, config()->array('permissions.resources', []));
-        if ($public && $policy) {
-            throw new LogicException("{$name}: choose public reads or a permission binding, never both.");
-        }
-
-        if (! $public && ! $policy) {
-            throw new LogicException("{$name}: add a permissions.resources binding for protected reads, or #[ZeroPublic] for intentionally public reads.");
-        }
 
         if (method_exists($class, 'zero')) {
             throw new LogicException("{$name}: legacy zero()/ZeroDefinition is unsupported. Use HasZeroQueries, Zero scopes, withAttributes(), and zeroSearch(), then run zero:generate.");
@@ -293,8 +290,8 @@ final class ModelRegistry
 
         $created = $model->usesTimestamps() ? $model->getCreatedAtColumn() : null;
         $updated = $model->usesTimestamps() ? $model->getUpdatedAtColumn() : null;
-        $excluded = $model->getHidden();
-        foreach ($this->attributes($class, Attributes\ZeroExclude::class) as $a) {
+        $excluded = [];
+        foreach ($this->attributes($class, Attributes\ZeroExcludeColumns::class) as $a) {
             $excluded = array_merge($excluded, $a->columns);
         }
 
@@ -310,6 +307,8 @@ final class ModelRegistry
                 throw new LogicException("{$name}: unknown column {$field}.");
             }
         }
+
+        $excluded = array_merge($model->getHidden(), $excluded);
 
         foreach ($dbColumns as $column) {
             $field = $column['name'];
@@ -359,25 +358,19 @@ final class ModelRegistry
         }
 
         $generator = in_array(HasUlids::class, $traits) ? 'ulid' : (in_array(HasUuids::class, $traits) ? 'uuid' : null);
-        $writable = array_values(array_intersect(array_diff($this->fillable($model), array_filter([$model->getKeyName(), $created, $updated, $deleted])), array_keys($columns)));
+        $candidates = array_unique([...$model->getFillable(), ...array_keys($columns)]);
+        $writable = array_values(array_filter($candidates, static fn (string $field): bool => isset($columns[$field]) && ! in_array($field, $required, true) && $model->isFillable($field)));
 
-        return new ModelMetadata($class, $name, $model->getTable(), $model->getKeyName(), $columns, $writable, $generator, $created, $updated, $deleted,
-            search: $search, policyVisibility: $policy);
-    }
-
-    /** @return list<string> */
-    private function fillable(Model $model): array
-    {
-        $fields = [];
-        foreach ($model->getFillable() as $field) {
-            if (! is_string($field)) {
-                throw new LogicException('Fillable columns must be strings.');
-            }
-
-            $fields[] = $field;
+        // Eloquent's builder turns even plain eager-load names into closures. Read the model
+        // declaration so column selections or custom closures cannot be mistaken for plain names.
+        $with = (new ReflectionProperty($model, 'with'))->getValue($model);
+        if (! is_array($with)) {
+            throw new LogicException($name.': expected an array of default eager loads.');
         }
 
-        return $fields;
+        return new ModelMetadata($class, $name, $model->getTable(), $model->getKeyName(), $columns, $writable, $generator, $created, $updated, $deleted,
+            search: $search, policyVisibility: array_key_exists($class, config()->array('permissions.resources', [])),
+            hidden: $model->getHidden(), with: $with, visible: $model->getVisible());
     }
 
     /** @param list<string> $names */

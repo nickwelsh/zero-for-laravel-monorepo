@@ -14,7 +14,7 @@ return new class extends Migration
     {
         DB::transaction(function (): void {
             (new ProjectionManager)->lock();
-            foreach (TodoList::query()->cursor() as $list) {
+            foreach (TodoList::withoutGlobalScope('creator')->cursor() as $list) {
                 ListPermissions::grantOwner($list);
                 foreach (DB::table('list_memberships')->where('list_id', $list->id)->pluck('user_id') as $userId) {
                     if ((int) $userId !== $list->user_id) {

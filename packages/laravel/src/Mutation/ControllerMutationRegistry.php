@@ -75,7 +75,7 @@ final readonly class ControllerMutationRegistry
             Input::keys($ids, array_keys($contract['sites']), 'prepared.ids');
             $validatedIds = [];
             foreach ($contract['sites'] as $site => $generator) {
-                $pattern = $generator === 'ulid' ? '/^[0-7][0-9A-HJKMNP-TV-Z]{25}$/D' : '/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/Di';
+                $pattern = $generator === 'ulid' ? '/^[0-7][0-9A-HJKMNP-TV-Z]{25}$/Di' : '/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/Di';
                 if (! is_string($ids[$site] ?? null) || ! preg_match($pattern, $ids[$site])) {
                     Input::fail('prepared.ids.'.$site, 'Invalid prepared identity.');
                 }
@@ -83,7 +83,7 @@ final readonly class ControllerMutationRegistry
                 $validatedIds[$site] = $ids[$site];
             }
 
-            if (count(array_unique($validatedIds)) !== count($validatedIds)) {
+            if (count(array_unique(array_map(strtolower(...), $validatedIds))) !== count($validatedIds)) {
                 Input::fail('prepared.ids', 'Creation identities must be distinct.');
             }
 

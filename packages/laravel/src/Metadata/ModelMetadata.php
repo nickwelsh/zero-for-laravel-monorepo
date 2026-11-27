@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace ZeroForLaravel\Metadata;
 
 use Illuminate\Database\Eloquent\Model;
+use LogicException;
 use ZeroForLaravel\Generation\ScopeCompiler;
 use ZeroForLaravel\Query\ZeroQuery;
 use ZeroForLaravel\Scopes\ScopeRegistry;
@@ -25,12 +26,18 @@ final class ModelMetadata
     /** @var array<string, RelationConstraints> */
     public array $relationConstraints = [];
 
+    /** @var array<string, JunctionLookup> Schema-only edges, not model relationships. */
+    public array $junctionLookups = [];
+
     public ModelRegistry $registry;
 
     /**
      * @param  class-string<Model>  $class
      * @param  array<string, Column>  $columns
      * @param  list<string>  $writable
+     * @param  array<array-key, string>  $hidden
+     * @param  array<array-key, string>  $visible
+     * @param  array<array-key, mixed>  $with
      */
     public function __construct(
         public readonly string $class,
@@ -45,11 +52,34 @@ final class ModelMetadata
         public readonly ?string $deletedAt,
         public readonly ?ScoutSearch $search = null,
         public readonly bool $policyVisibility = false,
+        private readonly array $hidden = [],
+        private readonly array $with = [],
+        private readonly array $visible = [],
     ) {}
 
     public static function column(string $column): string
     {
         return substr($column, (int) strrpos('.'.$column, '.'));
+    }
+
+    public function returnsRelation(string $name): bool
+    {
+        return ! in_array($name, $this->hidden, true) && ($this->visible === [] || in_array($name, $this->visible, true));
+    }
+
+    /** @return array<string, null> Default paths have no explicit callback. */
+    public function eagerLoads(): array
+    {
+        $loads = [];
+        foreach ($this->with as $key => $path) {
+            if (! is_int($key) || ! is_string($path) || ! preg_match('/^[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*$/D', $path)) {
+                throw new LogicException($this->name.': default eager loads require relationship names or dotted paths.');
+            }
+
+            $loads[$path] = null;
+        }
+
+        return $loads;
     }
 
     public function applyRelationConstraints(string $name, ZeroQuery $query): void
@@ -87,7 +117,20 @@ final class ModelMetadata
             if ($where['type'] === 'Nested') {
                 $query->{$method}(fn (ZeroQuery $nested) => self::applyWheres($nested, ModelRegistry::relationWheres($where['wheres'], $nested->model, normalized: true)));
             } else {
-                $query->{$method}(self::column($where['column']), $where['operator'], $where['value']);
+                $column = self::column($where['column']);
+                $operator = $where['operator'];
+                if (in_array($operator, ['IN', 'NOT IN'], true)) {
+                    $values = $where['value'];
+                    if (! is_array($values) || ! array_is_list($values)) {
+                        throw new LogicException('Relationship membership requires a scalar list.');
+                    }
+
+                    $query->{$method.($operator === 'IN' ? 'In' : 'NotIn')}($column, $values);
+                } elseif ($where['value'] === null && in_array($operator, ['IS', 'IS NOT'], true)) {
+                    $query->{$method.($operator === 'IS' ? 'Null' : 'NotNull')}($column);
+                } else {
+                    $query->{$method}($column, $operator, $where['value']);
+                }
             }
         }
     }

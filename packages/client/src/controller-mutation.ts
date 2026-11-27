@@ -667,12 +667,12 @@ export function createControllerMutations<S extends Schema, C extends ClientCont
                         const pattern =
                             generator === 'uuid'
                                 ? /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
-                                : /^[0-7][0-9A-HJKMNP-TV-Z]{25}$/;
+                                : /^[0-7][0-9A-HJKMNP-TV-Z]{25}$/i;
                         const id = ids[site]!;
                         if (id.length !== (generator === 'uuid' ? 36 : 26) || !pattern.test(id))
                             throw new Error('Invalid prepared identity.');
                     }
-                    if (new Set(Object.values(ids)).size !== Object.keys(ids).length)
+                    if (new Set(Object.values(ids).map((id) => id.toLowerCase())).size !== Object.keys(ids).length)
                         throw new Error('Creation identities must be distinct.');
                     const timestamp = preparation.now ? preparation.now().getTime() : Date.now();
                     if (!Number.isSafeInteger(timestamp) || timestamp < 0 || timestamp > 8640000000000000)

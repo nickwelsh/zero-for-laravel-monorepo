@@ -19,7 +19,7 @@ final readonly class AutoDetectFrontendDriver implements FrontendDriver
         return $this->detect()?->configuration();
     }
 
-    private function detect(): ?FrontendDriver
+    public function detect(): ?FrontendDriver
     {
         $files = new Filesystem;
         if (! $files->exists(base_path('package.json'))) {

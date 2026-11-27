@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace ZeroForLaravel\Query;
 
 use Carbon\CarbonImmutable;
-use Closure;
 use DateTimeInterface;
 use Formbraid\Laravel\OptionInput;
 use InvalidArgumentException;
@@ -24,8 +23,27 @@ final readonly class ExpressionBuilder
         'EXISTS' => 'NOT EXISTS', 'NOT EXISTS' => 'EXISTS',
     ];
 
-    /** @param Closure(string, ?Closure, array<string, bool>): Condition $exists */
-    public function __construct(private ModelMetadata $model, private Closure $exists) {}
+    public function __construct(private ModelMetadata $model) {}
+
+    public static function eloquentOperator(mixed $operator): string
+    {
+        $operator = is_string($operator) ? strtoupper($operator) : null;
+
+        return match ($operator) {
+            '<>' => '!=',
+            '=', '!=', '<', '>', '<=', '>=', 'LIKE', 'NOT LIKE', 'ILIKE', 'NOT ILIKE' => $operator,
+            default => throw new InvalidArgumentException('Unsupported where operator; use whereIn/whereNotIn or whereNull/whereNotNull for membership and null tests.'),
+        };
+    }
+
+    public static function absence(string $operator, int $count): bool
+    {
+        return match ([$operator, $count]) {
+            ['>=', 1], ['>', 0], ['!=', 0], ['<>', 0] => false,
+            ['<', 1], ['=', 0], ['<=', 0] => true,
+            default => throw new InvalidArgumentException('Relationship counts must be equivalent to existence or absence.'),
+        };
+    }
 
     public static function simplify(Condition $condition): Condition
     {
@@ -107,15 +125,6 @@ final readonly class ExpressionBuilder
         $operator = $this->operator($operator);
 
         return new Condition('simple', ['left' => $this->operand($left), 'right' => $this->operand($right), 'op' => $operator]);
-    }
-
-    /**
-     * @param  Closure(ZeroQuery): (ZeroQuery|void)|null  $refine
-     * @param  array<string, bool>  $options
-     */
-    public function exists(string $relationship, ?Closure $refine = null, array $options = []): Condition
-    {
-        return ($this->exists)($relationship, $refine, $options);
     }
 
     public function and(Condition|MissingValue ...$conditions): Condition

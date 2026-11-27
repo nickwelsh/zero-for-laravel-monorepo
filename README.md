@@ -6,7 +6,7 @@ replication, subscriptions, optimistic transactions, replay, and mutation outcom
 
 The [project glossary](GLOSSARY.md) defines the terms used across the Laravel, client, and table packages.
 
-**v0.13.0** provides controller-first queries and mutations. Install matching versions of
+**v0.15.0** adds guided Laravel setup and relation-aware table filters and columns. Install matching versions of
 `nickwelsh/zero-for-laravel`, `@nickwelsh/zero-for-laravel`, and the optional
 `@nickwelsh/zero-table`. Both the Zero client
 and zero-cache must use **1.11.4**. PHP 8.3+, Laravel 12/13, PostgreSQL 15+ with
@@ -14,8 +14,8 @@ logical replication, and React 18/19 are supported targets. Automatic live page
 props require Inertia 3 (the React adapter requires `@inertiajs/react` ^3.8.0).
 
 ```sh
-composer require nickwelsh/zero-for-laravel:^0.13.0
-pnpm add @nickwelsh/zero-for-laravel@^0.13.0 @rocicorp/zero@1.11.4
+composer require nickwelsh/zero-for-laravel:^0.15.0
+pnpm add @nickwelsh/zero-for-laravel@^0.15.0 @rocicorp/zero@1.11.4
 ```
 
 The [shared todos example](examples/todos/README.md) is a complete application with
@@ -23,10 +23,10 @@ authentication, shared/private lists, controller mutations, and live Inertia pro
 The [query design](docs/QUERY_DESIGN.md) and [mutation design](docs/MUTATION_DESIGN.md)
 record the architecture and acceptance requirements.
 
-For editable grouped data grids, add `@nickwelsh/zero-table@^0.13.0`. Its
+For editable grouped data grids, add `@nickwelsh/zero-table@^0.15.0`. Its
 [consumer guide](packages/table/README.md) covers fluent Laravel capabilities,
 React hooks and unstyled components, infinite loading, snapshot group counts,
-and optional Formbraid 0.3 editors. The table package requires client **^0.13.0**;
+and optional Formbraid 0.3 editors. The table package requires client **^0.15.0**;
 ordinary Zero applications do not depend on it.
 
 ## Declare live props in controllers
@@ -40,8 +40,8 @@ public function index(\Illuminate\Http\Request $request): \Inertia\Response
             ->visibleTo($request->user())
             ->where('done', false)
             ->with('list', fn ($list) => $list->visibleTo($request->user()))
-            ->orderBy('created_at', 'desc')
-            ->infinite(25),
+            ->latest()
+            ->paginate(25),
     ]);
 }
 ```
@@ -56,14 +56,14 @@ Generation never executes an HTTP controller to sample its result.
 The Inertia integration removes live result keys from ordinary props before
 serialization. Reserved `__zero` metadata identifies the queries, their arguments
 and any access checks. A directly returned eligible route-bound model becomes a
-live `one()` query after normal Laravel binding. Initial missing models still produce Laravel's
+live singular query after normal Laravel binding. Initial missing models still produce Laravel's
 normal response. Direct query transforms rerun the required binding/middleware and
 FormRequest boundary, not the page controller or its unrelated effects.
 
-Native comparisons, expressions, relationships, ordering, cursors, and cardinality
-remain explicit. `infinite()` grows a live window; `paginate()` navigates raw cursors.
-Neither promises total counts or immutable historical pages. Plain queries acquire
-no hidden limit or ordering.
+End a live read with `get()`, `first()`, `find($id)`, or a paginator. Use
+`paginate()` for numbered pages and `cursorPaginate()` for deep traversal.
+`Zero::scroll($query->paginate(25))` keeps earlier pages visible. Live paginators
+do not promise total counts or immutable historical pages.
 
 ## Use ordinary Laravel policies
 
@@ -79,7 +79,7 @@ public function view(User $user, Task $task): Response
 
 Gate::authorize('view', $task); // REST and Inertia show routes.
 Task::query()->visibleTo($user)->paginate(); // REST collections.
-Task::zeroQuery()->visibleTo($request->user()); // Live collections.
+Task::zeroQuery()->visibleTo($request->user())->get(); // Live collections.
 ```
 
 Add `HasPolicyVisibility` alongside `HasZeroQueries` to opt into the Eloquent local
@@ -90,24 +90,25 @@ unsupported policies fail explicitly. A supported policy `before()` admin overri
 stays live and preserves caller filters.
 
 Models using `HasZeroQueries` are discovered in the application's Composer namespaces.
-Every protected root, related selection, and existence path needs policy coverage.
+By default, a live query returns the rows its filters and scopes select; defining
+a Laravel policy does not automatically apply it. Bind a model in `permissions.resources`
+to require policy coverage at the root, in related selections, and in existence checks.
 Use `visibleTo()` for an explicit actor or opt a model into the `VisibleToCurrentUser`
 global scope to apply the current actor's policy visibility by default. A supported
-captured instance Gate can also cover its bound resource. Declare `#[ZeroPublic]`
-on an intentionally public model. Creation
-defaults use `withAttributes()` and typed application context; explicit creation
+captured instance Gate can also cover its bound resource. Creation defaults use
+`withAttributes()` and typed application context; explicit creation
 attributes override defaults. Defaults are not write authorization or update stamps.
-Use checked `#[ZeroScope]` methods for local Zero scopes and `ZeroGlobalScope` for
-reusable query constraints. Search uses `zeroSearch()` or explicit registration.
+Reuse portable Eloquent local and global scopes for live query constraints.
+Search uses `zeroSearch()` or explicit registration.
 Write authorization stays in FormRequests, middleware and controller Gates.
 
 Captured show Gates also create actor-owned access watches: confirmed access loss
 blocks the page before the optional Inertia adapter `access.onRevoked` callback.
 Disconnects block pending revalidation; empty collections remain successful.
-See [authorization and migration](apps/docs/content/docs/0.x/docs/authorization.mdx)
+See [authorization](apps/docs/content/docs/0.x/docs/authorization.mdx)
 for setup, supported compiler boundaries and deployment requirements.
 
-Column privacy uses `$visible`, `$hidden`, `ZeroColumns`, `ZeroExclude`, and
+Column privacy uses `$visible`, `$hidden`, `ZeroColumns`, `ZeroExcludeColumns`, and
 `ZeroIncludeColumns`. Generation fails if required keys are excluded. Synchronize a
 dedicated PostgreSQL publication; do not let the cache create an unrestricted one.
 
@@ -170,24 +171,31 @@ php artisan zero:sync-publication --dry-run
 php artisan zero:sync-publication
 ```
 
-Generation writes the native schema/metadata, sibling `.queries.ts`, `.mutations.ts`,
-optional `.react.ts`, and matching `bootstrap/zero-{queries,mutations}.php` registries.
-It also writes one module per controller, with named mutations and native query
+Generation writes `index.ts`, `queries.ts`, `mutations.ts`, and optionally `react.ts`
+in `resources/js/zero/generated/`, plus `bootstrap/zero-{queries,mutations}.php`.
+Controller modules mirror PHP namespaces directly under `resources/js/zero/`, with named mutations and native query
 factories grouped by method and prop. Types come from these exports, not a global
 page namespace; consumers own their page props and presentation types.
 The generated file manifest tracks obsolete controller modules for safe removal.
-Deploy these together. `zero:generate --check` detects drift. The editable
-`zero.config.ts` holds public connection options and is never overwritten.
+These outputs are gitignored. During deployment, run `php artisan zero:generate`
+against the migrated database **before** Wayfinder or your frontend build. Ship
+the PHP registries with that build. Commit `zero.config.ts` and `inertia.ts`.
 
-Applications using Wayfinder `dev-next` can opt into
-`ZeroForLaravel\WayfinderServiceProvider` to have **Wayfinder's own page generator**
-emit precise live-query prop types. Run `zero:generate` before `wayfinder:generate`.
+`php artisan zero:setup` first connects to PostgreSQL 15+. It preselects installed
+Inertia and Wayfinder integrations and asks how your app authenticates. For React,
+it offers to install missing dependencies using `packageManager` from `package.json`
+or the project's lockfile. If you choose Herd, applying the settings links the
+site and creates the cache proxy, with TLS if selected. Setup then runs `zero:generate`.
+Laravel discovers both providers. If upgrading from manual registration, set the
+flags for the integrations you use and remove their `bootstrap/providers.php` entries.
+Run `zero:generate` before `wayfinder:generate`.
 Only registered Zero props are customized; shared and ordinary props stay with
 Wayfinder, without duplicate declarations or global overrides. The controller
 module root is configurable with `zero.wayfinder.module` (default `@/zero`).
 
-Install `createInertiaAdapter(bindings, { navigation })` from the `/inertia` export in your
-`createInertiaApp` resolver and call `livePages.wrap(module.default, page)`.
+On the React starter, setup offers to add the live page resolver to `resources/js/app.tsx`.
+If you already have a resolver, import `livePages` from `@/zero/inertia` and return
+`livePages.wrap(module.default, page)` from it.
 Put the generated `ZeroProvider` in the authenticated persistent layout, outside
 the wrapped page. Pass `userID` and `context={{ user_id: user.id }}`. Changing identity
 replaces the client and clears identity-scoped results.
@@ -222,7 +230,7 @@ loads, and browser/Inertia history, see [URL state integration](docs/URL_STATE.m
 For native reads, call `zero.run(index.tasks(input))` or pass that same request to
 Zero's `useQuery`. For the optional decoded-data adapter, call
 `useData(index.tasks.live(input))`. Internal `bindings` consume wire arguments from
-page metadata. The generated `.react.ts` exports a schema-typed `useZero` hook.
+page metadata. The generated `react.ts` exports a schema-typed `useZero` hook.
 For writes, call `zero.mutate(actions[store.action].prepare(input, routeArguments))`
 using `actions` from that same generated provider, then observe `.client` and `.server`.
 Outside React, construct Zero with the `mutators` returned by
@@ -240,7 +248,7 @@ see the [two-import migration](apps/docs/content/docs/0.x/docs/mutations.mdx#mig
 or the [runnable Todo fixture](tests/integration/todo-migration/README.md).
 
 React 19 apps can also use Formbraid **0.3** with generated controller descriptors:
-import `store` from `@/formbraid/zero/App/Http/Controllers/TodoListController`
+import `store` from `@/zero/formbraid/App/Http/Controllers/TodoListController`
 and render `<Form form={store} />`. `zero:formbraid` reuses Formbraid's component
 metadata and request generator, attaching native Zero submission callbacks.
 Formbraid owns draft state; success waits for authoritative acceptance. See the
@@ -260,9 +268,9 @@ Laravel needs `ZERO_APP_ID`, matching `ZERO_UPSTREAM_SCHEMA` (normally `<app-id>
 publication, PostgreSQL connection URLs, `ZERO_QUERY_URL`, `ZERO_MUTATE_URL`, and
 matching query/mutate API keys. Never put the private cache key in browser code.
 
-For sessions, use `zero.middleware = ['web', 'auth']`, forward cookies on both cache
-callbacks, exclude only those callback paths from CSRF validation, and use compatible
-app/cache cookie origins. The private cache key and end-user session are both required.
+For sessions, use `zero.middleware = ['web', 'auth']` and compatible app/cache cookie
+origins. Forward cookies and allow `x-xsrf-token` on both cache callbacks. The generated
+React provider sends the header automatically; keep Laravel CSRF validation enabled.
 Controller route middleware/binding still runs for registered actions. See the example
 for concrete environment configuration and startup commands.
 

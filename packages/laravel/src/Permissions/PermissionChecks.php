@@ -70,7 +70,7 @@ final readonly class PermissionChecks
         } else {
             $model = new $permission['class'];
             $abilities = [$permission['ability']];
-            if ($model->hasGlobalScope(VisibleToCurrentUser::class)) {
+            if (VisibleToCurrentUser::names($model) !== []) {
                 $abilities[] = 'view';
             }
 

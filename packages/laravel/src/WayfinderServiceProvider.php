@@ -13,7 +13,7 @@ final class WayfinderServiceProvider extends ServiceProvider
 {
     public function register(): void
     {
-        if (! $this->app->runningInConsole() || ! class_exists(InertiaData::class)) {
+        if (! config('zero.wayfinder.enabled', false) || ! $this->app->runningInConsole() || ! class_exists(InertiaData::class)) {
             return;
         }
 
