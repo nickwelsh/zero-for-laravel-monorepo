@@ -15,8 +15,8 @@
     },
     "dependencies": {
         "@nickwelsh/docs-base": "^1.1.0",
-        "fumadocs-core": "16.19.0",
-        "fumadocs-mdx": "15.6.1",
+        "fumadocs-core": "16.19.4",
+        "fumadocs-mdx": "15.6.3",
         "fumadocs-ui": "npm:@fumadocs/base-ui@16.17.5",
         "react": "19.3.1",
         "react-dom": "19.3.1",
@@ -27,7 +27,7 @@
         "@cloudflare/vite-plugin": "2.0.0-rc.1",
         "@nickwelsh/refquill": "0.1.0",
         "@types/node": "^26.6.5",
-        "cf": "1.0.0-beta.17",
+        "cf": "1.0.0-rc.0",
         "typescript": "^7.0.2",
         "vite": "8.3.8"
     }
